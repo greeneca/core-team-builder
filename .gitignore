@@ -1,0 +1,19 @@
+# Environment & secrets
+.env
+*.env
+!.env.example
+
+# Go build artifacts
+/backend/server
+/backend/seed
+*.test
+*.out
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# Logs
+*.log

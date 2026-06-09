@@ -1,0 +1,71 @@
+# Core Team Builder — local/dev orchestration.
+#
+# Services:
+#   db        PostgreSQL with schema auto-applied on first boot.
+#   backend   Go API server.
+#   seed      One-shot job: applies migrations + creates the test user.
+#   frontend  nginx serving static files and proxying /api to backend.
+#
+# Copy .env.example to .env and adjust before running:  docker compose up --build
+
+services:
+  db:
+    build: ./database
+    image: ctb-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  backend:
+    build: ./backend
+    image: ctb-backend
+    environment:
+      HTTP_ADDR: ":8080"
+      DATABASE_URL: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?sslmode=disable"
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_TTL: ${JWT_TTL}
+      CORS_ORIGIN: ${CORS_ORIGIN}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # One-shot seeder. Runs migrations and ensures the test user exists, then exits.
+  seed:
+    build: ./backend
+    image: ctb-backend
+    # Override the image ENTRYPOINT (/app/server) to run the seeder instead.
+    entrypoint: ["/app/seed"]
+    environment:
+      DATABASE_URL: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?sslmode=disable"
+      MIGRATIONS_DIR: "/migrations"
+      SEED_USERNAME: ${SEED_USERNAME}
+      SEED_EMAIL: ${SEED_EMAIL}
+      SEED_PASSWORD: ${SEED_PASSWORD}
+    volumes:
+      - ./database/migrations:/migrations:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  frontend:
+    build: ./frontend
+    image: ctb-frontend
+    ports:
+      - "${FRONTEND_PORT}:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  db-data:

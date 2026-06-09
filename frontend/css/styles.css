@@ -1,0 +1,236 @@
+/*
+ * Core Team Builder — design system
+ *
+ * A single source of truth for visual styling. All values are defined as CSS
+ * custom properties (design tokens) under :root so the theme can be tuned in
+ * one place. See docs/STYLE_GUIDE.md for the conventions.
+ *
+ * Theme: dark "Elder Scrolls" aesthetic — deep slate backgrounds with an
+ * Aldmeri gold accent.
+ */
+
+:root {
+  /* Color tokens */
+  --color-bg:            #14171c;
+  --color-surface:       #1d2128;
+  --color-surface-alt:   #252b34;
+  --color-border:        #333b47;
+  --color-text:          #e8eaed;
+  --color-text-muted:    #9aa3af;
+  --color-accent:        #c9a24b; /* Aldmeri gold */
+  --color-accent-hover:  #ddb95f;
+  --color-danger:        #e0564f;
+  --color-success:       #5bb98c;
+
+  /* Typography */
+  --font-sans: "Segoe UI", system-ui, -apple-system, Roboto, Helvetica, Arial, sans-serif;
+  --font-size-sm:   0.875rem;
+  --font-size-base: 1rem;
+  --font-size-lg:   1.25rem;
+  --font-size-xl:   1.75rem;
+  --font-size-2xl:  2.5rem;
+
+  /* Spacing scale (4px base) */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-8: 3rem;
+
+  /* Radius & shadow */
+  --radius:    8px;
+  --radius-lg: 14px;
+  --shadow:    0 6px 24px rgba(0, 0, 0, 0.35);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font-sans);
+  font-size: var(--font-size-base);
+  line-height: 1.5;
+  color: var(--color-text);
+  background: var(--color-bg);
+  background-image: radial-gradient(circle at 50% -10%, #20252e 0%, var(--color-bg) 55%);
+  min-height: 100vh;
+}
+
+a {
+  color: var(--color-accent);
+  text-decoration: none;
+}
+a:hover {
+  color: var(--color-accent-hover);
+  text-decoration: underline;
+}
+
+/* Layout helpers */
+.container {
+  width: 100%;
+  max-width: 960px;
+  margin: 0 auto;
+  padding: var(--space-6) var(--space-4);
+}
+
+.center-screen {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: var(--space-4);
+}
+
+/* Brand */
+.brand {
+  font-size: var(--font-size-xl);
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: var(--color-accent);
+}
+.brand small {
+  display: block;
+  font-size: var(--font-size-sm);
+  font-weight: 400;
+  color: var(--color-text-muted);
+  letter-spacing: 0;
+}
+
+/* Card */
+.card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  padding: var(--space-6);
+}
+.card--narrow {
+  width: 100%;
+  max-width: 400px;
+}
+
+/* Forms */
+.form-group {
+  margin-bottom: var(--space-4);
+}
+.form-group label {
+  display: block;
+  margin-bottom: var(--space-2);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+.input {
+  width: 100%;
+  padding: var(--space-3);
+  font-size: var(--font-size-base);
+  color: var(--color-text);
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  transition: border-color 0.15s ease;
+}
+.input:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+/* Buttons */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-5);
+  font-size: var(--font-size-base);
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.btn--primary {
+  background: var(--color-accent);
+  color: #1a1a1a;
+}
+.btn--primary:hover {
+  background: var(--color-accent-hover);
+}
+.btn--ghost {
+  background: transparent;
+  color: var(--color-text);
+  border-color: var(--color-border);
+}
+.btn--ghost:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+.btn--block {
+  width: 100%;
+}
+
+/* Tabs */
+.tabs {
+  display: flex;
+  gap: var(--space-2);
+  margin-bottom: var(--space-5);
+}
+.tab {
+  flex: 1;
+  padding: var(--space-2) var(--space-3);
+  text-align: center;
+  cursor: pointer;
+  color: var(--color-text-muted);
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  font-size: var(--font-size-base);
+}
+.tab.is-active {
+  color: var(--color-accent);
+  border-bottom-color: var(--color-accent);
+}
+
+/* Top bar */
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-4) var(--space-6);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+/* Messages */
+.message {
+  padding: var(--space-3);
+  border-radius: var(--radius);
+  font-size: var(--font-size-sm);
+  margin-bottom: var(--space-4);
+}
+.message--error {
+  color: var(--color-danger);
+  background: rgba(224, 86, 79, 0.1);
+  border: 1px solid rgba(224, 86, 79, 0.3);
+}
+.message--success {
+  color: var(--color-success);
+  background: rgba(91, 185, 140, 0.1);
+  border: 1px solid rgba(91, 185, 140, 0.3);
+}
+.is-hidden {
+  display: none !important;
+}
+
+/* Utility text */
+.text-muted { color: var(--color-text-muted); }
+.text-center { text-align: center; }
+.mt-4 { margin-top: var(--space-4); }
+.mt-6 { margin-top: var(--space-6); }

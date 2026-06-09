@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dashboard — Core Team Builder</title>
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      Core Team Builder
+      <small>Elder Scrolls Online · Trial Roster</small>
+    </div>
+    <button id="logout-btn" class="btn btn--ghost" type="button">Sign Out</button>
+  </header>
+
+  <main class="container">
+    <div class="card">
+      <h1>Welcome, <span id="username">…</span></h1>
+      <p class="text-muted">
+        This is the starting point for designing and organizing your trial core
+        team. Roster, role, and build planning tools will live here.
+      </p>
+
+      <div class="card mt-6" style="background: var(--color-surface-alt);">
+        <h2 style="margin-top: 0;">Your Account</h2>
+        <p class="text-muted" style="margin-bottom: var(--space-2);">Email</p>
+        <p id="email">…</p>
+        <p class="text-muted" style="margin-bottom: var(--space-2);">Member since</p>
+        <p id="created-at">…</p>
+      </div>
+    </div>
+  </main>
+
+  <script src="js/api.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
