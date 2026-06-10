@@ -185,5 +185,7 @@ master data (`frontend/js/data.js`).
 
 `docker-compose.yml` defines four services: `db`, `backend`, `seed` (one-shot),
 and `frontend`. The backend waits for the database healthcheck before starting.
-Only the frontend publishes a host port; backend and db are reachable on the
-internal compose network.
+All services are attached to a single user-defined bridge network (`ctb-net`),
+which isolates the project from other compose stacks and lets the services reach
+each other by service name (e.g. `db:5432`, `backend:8080`). Only the frontend
+publishes a host port; `db` and `backend` are reachable on `ctb-net` only.
