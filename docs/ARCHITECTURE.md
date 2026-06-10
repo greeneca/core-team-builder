@@ -59,7 +59,8 @@ method-aware patterns, Go 1.22+). Layout:
 
 ### Database (`database/`)
 
-PostgreSQL. The schema in `migrations/001_init.sql` is applied two ways:
+PostgreSQL. The schema in `migrations/*.sql` (e.g. `001_init.sql`,
+`002_teams.sql`) is applied two ways:
 
 1. Baked into the image's `/docker-entrypoint-initdb.d/`, so a fresh volume is
    initialized automatically on first boot.
@@ -78,6 +79,47 @@ PostgreSQL. The schema in `migrations/001_init.sql` is applied two ways:
 | password_hash  | text          | bcrypt hash, not null              |
 | created_at     | timestamptz   | default `now()`                    |
 | updated_at     | timestamptz   | auto-updated via trigger           |
+
+### `teams`
+
+| column     | type              | notes                          |
+|------------|-------------------|--------------------------------|
+| id         | bigint (IDENTITY) | primary key                    |
+| name       | varchar(100)      | not null                       |
+| owner_id   | bigint            | FK → `users(id)`, cascade      |
+| created_at | timestamptz       | default `now()`                |
+| updated_at | timestamptz       | auto-updated via trigger       |
+
+### `team_members` (sharing)
+
+| column   | type        | notes                                       |
+|----------|-------------|---------------------------------------------|
+| team_id  | bigint      | FK → `teams(id)`, cascade; PK part          |
+| user_id  | bigint      | FK → `users(id)`, cascade; PK part          |
+| role     | varchar(20) | `owner` or `member`                         |
+| added_at | timestamptz | default `now()`                             |
+
+The owner is stored here as a `role = 'owner'` row, so any access check is a
+single membership lookup.
+
+### `players`
+
+| column         | type         | notes                                    |
+|----------------|--------------|------------------------------------------|
+| id             | bigint (IDENTITY) | primary key                         |
+| team_id        | bigint       | FK → `teams(id)`, cascade                |
+| slot           | smallint     | 1–12, unique per team                    |
+| name           | varchar(100) | default `''`                             |
+| discord_handle | varchar(100) | default `''`                             |
+| role           | varchar(20)  | `''`/`tank`/`healer`/`dps`/`support_dps` |
+| class          | varchar(30)  | `''` or current ESO class                |
+| created_at     | timestamptz  | default `now()`                          |
+| updated_at     | timestamptz  | auto-updated via trigger                 |
+
+Every team is created with all 12 player slots pre-populated (in a single
+transaction), so slots are edited rather than added/removed. Role and class
+values are validated against allow-lists in the backend
+(`internal/models/team.go`).
 
 ## Authentication & security
 

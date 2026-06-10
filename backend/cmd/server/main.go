@@ -10,6 +10,10 @@ import (
 	"syscall"
 	"time"
 
+	// Embed the IANA timezone database in the binary so time.LoadLocation works
+	// in the minimal Alpine runtime image (which has no system tzdata).
+	_ "time/tzdata"
+
 	"github.com/core-team-builder/backend/internal/auth"
 	"github.com/core-team-builder/backend/internal/config"
 	"github.com/core-team-builder/backend/internal/db"
@@ -39,8 +43,9 @@ func run() error {
 	defer pool.Close()
 
 	users := models.NewUserStore(pool)
+	teams := models.NewTeamStore(pool)
 	tokens := auth.NewTokenManager(cfg.JWTSecret, cfg.JWTTTL)
-	srv := handlers.New(users, tokens, cfg.CORSOrigin)
+	srv := handlers.New(users, teams, tokens, cfg.CORSOrigin)
 
 	httpServer := &http.Server{
 		Addr:              cfg.HTTPAddr,

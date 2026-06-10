@@ -6,8 +6,9 @@ quickly. Keep it current when the architecture changes.
 ## What this project is
 
 `core-team-builder` helps design and organize a **trial core team** for *The
-Elder Scrolls Online*. Today it provides accounts + login. Future work will add
-roster, role, and build planning on top of the same stack.
+Elder Scrolls Online*. Today it provides accounts + login and **teams**: a user
+can own multiple teams, share them with other users, and each team has a fixed
+12-player roster (name, discord handle, role, ESO class).
 
 ## Stack at a glance
 
@@ -33,6 +34,45 @@ roster, role, and build planning on top of the same stack.
 
 Passwords: bcrypt cost 12, min length 8. Hashes only ever leave via `password_hash`
 column; the `User` JSON model hides it (`json:"-"`).
+
+## Teams model (current)
+
+- **Tables** (`002_teams.sql`): `teams` (owner + name), `team_members`
+  (sharing; the owner is a row with role `owner`), `players` (12 rows per team,
+  one per `slot` 1–12). `004_team_schedule.sql` + `005_team_timezone.sql` add the
+  trial schedule to `teams`: `schedule_days TEXT[]` (e.g. `{mon,wed}`),
+  `schedule_time` (`"HH:MM"` 24h, `''` when unset), and `schedule_timezone`
+  (IANA name, e.g. `America/New_York`, `''` when unset). Day keys validated
+  against `ValidDays`; timezone validated via `time.LoadLocation` (the server
+  embeds `time/tzdata` so this works in the Alpine image).
+- **Access**: a single `team_members` lookup yields the caller's role —
+  `owner`, `editor`, or `viewer`. Owners and editors can rename a team and edit
+  players; **viewers are read-only**; **only the owner** can delete the team or
+  manage sharing (add/remove members, change a member's role). Inaccessible
+  teams return `404` (not `403`) so other users' teams are not revealed; viewers
+  attempting an edit get `403`.
+- **Sharing roles**: `POST /api/teams/{id}/share` takes `{ username, role }`
+  where role is `viewer` or `editor` (defaults to `editor`). It is an upsert, so
+  re-sharing changes an existing member's role. Allow-list: `ValidShareRoles`
+  in `team.go`; role constants `RoleOwner`/`RoleEditor`/`RoleViewer`. Migration
+  `003_share_roles.sql` converts legacy `member` rows to `editor`.
+- **Players**: each slot has `name`, `discord_handle`, `role`, `class`. Empty
+  fields = unset. Roles and classes are validated against allow-lists in
+  `backend/internal/models/team.go` (`ValidRoles`, `ValidClasses`):
+  - roles: `tank`, `healer`, `dps`, `support_dps` (plus `""`).
+  - classes: `arcanist`, `dragonknight`, `necromancer`, `nightblade`,
+    `sorcerer`, `templar`, `warden` (plus `""`). The frontend mirrors these
+    plus display labels in `frontend/js/api.js` (`ROLES`, `CLASSES`).
+- **Endpoints** (all JWT-protected): `GET/POST /api/teams`,
+  `GET/PUT/DELETE /api/teams/{id}`, `POST /api/teams/{id}/share`,
+  `DELETE /api/teams/{id}/members/{userID}`. Mutations return the full refreshed
+  team.
+- **Save-all**: `PUT /api/teams/{id}` is the single "save everything" call —
+  body is `{ name, schedule_days, schedule_time, schedule_timezone, players: [{slot,name,discord_handle,role,class}] }`
+  and the backend (`TeamStore.Save`) updates team meta + roster in one
+  transaction. The UI uses a single **Save All** button (there is no per-player
+  save endpoint). The timezone field defaults in the UI to the viewer's current
+  zone (`Intl.DateTimeFormat().resolvedOptions().timeZone`).
 
 ## Request flow
 
@@ -73,6 +113,7 @@ cd backend && go vet ./...         # static checks
 ## Status / TODO ideas
 
 - [ ] Token refresh / logout server-side invalidation (currently stateless JWT).
-- [ ] Trial roster, role, and build planning models + UI.
+- [x] Teams: ownership, sharing, and a 12-player roster (name/discord/role/class).
+- [ ] Build/set planning per player (gear, skills) on top of the roster.
 - [ ] Tests (handlers, auth, models).
 - [ ] Rate limiting on auth endpoints.

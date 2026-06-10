@@ -15,13 +15,14 @@ import (
 // Server holds the dependencies shared across HTTP handlers.
 type Server struct {
 	users      *models.UserStore
+	teams      *models.TeamStore
 	tokens     *auth.TokenManager
 	corsOrigin string
 }
 
 // New constructs a Server.
-func New(users *models.UserStore, tokens *auth.TokenManager, corsOrigin string) *Server {
-	return &Server{users: users, tokens: tokens, corsOrigin: corsOrigin}
+func New(users *models.UserStore, teams *models.TeamStore, tokens *auth.TokenManager, corsOrigin string) *Server {
+	return &Server{users: users, teams: teams, tokens: tokens, corsOrigin: corsOrigin}
 }
 
 // Routes returns the fully configured HTTP handler, including CORS handling.
@@ -33,7 +34,19 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/login", s.handleLogin)
 
 	// Protected routes.
-	mux.Handle("GET /api/me", s.tokens.Middleware(http.HandlerFunc(s.handleMe)))
+	protected := func(h http.HandlerFunc) http.Handler {
+		return s.tokens.Middleware(h)
+	}
+	mux.Handle("GET /api/me", protected(s.handleMe))
+
+	// Teams.
+	mux.Handle("GET /api/teams", protected(s.handleListTeams))
+	mux.Handle("POST /api/teams", protected(s.handleCreateTeam))
+	mux.Handle("GET /api/teams/{id}", protected(s.handleGetTeam))
+	mux.Handle("PUT /api/teams/{id}", protected(s.handleUpdateTeam))
+	mux.Handle("DELETE /api/teams/{id}", protected(s.handleDeleteTeam))
+	mux.Handle("POST /api/teams/{id}/share", protected(s.handleShareTeam))
+	mux.Handle("DELETE /api/teams/{id}/members/{userID}", protected(s.handleUnshareTeam))
 
 	return s.withCORS(mux)
 }
@@ -43,7 +56,7 @@ func (s *Server) Routes() http.Handler {
 func (s *Server) withCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", s.corsOrigin)
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		w.Header().Set("Vary", "Origin")
 

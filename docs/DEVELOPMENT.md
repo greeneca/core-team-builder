@@ -110,6 +110,59 @@ Response `200`: same shape as register. Errors: `401` (invalid credentials).
 
 Header: `Authorization: Bearer <jwt>`. Returns the current `user`. Errors: `401`.
 
+### Teams (all protected)
+
+All routes require `Authorization: Bearer <jwt>`. A team is accessible to its
+owner and any user it has been shared with; inaccessible teams return `404`.
+Mutating endpoints return the full refreshed team (with `players` and `members`).
+
+| Method & path                              | Who      | Description                          |
+|--------------------------------------------|----------|--------------------------------------|
+| `GET /api/teams`                           | member   | List teams you own or that are shared with you (`{ "teams": [...] }`). |
+| `POST /api/teams`                          | any user | Create a team `{ "name": "..." }`; auto-creates 12 empty slots. |
+| `GET /api/teams/{id}`                      | viewer+  | Get one team with `players` + `members`. |
+| `PUT /api/teams/{id}`                      | editor+  | Save everything: `{ name, schedule_days, schedule_time, players }`. |
+| `DELETE /api/teams/{id}`                   | owner    | Delete the team (cascades).          |
+| `POST /api/teams/{id}/share`              | owner    | Share/update role `{ "username": "...", "role": "viewer"\|"editor" }` (role defaults to `editor`; upsert). |
+| `DELETE /api/teams/{id}/members/{userID}` | owner    | Revoke a member's access.            |
+
+Roles: `owner` and `editor` can edit the team/roster; `viewer` is read-only
+(edit attempts return `403`). Only the owner can delete or manage sharing.
+
+`PUT /api/teams/{id}` body (the UI "Save All" sends all of this at once):
+
+```json
+{
+  "name": "Sunday Trial Core",
+  "schedule_days": ["mon", "wed"],
+  "schedule_time": "20:00",
+  "schedule_timezone": "America/New_York",
+  "players": [
+    { "slot": 1, "name": "Aedric", "discord_handle": "aedric#1234", "role": "tank", "class": "dragonknight" }
+  ]
+}
+```
+
+- `schedule_days` ⊆ `mon,tue,wed,thu,fri,sat,sun` (validated, de-duped, ordered).
+- `schedule_time` is `""` or `"HH:MM"` (24h); anything else returns `400`.
+- `schedule_timezone` is `""` or a valid IANA name (e.g. `America/New_York`);
+  validated via `time.LoadLocation`, anything else returns `400`. The frontend
+  defaults this to the viewer's current zone.
+- `players` is optional; omitted slots are left unchanged. Invalid slot/role/
+  class returns `400` and the whole save is rolled back.
+
+Player slot body:
+
+```json
+{ "name": "Aedric", "discord_handle": "aedric#1234", "role": "tank", "class": "dragonknight" }
+```
+
+- `role` ∈ `""`, `tank`, `healer`, `dps`, `support_dps`.
+- `class` ∈ `""`, `arcanist`, `dragonknight`, `necromancer`, `nightblade`,
+  `sorcerer`, `templar`, `warden`.
+
+Invalid `role`/`class` values return `400`.
+
 ### Quick curl test
 
 ```bash

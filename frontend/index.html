@@ -12,25 +12,103 @@
       Core Team Builder
       <small>Elder Scrolls Online · Trial Roster</small>
     </div>
-    <button id="logout-btn" class="btn btn--ghost" type="button">Sign Out</button>
+    <div class="topbar-actions">
+      <span class="text-muted">Signed in as <strong id="username">…</strong></span>
+      <button id="logout-btn" class="btn btn--ghost" type="button">Sign Out</button>
+    </div>
   </header>
 
   <main class="container">
-    <div class="card">
-      <h1>Welcome, <span id="username">…</span></h1>
-      <p class="text-muted">
-        This is the starting point for designing and organizing your trial core
-        team. Roster, role, and build planning tools will live here.
-      </p>
+    <div id="message" class="message is-hidden"></div>
 
-      <div class="card mt-6" style="background: var(--color-surface-alt);">
-        <h2 style="margin-top: 0;">Your Account</h2>
-        <p class="text-muted" style="margin-bottom: var(--space-2);">Email</p>
-        <p id="email">…</p>
-        <p class="text-muted" style="margin-bottom: var(--space-2);">Member since</p>
-        <p id="created-at">…</p>
+    <!-- Teams list view -->
+    <section id="teams-view">
+      <div class="section-head">
+        <h1>Your Teams</h1>
+        <button id="new-team-btn" class="btn btn--primary" type="button">+ New Team</button>
       </div>
-    </div>
+
+      <form id="new-team-form" class="card is-hidden mt-4">
+        <div class="form-group">
+          <label for="new-team-name">Team name</label>
+          <input class="input" id="new-team-name" maxlength="100" placeholder="e.g. Sunday Trial Core" required />
+        </div>
+        <div class="form-actions">
+          <button class="btn btn--primary" type="submit">Create Team</button>
+          <button class="btn btn--ghost" type="button" id="new-team-cancel">Cancel</button>
+        </div>
+      </form>
+
+      <div id="teams-list" class="teams-grid mt-6"></div>
+      <p id="teams-empty" class="text-muted is-hidden mt-6">
+        You have no teams yet. Create one to start building your roster.
+      </p>
+    </section>
+
+    <!-- Single team detail view -->
+    <section id="team-detail-view" class="is-hidden">
+      <button id="back-btn" class="btn btn--ghost" type="button">← Back to teams</button>
+
+      <div class="card mt-4">
+        <div class="section-head">
+          <div>
+            <input id="team-name-input" class="input team-name-input" maxlength="100" />
+            <p class="text-muted" id="team-meta" style="margin: var(--space-2) 0 0;"></p>
+          </div>
+          <div class="form-actions">
+            <button id="save-all-btn" class="btn btn--primary" type="button">Save All</button>
+            <button id="delete-team-btn" class="btn btn--danger is-hidden" type="button">Delete Team</button>
+          </div>
+        </div>
+
+        <div class="schedule mt-6">
+          <h3 class="schedule-heading">Trial schedule</h3>
+          <div class="form-group">
+            <label>Days of the week</label>
+            <div id="schedule-days" class="day-toggles"></div>
+          </div>
+          <div class="schedule-time-row">
+            <div class="form-group schedule-time-group">
+              <label for="schedule-time">Time</label>
+              <input id="schedule-time" class="input" type="time" />
+            </div>
+            <div class="form-group schedule-tz-group">
+              <label for="schedule-timezone">Timezone</label>
+              <select id="schedule-timezone" class="input"></select>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Roster -->
+      <div class="card mt-4">
+        <h2 style="margin-top: 0;">Roster <span class="text-muted">(12 players)</span></h2>
+        <div id="roster" class="roster-grid"></div>
+      </div>
+    </section>
+
+    <!-- Sharing view (own page) -->
+    <section id="share-view" class="is-hidden">
+      <button id="share-back-btn" class="btn btn--ghost" type="button">← Back to teams</button>
+
+      <div class="card mt-4">
+        <h1 id="share-team-name" style="margin-top: 0;">…</h1>
+        <h2 style="margin-top: var(--space-5);">Shared with</h2>
+        <div id="members-list" class="members-list"></div>
+
+        <form id="share-form" class="share-form is-hidden mt-4">
+          <input class="input" id="share-username" placeholder="username to share with" autocomplete="off" />
+          <select class="input share-role-select" id="share-role">
+            <option value="editor">Editor — can edit roster</option>
+            <option value="viewer">Viewer — read-only</option>
+          </select>
+          <button class="btn btn--primary" type="submit">Share</button>
+        </form>
+        <p id="share-note" class="text-muted is-hidden mt-2">
+          Only the team owner can share or remove access.
+        </p>
+      </div>
+    </section>
   </main>
 
   <script src="js/api.js"></script>
