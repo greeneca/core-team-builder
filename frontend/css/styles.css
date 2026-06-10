@@ -593,6 +593,16 @@ a:hover {
   border-color: var(--color-accent);
   color: var(--color-accent-hover);
 }
+/* The currently selected encounter (whose loadouts show in the roster). */
+.encounter-chip.is-active {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: var(--color-bg);
+  font-weight: 600;
+}
+.encounter-chip.is-active:hover {
+  color: var(--color-bg);
+}
 .add-encounter-form {
   display: flex;
   align-items: flex-end;
@@ -600,6 +610,23 @@ a:hover {
   flex-wrap: wrap;
 }
 .add-encounter-form .form-group { min-width: 16rem; margin: 0; }
+
+/* Controls for the selected encounter (name, rename, delete, save status). */
+.encounter-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border);
+}
+
+/* Per-player loadout block in the roster (below the subclass build). */
+.player-loadout {
+  border-top: 1px dashed var(--color-border);
+  padding-top: var(--space-3);
+}
 
 /* Encounter detail (loadouts) */
 .encounter-title-row {

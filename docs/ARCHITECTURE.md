@@ -21,14 +21,16 @@ Core Team Builder is a three-tier application:
             ┌─────────────────────────────────────────────┐
             │  backend (Go, net/http)                      │
             │   • /api/register, /api/login (public)       │
-            │   • /api/me (JWT-protected)                   │
+            │   • /api/me, /api/teams, .../encounters       │
+            │     (JWT-protected)                          │
             │   • bcrypt password hashing, JWT issuance     │
             └───────────────┬─────────────────────────────┘
                             │ pgx connection pool
                             ▼
             ┌─────────────────────────────────────────────┐
             │  db (PostgreSQL 16)                           │
-            │   • users table                              │
+            │   • users, teams, team_members, players,      │
+            │     encounters, encounter_loadouts            │
             └─────────────────────────────────────────────┘
 ```
 
@@ -40,10 +42,12 @@ Plain static files — no build step. nginx serves them and reverse-proxies
 `/api/*` to the backend, keeping API calls same-origin (so the browser does not
 hit CORS). The JS is split into:
 
-- `js/api.js` — fetch wrapper, token storage, typed-ish endpoint helpers, plus
-  shared constants (roles, classes, skill lines, masteries).
-- `js/data.js` — ESO master/seed data for encounters (boss names grouped by
-  trial, gear sets with tooltips, skills) and lookup helpers.
+- `js/api.js` — fetch wrapper, token storage, and endpoint helpers (the `api`
+  client object only — no domain data).
+- `js/data.js` — all shared reference data + display helpers: roles, classes,
+  share roles, days, timezone/schedule helpers, subclassing skill lines and
+  class masteries, and the ESO encounter master/seed data (boss names grouped by
+  trial, gear sets with tooltips, skills) with lookup helpers.
 - `js/components.js` — reusable, framework-free UI components
   (`createSearchableSelect`: a search box with optional group headers, used by
   the loadout gear/skills pickers).
@@ -59,7 +63,9 @@ method-aware patterns, Go 1.22+). Layout:
 - `cmd/seed` — one-shot migration + test-user seeder.
 - `internal/config` — environment configuration (12-factor).
 - `internal/db` — pgx pool with startup retry.
-- `internal/models` — domain types + data access (`UserStore`).
+- `internal/models` — domain types + data access (`UserStore`, `TeamStore`,
+  `EncounterStore`). ESO game reference data and the player-build validators live
+  in `eso.go`, kept separate from the persistence stores.
 - `internal/auth` — bcrypt hashing, JWT issuing/parsing, auth middleware.
 - `internal/handlers` — HTTP handlers, JSON helpers, CORS.
 
@@ -102,7 +108,7 @@ PostgreSQL. The schema in `migrations/*.sql` (e.g. `001_init.sql`,
 |----------|-------------|---------------------------------------------|
 | team_id  | bigint      | FK → `teams(id)`, cascade; PK part          |
 | user_id  | bigint      | FK → `users(id)`, cascade; PK part          |
-| role     | varchar(20) | `owner` or `member`                         |
+| role     | varchar(20) | `owner`, `editor`, or `viewer`              |
 | added_at | timestamptz | default `now()`                             |
 
 The owner is stored here as a `role = 'owner'` row, so any access check is a
@@ -129,7 +135,7 @@ Every team is created with all 12 player slots pre-populated (in a single
 transaction), so slots are edited rather than added/removed. New slots default
 their roles to 2 tanks / 2 healers / 8 dps. Role, class, skill-line, and mastery
 values are validated against allow-lists in the backend
-(`internal/models/team.go`). Subclassing (`006_player_subclass.sql`) is
+(`internal/models/eso.go`). Subclassing (`006_player_subclass.sql`) is
 mutually exclusive: when `subclassed` is true the three `skill_line_*` columns
 apply and the masteries are blanked; when false the two `mastery_*` columns
 apply (drawn from the player's class) and the skill lines are blanked.

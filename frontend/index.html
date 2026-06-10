@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Dashboard — Core Team Builder</title>
-  <link rel="stylesheet" href="css/styles.css?v=17" />
+  <link rel="stylesheet" href="css/styles.css?v=21" />
 </head>
 <body>
   <div id="message" class="toast is-hidden" role="alert" aria-live="assertive"></div>
@@ -80,7 +80,8 @@
         </div>
       </div>
 
-      <!-- Encounters -->
+      <!-- Encounters: select the current encounter (drives the per-player
+           loadouts shown in the roster below) and add new ones. -->
       <div class="card mt-4">
         <div class="section-head">
           <h2 style="margin: 0;">Encounters</h2>
@@ -97,34 +98,24 @@
           </div>
         </form>
         <div id="encounters-bar" class="encounters-bar mt-4"></div>
+
+        <div id="encounter-controls" class="encounter-controls mt-4 is-hidden">
+          <div class="encounter-title-row">
+            <span class="text-muted">Loadouts for</span>
+            <strong id="current-encounter-name">…</strong>
+            <select id="encounter-rename" class="input input--sm is-hidden"></select>
+          </div>
+          <div class="form-actions">
+            <span id="encounter-save-status" class="save-status" aria-live="polite"></span>
+            <button id="encounter-delete-btn" class="btn btn--danger btn--sm is-hidden" type="button">Delete Encounter</button>
+          </div>
+        </div>
       </div>
 
       <!-- Roster -->
       <div class="card mt-4">
         <h2 style="margin-top: 0;">Roster <span class="text-muted">(12 players)</span></h2>
         <div id="roster" class="roster-grid"></div>
-      </div>
-    </section>
-
-    <!-- Encounter detail view (loadouts) -->
-    <section id="encounter-view" class="is-hidden">
-      <button id="encounter-back-btn" class="btn btn--ghost" type="button">← Back to team</button>
-
-      <div class="card mt-4">
-        <div class="section-head">
-          <div>
-            <h1 id="encounter-team-name" class="text-muted" style="margin: 0; font-size: var(--font-size-base); font-weight: 500;">…</h1>
-            <div class="encounter-title-row">
-              <h2 id="encounter-name" style="margin: var(--space-2) 0 0;">…</h2>
-              <select id="encounter-rename" class="input is-hidden"></select>
-            </div>
-          </div>
-          <div class="form-actions">
-            <span id="encounter-save-status" class="save-status" aria-live="polite"></span>
-            <button id="encounter-delete-btn" class="btn btn--danger is-hidden" type="button">Delete</button>
-          </div>
-        </div>
-        <div id="loadout-list" class="loadout-list mt-6"></div>
       </div>
     </section>
 
@@ -152,9 +143,9 @@
     </section>
   </main>
 
-  <script src="js/api.js?v=17"></script>
-  <script src="js/data.js?v=17"></script>
-  <script src="js/components.js?v=17"></script>
-  <script src="js/app.js?v=17"></script>
+  <script src="js/api.js?v=21"></script>
+  <script src="js/data.js?v=21"></script>
+  <script src="js/components.js?v=21"></script>
+  <script src="js/app.js?v=21"></script>
 </body>
 </html>

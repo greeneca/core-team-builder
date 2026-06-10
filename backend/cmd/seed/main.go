@@ -3,17 +3,19 @@
 // It is idempotent: running it repeatedly applies the (idempotent) migrations
 // and ensures the test user exists without creating duplicates.
 //
-// Configuration (environment variables):
+// Configuration (environment variables). Credentials are never hardcoded; they
+// must be supplied via the environment (see .env / .env.example):
 //
 //	DATABASE_URL    PostgreSQL connection string (required)
 //	MIGRATIONS_DIR  Directory of *.sql files to apply (default: /migrations)
-//	SEED_USERNAME   Test user username (default: testuser)
-//	SEED_EMAIL      Test user email (default: test@example.com)
-//	SEED_PASSWORD   Test user password (default: changeme123)
+//	SEED_USERNAME   Test user username (required)
+//	SEED_EMAIL      Test user email (required)
+//	SEED_PASSWORD   Test user password (required)
 package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -36,7 +38,7 @@ func run() error {
 
 	databaseURL := os.Getenv("DATABASE_URL")
 	if databaseURL == "" {
-		log.Fatal("DATABASE_URL is required")
+		return fmt.Errorf("DATABASE_URL is required")
 	}
 
 	pool, err := db.Connect(ctx, databaseURL)
@@ -81,9 +83,20 @@ func applyMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 }
 
 func ensureTestUser(ctx context.Context, pool *pgxpool.Pool) error {
-	username := getEnv("SEED_USERNAME", "testuser")
-	email := getEnv("SEED_EMAIL", "test@example.com")
-	password := getEnv("SEED_PASSWORD", "changeme123")
+	// Credentials come from the environment only; never hardcode them so they
+	// stay isolated in .env and out of source control.
+	username, err := requireEnv("SEED_USERNAME")
+	if err != nil {
+		return err
+	}
+	email, err := requireEnv("SEED_EMAIL")
+	if err != nil {
+		return err
+	}
+	password, err := requireEnv("SEED_PASSWORD")
+	if err != nil {
+		return err
+	}
 
 	hash, err := auth.HashPassword(password)
 	if err != nil {
@@ -103,7 +116,8 @@ func ensureTestUser(ctx context.Context, pool *pgxpool.Pool) error {
 	if tag.RowsAffected() == 0 {
 		log.Printf("test user %q already exists, skipping", username)
 	} else {
-		log.Printf("created test user %q (password: %q)", username, password)
+		// Never log the plaintext password; it is configured via the environment.
+		log.Printf("created test user %q", username)
 	}
 	return nil
 }
@@ -113,4 +127,14 @@ func getEnv(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// requireEnv returns the value of a required environment variable, or an error
+// when it is unset/empty. Used for credentials so they are never hardcoded.
+func requireEnv(key string) (string, error) {
+	v := os.Getenv(key)
+	if v == "" {
+		return "", fmt.Errorf("%s is required", key)
+	}
+	return v, nil
 }

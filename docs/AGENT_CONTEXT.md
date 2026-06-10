@@ -6,9 +6,13 @@ quickly. Keep it current when the architecture changes.
 ## What this project is
 
 `core-team-builder` helps design and organize a **trial core team** for *The
-Elder Scrolls Online*. Today it provides accounts + login and **teams**: a user
-can own multiple teams, share them with other users, and each team has a fixed
-12-player roster (name, discord handle, role, ESO class).
+Elder Scrolls Online*. It provides accounts + login and **teams**: a user can
+own multiple teams and share them with others (viewer/editor roles). Each team
+has a trial schedule (days/time/timezone) and a fixed 12-player roster — name,
+discord handle, role, ESO class, and a per-player build (either a subclassed set
+of 3 skill lines or 2 class masteries). Teams also have **encounters** (Default,
+Trash, or a trial boss), each holding a per-player gear/skills loadout. The UI
+autosaves changes (no Save buttons).
 
 ## Stack at a glance
 
@@ -59,11 +63,13 @@ column; the `User` JSON model hides it (`json:"-"`).
 - **Players**: each slot has `name`, `discord_handle`, `role`, `class`, plus a
   subclassing build (`006_player_subclass.sql`). Empty fields = unset. Roles and
   classes are validated against allow-lists in
-  `backend/internal/models/team.go` (`ValidRoles`, `ValidClasses`):
+  `backend/internal/models/eso.go` (`ValidRoles`, `ValidClasses`) — the ESO game
+  reference data + build validators live in `eso.go`, separate from the team
+  persistence layer in `team.go`:
   - roles: `tank`, `healer`, `dps`, `support_dps` (plus `""`).
   - classes: `arcanist`, `dragonknight`, `necromancer`, `nightblade`,
     `sorcerer`, `templar`, `warden` (plus `""`). The frontend mirrors these
-    plus display labels in `frontend/js/api.js` (`ROLES`, `CLASSES`).
+    plus display labels in `frontend/js/data.js` (`ROLES`, `CLASSES`).
   - New teams default the 12 roles to 2 tanks, 2 healers, 8 dps
     (`defaultPlayerRole` in `team.go`).
 - **Subclassing** (`006_player_subclass.sql`): each player has `subclassed`
@@ -78,7 +84,7 @@ column; the `User` JSON model hides it (`json:"-"`).
   - `subclassed = false` → `mastery_1..2`, drawn from the **5 class masteries of
     the player's class** (`MasteriesByClass` / `ValidMastery(class, m)`).
   - The backend validates only the active set and **blanks the inactive set** on
-    save, so the two never coexist. The UI (`frontend/js/api.js`) mirrors these
+    save, so the two never coexist. The UI (`frontend/js/data.js`) mirrors these
     as `SKILL_LINE_GROUPS`/`SKILL_LINES` and `MASTERIES_BY_CLASS`/`MASTERIES`,
     and the roster shows a "Subclassed" checkbox that swaps between 3 skill-line
     dropdowns and 2 class-mastery dropdowns (mastery options follow the class).
@@ -131,11 +137,17 @@ column; the `User` JSON model hides it (`json:"-"`).
   `GET/PUT/DELETE /api/teams/{id}/encounters/{eid}`,
   `PUT /api/teams/{id}/encounters/{eid}/loadouts`. Mutations return the refreshed
   encounter (with its 12 loadouts).
-- **UI**: the team detail view shows an **Encounters** bar (chips + add picker);
-  clicking a chip opens the encounter screen (`#encounter-view`) listing the 12
-  players by name (read-only) with two searchable, tag-style lists per player
-  (gear with tooltips, skills). Loadouts autosave on chip add/remove (or
-  Ctrl/Cmd+S); see **Autosave (UI)** above.
+- **UI**: encounters are integrated into the single team detail page (there is
+  **no** separate encounter screen). The **Encounters** card holds a bar of
+  selectable chips (the active one is highlighted), an `+ Add Encounter` picker,
+  and an `#encounter-controls` row (current name, rename dropdown, delete, save
+  status). Selecting a chip (`selectEncounter`) loads that encounter's loadouts
+  and refreshes the per-player gear/skill chips inline in the roster — each
+  roster slot renders a `[data-loadout]` block (Gear + Skills searchable lists)
+  below its subclass/class-mastery section (`renderRosterLoadouts`). Loadouts
+  autosave on chip add/remove (or Ctrl/Cmd+S); `selectEncounter` flushes any
+  pending loadout autosave before switching so unsaved edits are never dropped.
+  See **Autosave (UI)** above.
 
 ## Request flow
 
@@ -152,7 +164,9 @@ generally not triggered (the backend still sets CORS headers as defense).
   add a store + methods in `backend/internal/models/`.
 - **New page / UI**: add an `.html` file in `frontend/`, a script in
   `frontend/js/`, and reuse tokens/classes from `frontend/css/styles.css`
-  (see `docs/STYLE_GUIDE.md`).
+  (see `docs/STYLE_GUIDE.md`). Keep concerns separated: network calls/endpoint
+  helpers go in `js/api.js`; shared reference data + display helpers go in
+  `js/data.js`; reusable widgets go in `js/components.js`.
 - **Config**: env vars are read in `backend/internal/config/config.go` and wired
   through `docker-compose.yml` + `.env`.
 
@@ -161,8 +175,12 @@ generally not triggered (the backend still sets CORS headers as defense).
 - Migrations are **idempotent** (`IF NOT EXISTS`, `ON CONFLICT`) so both the
   Postgres init dir and the `seed` command can apply them safely.
 - The `seed` binary applies all `*.sql` in `MIGRATIONS_DIR` (sorted) then
-  upserts the test user. It is safe to run repeatedly.
-- Secrets come from the environment only; never hardcode. `.env` is git-ignored.
+  upserts the test user. It is safe to run repeatedly. The test-user
+  credentials (`SEED_USERNAME`, `SEED_EMAIL`, `SEED_PASSWORD`) are **required
+  from the environment** — there are no hardcoded defaults — and the plaintext
+  password is never logged.
+- Secrets/credentials come from the environment only; never hardcode. `.env` is
+  git-ignored.
 
 ## Common commands
 

@@ -40,9 +40,13 @@ All configuration is via environment variables (see `.env.example`).
 | `JWT_TTL`         | backend   | Token lifetime (e.g. `24h`)                        |
 | `CORS_ORIGIN`     | backend   | Allowed browser origin                             |
 | `FRONTEND_PORT`   | frontend  | Host port for the site                             |
-| `SEED_USERNAME`   | seed      | Test user username                                 |
-| `SEED_EMAIL`      | seed      | Test user email                                    |
-| `SEED_PASSWORD`   | seed      | Test user password                                 |
+| `SEED_USERNAME`   | seed      | **Required.** Test user username                   |
+| `SEED_EMAIL`      | seed      | **Required.** Test user email                      |
+| `SEED_PASSWORD`   | seed      | **Required.** Test user password                   |
+
+Seed credentials have no hardcoded defaults — they must be supplied via the
+environment so they stay isolated in `.env`. The seeder never logs the plaintext
+password.
 
 Generate a strong secret:
 
@@ -59,6 +63,11 @@ cd backend
 export DATABASE_URL="postgres://ctb:change-me-in-prod@localhost:5432/core_team_builder?sslmode=disable"
 export JWT_SECRET="dev-only-insecure-secret-change-me"
 export MIGRATIONS_DIR="../database/migrations"
+
+# Seed credentials are required (no defaults):
+export SEED_USERNAME="testuser"
+export SEED_EMAIL="test@example.com"
+export SEED_PASSWORD="changeme123"
 
 go run ./cmd/seed      # apply schema + create test user
 go run ./cmd/server    # start the API on :8080
@@ -121,7 +130,7 @@ Mutating endpoints return the full refreshed team (with `players` and `members`)
 | `GET /api/teams`                           | member   | List teams you own or that are shared with you (`{ "teams": [...] }`). |
 | `POST /api/teams`                          | any user | Create a team `{ "name": "..." }`; auto-creates 12 empty slots. |
 | `GET /api/teams/{id}`                      | viewer+  | Get one team with `players` + `members`. |
-| `PUT /api/teams/{id}`                      | editor+  | Save everything: `{ name, schedule_days, schedule_time, players }`. |
+| `PUT /api/teams/{id}`                      | editor+  | Save everything: `{ name, schedule_days, schedule_time, schedule_timezone, players }`. |
 | `DELETE /api/teams/{id}`                   | owner    | Delete the team (cascades).          |
 | `POST /api/teams/{id}/share`              | owner    | Share/update role `{ "username": "...", "role": "viewer"\|"editor" }` (role defaults to `editor`; upsert). |
 | `DELETE /api/teams/{id}/members/{userID}` | owner    | Revoke a member's access.            |

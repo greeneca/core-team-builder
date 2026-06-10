@@ -52,12 +52,12 @@ core-team-builder/
 │   │   ├── auth/         password hashing (bcrypt) + JWT + middleware
 │   │   ├── config/       env-based configuration
 │   │   ├── db/           connection pool
-│   │   ├── handlers/     HTTP routes
-│   │   └── models/       data access (users)
+│   │   ├── handlers/     HTTP routes (auth, teams, encounters)
+│   │   └── models/       data access (users, teams, encounters)
 │   └── Dockerfile
 ├── frontend/             Static site (nginx)
 │   ├── css/styles.css    design system / tokens
-│   ├── js/               api client + page scripts
+│   ├── js/               api client, master data, components, page scripts
 │   ├── *.html
 │   ├── nginx.conf        serves static + proxies /api -> backend
 │   └── Dockerfile

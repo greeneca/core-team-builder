@@ -4,11 +4,14 @@
  * Responsibilities:
  *   - Route guard (redirect unauthenticated visitors to login).
  *   - Teams list: create and open teams; each card has a Share button.
- *   - Team detail: rename, delete (owner), schedule, and edit the 12 player
- *     slots (name, discord handle, role, class).
+ *   - Team detail: rename, delete (owner), schedule, encounters, and edit the
+ *     12 player slots (name, discord handle, role, class, subclass build, and
+ *     the gear/skills loadout for the currently selected encounter).
  *   - Share page: view members and (owner) share/unshare and change roles.
  *
- * Relies on `api`, `ROLES`, `CLASSES`, and `labelFor` from api.js.
+ * Relies on `api` from api.js, the shared reference data + helpers from data.js
+ * (`ROLES`, `CLASSES`, `labelFor`, schedule/skill/mastery helpers, etc.), and
+ * `createSearchableSelect` from components.js.
  */
 
 (function () {
@@ -24,11 +27,12 @@
   const teamsView = el("teams-view");
   const detailView = el("team-detail-view");
   const shareView = el("share-view");
-  const encounterView = el("encounter-view");
 
   let currentUser = null;
   let currentTeam = null;
   let currentEncounters = [];
+  // The encounter currently selected on the team page; its per-player loadouts
+  // are shown inline in the roster. Always set once a team is open.
   let currentEncounter = null;
 
   // --- Helpers ---
@@ -67,7 +71,6 @@
     teamsView.classList.toggle("is-hidden", view !== "teams");
     detailView.classList.toggle("is-hidden", view !== "detail");
     shareView.classList.toggle("is-hidden", view !== "share");
-    encounterView.classList.toggle("is-hidden", view !== "encounter");
     window.scrollTo(0, 0);
   }
 
@@ -152,8 +155,13 @@
       currentTeam = await api.getTeam(id);
       const { encounters } = await api.listEncounters(id);
       currentEncounters = encounters || [];
+      // Select the first encounter (e.g. Default) and load its loadouts so the
+      // roster can show each player's gear/skills for it.
+      currentEncounter = null;
+      if (currentEncounters.length) {
+        currentEncounter = await api.getEncounter(id, currentEncounters[0].id);
+      }
       renderTeamDetail();
-      renderEncountersBar();
       showView("detail");
     } catch (err) {
       handleError(err);
@@ -211,6 +219,8 @@
     el("delete-team-btn").classList.toggle("is-hidden", !isOwner());
 
     renderSchedule(editable);
+    renderEncountersBar();
+    renderEncounterControls();
     renderRoster();
   }
 
@@ -374,13 +384,17 @@
     autosaveTimer = setTimeout(flushAutosave, AUTOSAVE_DELAY);
   }
 
+  // Flush any pending debounced autosave immediately. Returns a promise that
+  // resolves once the in-flight save (if any) completes, so callers can await it
+  // before doing something that would otherwise clobber the unsaved changes.
   function flushAutosave() {
     clearTimeout(autosaveTimer);
     autosaveTimer = null;
     const scope = autosavePending;
     autosavePending = null;
-    if (scope === "encounter") saveLoadouts();
-    else if (scope === "team") saveAll();
+    if (scope === "encounter") return saveLoadouts();
+    if (scope === "team") return saveAll();
+    return Promise.resolve();
   }
 
   async function saveAll() {
@@ -420,24 +434,28 @@
 
   // Autosave on any field change within the team detail view. Native `change`
   // covers both cases we want: text inputs fire on blur (finished), while
-  // selects/checkboxes fire immediately. The add-encounter form is excluded.
+  // selects/checkboxes fire immediately. The add-encounter form, the encounter
+  // controls (rename), and the per-player loadouts handle their own saves and
+  // are excluded so they don't trigger a redundant team save.
   detailView.addEventListener("change", (e) => {
     if (!currentTeam || !canEdit()) return;
     if (e.target.closest("#add-encounter-form")) return;
+    if (e.target.closest("#encounter-controls")) return;
+    if (e.target.closest("[data-loadout]")) return;
     if (e.target.matches("input, select, textarea")) scheduleAutosave("team");
   });
 
-  // Ctrl+S / Cmd+S forces an immediate save of the active view.
+  // Ctrl+S / Cmd+S forces an immediate save of the team page (roster + the
+  // selected encounter's loadouts, which are both on this page now).
   document.addEventListener("keydown", (e) => {
     if ((e.ctrlKey || e.metaKey) && (e.key === "s" || e.key === "S")) {
       e.preventDefault();
       clearTimeout(autosaveTimer);
       autosaveTimer = null;
       autosavePending = null;
-      if (!encounterView.classList.contains("is-hidden")) {
-        saveLoadouts();
-      } else {
+      if (!detailView.classList.contains("is-hidden")) {
         saveAll();
+        if (currentEncounter) saveLoadouts();
       }
     }
   });
@@ -577,6 +595,18 @@
             </label>
             <div class="build-selects" data-build></div>
           </div>
+          <div class="player-loadout" data-loadout>
+            <div class="loadout-lists">
+              <div class="loadout-col" data-type="gear">
+                <label>Gear</label>
+                <div class="chip-list" data-list></div>
+              </div>
+              <div class="loadout-col" data-type="skills">
+                <label>Skills</label>
+                <div class="chip-list" data-list></div>
+              </div>
+            </div>
+          </div>
         </div>`;
 
       slot.querySelector('[data-field="name"]').value = player.name;
@@ -592,7 +622,16 @@
       });
       renderBuild(slot, player);
 
-      // Viewers get a read-only roster; editors/owner save via the top Save All.
+      // Build the loadout add-controls (one per gear/skills column) for the
+      // currently selected encounter. The chips themselves are filled by
+      // renderRosterLoadouts so they can be refreshed when the encounter changes.
+      slot.querySelectorAll("[data-loadout] .loadout-col").forEach((col) => {
+        const type = col.dataset.type;
+        const listEl = col.querySelector("[data-list]");
+        if (editable) col.appendChild(buildAddControl(listEl, type));
+      });
+
+      // Viewers get a read-only roster; editors/owner autosave on change.
       if (!editable) {
         slot.querySelectorAll("input, select").forEach((field) => {
           field.disabled = true;
@@ -600,6 +639,32 @@
       }
 
       roster.appendChild(slot);
+    });
+
+    renderRosterLoadouts(editable);
+  }
+
+  // Fill each roster slot's gear/skills chip lists from the currently selected
+  // encounter's loadouts. Re-run when the selected encounter changes; it only
+  // touches the chip lists so in-progress player-field edits are preserved.
+  function renderRosterLoadouts(editable) {
+    if (editable === undefined) editable = canEdit();
+    const loadoutBySlot = {};
+    if (currentEncounter) {
+      (currentEncounter.loadouts || []).forEach((l) => {
+        loadoutBySlot[l.slot] = l;
+      });
+    }
+
+    el("roster").querySelectorAll(".player-slot").forEach((slot) => {
+      const slotNum = Number(slot.dataset.slot);
+      const lo = loadoutBySlot[slotNum] || { gear: [], skills: [] };
+      slot.querySelectorAll("[data-loadout] .loadout-col").forEach((col) => {
+        const type = col.dataset.type;
+        const listEl = col.querySelector("[data-list]");
+        listEl.innerHTML = "";
+        (lo[type] || []).forEach((key) => addChip(listEl, type, key, editable));
+      });
     });
   }
 
@@ -655,6 +720,9 @@
   }
 
   // --- Encounters bar (team detail) ---
+  // The encounters bar lets you pick the *current* encounter (whose per-player
+  // loadouts are shown inline in the roster) and add new ones. There is no
+  // separate encounter page anymore.
   function renderEncountersBar() {
     const bar = el("encounters-bar");
     bar.innerHTML = "";
@@ -662,11 +730,65 @@
       const chip = document.createElement("button");
       chip.type = "button";
       chip.className = "encounter-chip";
+      if (currentEncounter && enc.id === currentEncounter.id) {
+        chip.classList.add("is-active");
+      }
       chip.textContent = enc.name;
-      chip.addEventListener("click", () => openEncounter(enc.id));
+      chip.addEventListener("click", () => selectEncounter(enc.id));
       bar.appendChild(chip);
     });
     el("add-encounter-btn").classList.toggle("is-hidden", !canEdit());
+  }
+
+  // Show the controls for the currently selected encounter (name, rename,
+  // delete, save status). The loadouts themselves render inline in the roster.
+  function renderEncounterControls() {
+    const controls = el("encounter-controls");
+    if (!currentEncounter) {
+      controls.classList.add("is-hidden");
+      return;
+    }
+    controls.classList.remove("is-hidden");
+
+    const editable = canEdit();
+    el("current-encounter-name").textContent = currentEncounter.name;
+
+    // Editors get a rename dropdown; viewers just see the name.
+    const rename = el("encounter-rename");
+    rename.classList.toggle("is-hidden", !editable);
+    if (editable) {
+      populateEncounterNameSelect(rename);
+      rename.value = currentEncounter.name;
+    }
+
+    // Delete only when editable and more than one encounter exists.
+    el("encounter-delete-btn").classList.toggle(
+      "is-hidden",
+      !editable || currentEncounters.length <= 1
+    );
+    el("encounter-save-status").classList.toggle("is-hidden", !editable);
+    setSaveStatus("encounter", "");
+  }
+
+  // Switch the selected encounter: load its loadouts, refresh the bar + controls,
+  // and re-fill the roster's per-player gear/skill chips (only — player fields
+  // and any in-progress edits are left untouched).
+  async function selectEncounter(encounterId) {
+    if (currentEncounter && currentEncounter.id === encounterId) return;
+    clearMessage();
+    try {
+      // Flush any pending loadout autosave for the current encounter first, so
+      // switching never drops unsaved gear/skill edits.
+      if (autosavePending === "encounter") {
+        await flushAutosave();
+      }
+      currentEncounter = await api.getEncounter(currentTeam.id, encounterId);
+      renderEncountersBar();
+      renderEncounterControls();
+      renderRosterLoadouts();
+    } catch (err) {
+      handleError(err);
+    }
   }
 
   // Populate the "add encounter" picker once with grouped boss names.
@@ -696,98 +818,16 @@
       addEncounterForm.classList.add("is-hidden");
       const { encounters } = await api.listEncounters(currentTeam.id);
       currentEncounters = encounters || [];
+      // Select the newly added encounter so its loadouts show in the roster.
+      currentEncounter = await api.getEncounter(currentTeam.id, enc.id);
       renderEncountersBar();
+      renderEncounterControls();
+      renderRosterLoadouts();
       showMessage(`Added encounter “${enc.name}”`, "success");
-      openEncounter(enc.id);
     } catch (err) {
       handleError(err);
     }
   });
-
-  // --- Encounter detail (loadouts) ---
-  async function openEncounter(encounterId) {
-    clearMessage();
-    try {
-      currentEncounter = await api.getEncounter(currentTeam.id, encounterId);
-      renderEncounter();
-      showView("encounter");
-    } catch (err) {
-      handleError(err);
-    }
-  }
-
-  function renderEncounter() {
-    const editable = canEdit();
-    el("encounter-team-name").textContent = currentTeam.name;
-    el("encounter-name").textContent = currentEncounter.name;
-
-    // Editors get a rename dropdown alongside the title.
-    const rename = el("encounter-rename");
-    rename.classList.toggle("is-hidden", !editable);
-    if (editable) {
-      populateEncounterNameSelect(rename);
-      rename.value = currentEncounter.name;
-    }
-
-    // Delete only when editable and more than one encounter exists.
-    el("encounter-delete-btn").classList.toggle(
-      "is-hidden",
-      !editable || currentEncounters.length <= 1
-    );
-    el("encounter-save-status").classList.toggle("is-hidden", !editable);
-    setSaveStatus("encounter", "");
-
-    renderLoadouts(editable);
-  }
-
-  function renderLoadouts(editable) {
-    const list = el("loadout-list");
-    list.innerHTML = "";
-
-    // Map slot -> player name for read-only display.
-    const nameBySlot = {};
-    (currentTeam.players || []).forEach((p) => {
-      nameBySlot[p.slot] = p.name;
-    });
-    // Map slot -> loadout.
-    const loadoutBySlot = {};
-    (currentEncounter.loadouts || []).forEach((l) => {
-      loadoutBySlot[l.slot] = l;
-    });
-
-    for (let slot = 1; slot <= 12; slot++) {
-      const lo = loadoutBySlot[slot] || { slot, gear: [], skills: [] };
-      const name = nameBySlot[slot] || "";
-
-      const row = document.createElement("div");
-      row.className = "loadout-row";
-      row.dataset.slot = slot;
-      row.innerHTML = `
-        <div class="loadout-player">
-          <span class="slot-number">${slot}</span>
-          <span class="loadout-name">${name ? escapeAttr(name) : '<em class="text-muted">Empty slot</em>'}</span>
-        </div>
-        <div class="loadout-lists">
-          <div class="loadout-col" data-type="gear">
-            <label>Gear</label>
-            <div class="chip-list" data-list></div>
-          </div>
-          <div class="loadout-col" data-type="skills">
-            <label>Skills</label>
-            <div class="chip-list" data-list></div>
-          </div>
-        </div>`;
-
-      row.querySelectorAll(".loadout-col").forEach((col) => {
-        const type = col.dataset.type;
-        const listEl = col.querySelector("[data-list]");
-        (lo[type] || []).forEach((key) => addChip(listEl, type, key, editable));
-        if (editable) col.appendChild(buildAddControl(listEl, type));
-      });
-
-      list.appendChild(row);
-    }
-  }
 
   // Create a removable chip for one loadout item.
   function addChip(listEl, type, key, editable) {
@@ -832,14 +872,17 @@
     });
   }
 
+  // Collect each player's loadout (gear/skills chips) from the roster slots.
   function collectLoadouts() {
-    return Array.from(el("loadout-list").querySelectorAll(".loadout-row")).map((row) => {
+    return Array.from(el("roster").querySelectorAll(".player-slot")).map((slot) => {
       const read = (type) =>
         Array.from(
-          row.querySelector(`.loadout-col[data-type="${type}"] .chip-list`).querySelectorAll(".chip")
+          slot
+            .querySelector(`[data-loadout] .loadout-col[data-type="${type}"] .chip-list`)
+            .querySelectorAll(".chip")
         ).map((c) => c.dataset.value);
       return {
-        slot: Number(row.dataset.slot),
+        slot: Number(slot.dataset.slot),
         gear: read("gear"),
         skills: read("skills"),
       };
@@ -847,7 +890,7 @@
   }
 
   async function saveLoadouts() {
-    if (!currentEncounter || encounterView.classList.contains("is-hidden") || !canEdit()) {
+    if (!currentEncounter || detailView.classList.contains("is-hidden") || !canEdit()) {
       return;
     }
     setSaveStatus("encounter", "saving");
@@ -870,7 +913,8 @@
       currentEncounter = await api.renameEncounter(currentTeam.id, currentEncounter.id, name);
       const { encounters } = await api.listEncounters(currentTeam.id);
       currentEncounters = encounters || [];
-      renderEncounter();
+      renderEncountersBar();
+      renderEncounterControls();
       showMessage("Encounter renamed", "success");
     } catch (err) {
       handleError(err);
@@ -885,19 +929,17 @@
       await api.deleteEncounter(currentTeam.id, currentEncounter.id);
       const { encounters } = await api.listEncounters(currentTeam.id);
       currentEncounters = encounters || [];
-      currentEncounter = null;
+      // Fall back to the first remaining encounter.
+      currentEncounter = currentEncounters.length
+        ? await api.getEncounter(currentTeam.id, currentEncounters[0].id)
+        : null;
       renderEncountersBar();
-      showView("detail");
+      renderEncounterControls();
+      renderRosterLoadouts();
       showMessage("Encounter deleted", "success");
     } catch (err) {
       handleError(err);
     }
-  });
-
-  el("encounter-back-btn").addEventListener("click", () => {
-    currentEncounter = null;
-    renderEncountersBar();
-    showView("detail");
   });
 
   // --- Bootstrap ---

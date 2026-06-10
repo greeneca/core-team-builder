@@ -50,8 +50,21 @@ Consistent conventions across the codebase. Keep this in sync with reality.
 ### JavaScript
 
 - Vanilla ES (no framework, no build step). Use `const`/`let`, never `var`.
-- Each page has one script (`auth.js`, `app.js`) wrapped in an IIFE to avoid
-  globals. Shared API access goes through the `api` object in `api.js`.
+- Each page has one entry script (`auth.js`, `app.js`) wrapped in an IIFE to
+  avoid globals. Shared, page-agnostic code lives in dedicated modules that load
+  before the entry script. Keep concerns separated:
+  - `api.js` — **only** the `api` client object (token storage + endpoint
+    helpers). No domain data lives here.
+  - `data.js` — all shared reference data + display helpers: roles, classes,
+    share roles, days, timezone/schedule helpers, the subclassing skill lines
+    and class masteries (+ option/lookup helpers), and the ESO encounter
+    master/seed data (boss names grouped by trial, gear sets with tooltips,
+    skills grouped by skill line). Keys mirror the backend allow-lists in
+    `internal/models` (`eso.go`, `encounter.go`).
+  - `components.js` — reusable, framework-free UI components
+    (`createSearchableSelect`).
+- These modules expose plain top-level `const`s/functions (no module system);
+  rely on script load order in the HTML rather than `import`/`export`.
 - Network calls go through `api.request(...)`; do not call `fetch` directly in
   page scripts.
 - Two-space indentation; semicolons required; double quotes for strings.
@@ -61,6 +74,13 @@ Consistent conventions across the codebase. Keep this in sync with reality.
 - Two-space indentation. Always set `lang`, `charset`, and a responsive
   `viewport` meta. Associate `<label for>` with inputs and set sensible
   `autocomplete` attributes.
+- **Cache-busting**: reference CSS/JS assets with a shared version query string
+  (e.g. `app.js?v=N`) and bump `N` on every frontend change so browsers (and the
+  baked nginx image) pick up updates. Keep the version consistent across
+  `index.html` and `login.html`. nginx serves HTML/JS/CSS with
+  `Cache-Control: no-cache` (see `frontend/nginx.conf`). Note the frontend is
+  baked into the nginx image, so changes require
+  `docker compose up -d --build frontend` to deploy.
 
 ## Theme
 
