@@ -4,9 +4,11 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Dashboard — Core Team Builder</title>
-  <link rel="stylesheet" href="css/styles.css" />
+  <link rel="stylesheet" href="css/styles.css?v=17" />
 </head>
 <body>
+  <div id="message" class="toast is-hidden" role="alert" aria-live="assertive"></div>
+
   <header class="topbar">
     <div class="brand">
       Core Team Builder
@@ -19,8 +21,6 @@
   </header>
 
   <main class="container">
-    <div id="message" class="message is-hidden"></div>
-
     <!-- Teams list view -->
     <section id="teams-view">
       <div class="section-head">
@@ -56,7 +56,7 @@
             <p class="text-muted" id="team-meta" style="margin: var(--space-2) 0 0;"></p>
           </div>
           <div class="form-actions">
-            <button id="save-all-btn" class="btn btn--primary" type="button">Save All</button>
+            <span id="team-save-status" class="save-status" aria-live="polite"></span>
             <button id="delete-team-btn" class="btn btn--danger is-hidden" type="button">Delete Team</button>
           </div>
         </div>
@@ -80,10 +80,51 @@
         </div>
       </div>
 
+      <!-- Encounters -->
+      <div class="card mt-4">
+        <div class="section-head">
+          <h2 style="margin: 0;">Encounters</h2>
+          <button id="add-encounter-btn" class="btn btn--ghost btn--sm is-hidden" type="button">+ Add Encounter</button>
+        </div>
+        <form id="add-encounter-form" class="add-encounter-form is-hidden mt-4">
+          <div class="form-group">
+            <label for="add-encounter-name">Encounter</label>
+            <select id="add-encounter-name" class="input"></select>
+          </div>
+          <div class="form-actions">
+            <button class="btn btn--primary btn--sm" type="submit">Add</button>
+            <button class="btn btn--ghost btn--sm" type="button" id="add-encounter-cancel">Cancel</button>
+          </div>
+        </form>
+        <div id="encounters-bar" class="encounters-bar mt-4"></div>
+      </div>
+
       <!-- Roster -->
       <div class="card mt-4">
         <h2 style="margin-top: 0;">Roster <span class="text-muted">(12 players)</span></h2>
         <div id="roster" class="roster-grid"></div>
+      </div>
+    </section>
+
+    <!-- Encounter detail view (loadouts) -->
+    <section id="encounter-view" class="is-hidden">
+      <button id="encounter-back-btn" class="btn btn--ghost" type="button">← Back to team</button>
+
+      <div class="card mt-4">
+        <div class="section-head">
+          <div>
+            <h1 id="encounter-team-name" class="text-muted" style="margin: 0; font-size: var(--font-size-base); font-weight: 500;">…</h1>
+            <div class="encounter-title-row">
+              <h2 id="encounter-name" style="margin: var(--space-2) 0 0;">…</h2>
+              <select id="encounter-rename" class="input is-hidden"></select>
+            </div>
+          </div>
+          <div class="form-actions">
+            <span id="encounter-save-status" class="save-status" aria-live="polite"></span>
+            <button id="encounter-delete-btn" class="btn btn--danger is-hidden" type="button">Delete</button>
+          </div>
+        </div>
+        <div id="loadout-list" class="loadout-list mt-6"></div>
       </div>
     </section>
 
@@ -111,7 +152,9 @@
     </section>
   </main>
 
-  <script src="js/api.js"></script>
-  <script src="js/app.js"></script>
+  <script src="js/api.js?v=17"></script>
+  <script src="js/data.js?v=17"></script>
+  <script src="js/components.js?v=17"></script>
+  <script src="js/app.js?v=17"></script>
 </body>
 </html>

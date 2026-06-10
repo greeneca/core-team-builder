@@ -129,6 +129,12 @@ type playerPayload struct {
 	DiscordHandle string `json:"discord_handle"`
 	Role          string `json:"role"`
 	Class         string `json:"class"`
+	Subclassed    bool   `json:"subclassed"`
+	SkillLine1    string `json:"skill_line_1"`
+	SkillLine2    string `json:"skill_line_2"`
+	SkillLine3    string `json:"skill_line_3"`
+	Mastery1      string `json:"mastery_1"`
+	Mastery2      string `json:"mastery_2"`
 }
 
 func (s *Server) handleUpdateTeam(w http.ResponseWriter, r *http.Request) {
@@ -187,13 +193,42 @@ func (s *Server) handleUpdateTeam(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "invalid class")
 			return
 		}
-		players = append(players, models.Player{
+
+		player := models.Player{
 			Slot:          p.Slot,
 			Name:          strings.TrimSpace(p.Name),
 			DiscordHandle: strings.TrimSpace(p.DiscordHandle),
 			Role:          role,
 			Class:         class,
-		})
+			Subclassed:    p.Subclassed,
+		}
+
+		// The subclass flag selects which build set applies. Validate only the
+		// active set and clear the inactive one so stored data stays consistent.
+		if p.Subclassed {
+			s1 := strings.TrimSpace(p.SkillLine1)
+			s2 := strings.TrimSpace(p.SkillLine2)
+			s3 := strings.TrimSpace(p.SkillLine3)
+			if !models.ValidSkillLine(s1) || !models.ValidSkillLine(s2) || !models.ValidSkillLine(s3) {
+				writeError(w, http.StatusBadRequest, "invalid skill line")
+				return
+			}
+			if err := models.ValidateSkillLines(class, []string{s1, s2, s3}); err != nil {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			player.SkillLine1, player.SkillLine2, player.SkillLine3 = s1, s2, s3
+		} else {
+			m1 := strings.TrimSpace(p.Mastery1)
+			m2 := strings.TrimSpace(p.Mastery2)
+			if !models.ValidMastery(class, m1) || !models.ValidMastery(class, m2) {
+				writeError(w, http.StatusBadRequest, "invalid class mastery")
+				return
+			}
+			player.Mastery1, player.Mastery2 = m1, m2
+		}
+
+		players = append(players, player)
 	}
 
 	if err := s.teams.Save(r.Context(), teamID, req.Name, days, scheduleTime, scheduleTimezone, players); err != nil {

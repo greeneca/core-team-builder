@@ -16,13 +16,14 @@ import (
 type Server struct {
 	users      *models.UserStore
 	teams      *models.TeamStore
+	encounters *models.EncounterStore
 	tokens     *auth.TokenManager
 	corsOrigin string
 }
 
 // New constructs a Server.
-func New(users *models.UserStore, teams *models.TeamStore, tokens *auth.TokenManager, corsOrigin string) *Server {
-	return &Server{users: users, teams: teams, tokens: tokens, corsOrigin: corsOrigin}
+func New(users *models.UserStore, teams *models.TeamStore, encounters *models.EncounterStore, tokens *auth.TokenManager, corsOrigin string) *Server {
+	return &Server{users: users, teams: teams, encounters: encounters, tokens: tokens, corsOrigin: corsOrigin}
 }
 
 // Routes returns the fully configured HTTP handler, including CORS handling.
@@ -47,6 +48,14 @@ func (s *Server) Routes() http.Handler {
 	mux.Handle("DELETE /api/teams/{id}", protected(s.handleDeleteTeam))
 	mux.Handle("POST /api/teams/{id}/share", protected(s.handleShareTeam))
 	mux.Handle("DELETE /api/teams/{id}/members/{userID}", protected(s.handleUnshareTeam))
+
+	// Encounters.
+	mux.Handle("GET /api/teams/{id}/encounters", protected(s.handleListEncounters))
+	mux.Handle("POST /api/teams/{id}/encounters", protected(s.handleCreateEncounter))
+	mux.Handle("GET /api/teams/{id}/encounters/{eid}", protected(s.handleGetEncounter))
+	mux.Handle("PUT /api/teams/{id}/encounters/{eid}", protected(s.handleUpdateEncounter))
+	mux.Handle("DELETE /api/teams/{id}/encounters/{eid}", protected(s.handleDeleteEncounter))
+	mux.Handle("PUT /api/teams/{id}/encounters/{eid}/loadouts", protected(s.handleSaveLoadouts))
 
 	return s.withCORS(mux)
 }

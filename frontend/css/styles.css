@@ -242,6 +242,37 @@ a:hover {
   display: none !important;
 }
 
+/* Toast: a fixed notification pinned to the top of the viewport, shown
+   regardless of scroll position. Reuses .message--error/--success for the text
+   and border colors, with a solid background for readability over content. */
+.toast {
+  position: fixed;
+  top: var(--space-4);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  width: max-content;
+  max-width: min(92vw, 600px);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius);
+  font-size: var(--font-size-sm);
+  box-shadow: var(--shadow);
+  text-align: center;
+}
+.toast.message--error {
+  background: #2a1c1c;
+}
+.toast.message--success {
+  background: #16241d;
+}
+@keyframes toast-in {
+  from { opacity: 0; transform: translate(-50%, -8px); }
+  to   { opacity: 1; transform: translate(-50%, 0); }
+}
+.toast:not(.is-hidden) {
+  animation: toast-in 0.15s ease-out;
+}
+
 /* Top bar actions */
 .topbar-actions {
   display: flex;
@@ -288,10 +319,10 @@ a:hover {
   border: 1px solid var(--color-border);
 }
 
-/* Teams grid */
+/* Teams list: full-width rows, one team per row */
 .teams-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  display: flex;
+  flex-direction: column;
   gap: var(--space-4);
 }
 .team-card {
@@ -454,7 +485,7 @@ a:hover {
 }
 .player-slot {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: var(--space-4);
   background: var(--color-surface-alt);
   border: 1px solid var(--color-border);
@@ -473,22 +504,241 @@ a:hover {
   font-weight: 700;
   font-size: var(--font-size-sm);
   flex-shrink: 0;
+  margin-top: var(--space-5);
+}
+.player-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  flex: 1;
+  min-width: 0;
 }
 .player-fields {
   display: grid;
   grid-template-columns: 2fr 2fr 1.3fr 1.5fr;
   gap: var(--space-3);
-  flex: 1;
+  width: 100%;
   min-width: 0;
 }
 .player-fields .form-group {
   margin-bottom: 0;
   min-width: 0;
 }
+
+/* Conditional build controls (subclass toggle + skill-line/mastery selects) */
+.player-build {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  border-top: 1px dashed var(--color-border);
+  padding-top: var(--space-3);
+}
+.subclass-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-size-sm);
+  color: var(--color-text);
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.subclass-toggle input {
+  accent-color: var(--color-accent);
+  cursor: pointer;
+}
+.build-selects {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+  flex: 1;
+  min-width: 0;
+}
+.build-selects .form-group {
+  margin-bottom: 0;
+  min-width: 0;
+}
+.build-hint {
+  margin: 0;
+  align-self: center;
+}
 @media (max-width: 720px) {
   .player-fields {
     grid-template-columns: 1fr 1fr;
   }
+  .build-selects {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+/* Encounters bar (team detail) */
+.encounters-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.encounter-chip {
+  font-family: inherit;
+  font-size: var(--font-size-sm);
+  color: var(--color-text);
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  padding: var(--space-2) var(--space-4);
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+.encounter-chip:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent-hover);
+}
+.add-encounter-form {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+.add-encounter-form .form-group { min-width: 16rem; margin: 0; }
+
+/* Encounter detail (loadouts) */
+.encounter-title-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+.encounter-title-row .input { max-width: 18rem; }
+
+.loadout-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.loadout-row {
+  display: grid;
+  grid-template-columns: 12rem 1fr;
+  gap: var(--space-4);
+  align-items: start;
+  padding: var(--space-4);
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+.loadout-player {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.loadout-name { font-weight: 600; }
+.loadout-lists {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-4);
+  min-width: 0;
+}
+.loadout-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.loadout-col > label {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+.chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-size-sm);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  padding: var(--space-1) var(--space-3);
+}
+.chip-remove {
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+.chip-remove:hover { color: var(--color-danger); }
+/* Searchable-select component (createSearchableSelect): full search + headers. */
+.ss {
+  position: relative;
+  max-width: 16rem;
+}
+.ss-input {
+  width: 100%;
+}
+.ss-panel {
+  position: absolute;
+  z-index: 50;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 100%;
+  max-height: 16rem;
+  overflow-y: auto;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.ss-panel.is-hidden { display: none; }
+.ss-group {
+  position: sticky;
+  top: 0;
+  padding: var(--space-1) var(--space-3);
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--color-text-muted);
+  background: var(--color-bg);
+  border-bottom: 1px solid var(--color-border);
+}
+.ss-option {
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--font-size-sm);
+  white-space: nowrap;
+  cursor: pointer;
+  border-left: 3px solid transparent;
+}
+.ss-option.is-active {
+  background: var(--color-accent);
+  color: var(--color-bg);
+  font-weight: 600;
+  border-left-color: var(--color-accent-hover);
+}
+.ss-empty {
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+/* Autosave status indicator (replaces the old Save buttons). */
+.save-status {
+  align-self: center;
+  min-width: 5rem;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+  transition: color 0.2s ease;
+}
+.save-status.is-saved { color: var(--color-success); }
+.save-status.is-error { color: var(--color-danger); }
+
+@media (max-width: 720px) {
+  .loadout-row { grid-template-columns: 1fr; }
+  .loadout-lists { grid-template-columns: 1fr; }
 }
 
 /* Utility text */

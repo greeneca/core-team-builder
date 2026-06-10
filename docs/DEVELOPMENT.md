@@ -129,7 +129,8 @@ Mutating endpoints return the full refreshed team (with `players` and `members`)
 Roles: `owner` and `editor` can edit the team/roster; `viewer` is read-only
 (edit attempts return `403`). Only the owner can delete or manage sharing.
 
-`PUT /api/teams/{id}` body (the UI "Save All" sends all of this at once):
+`PUT /api/teams/{id}` body (the UI autosaves all of this together; see Autosave
+in `docs/AGENT_CONTEXT.md`):
 
 ```json
 {
@@ -138,7 +139,13 @@ Roles: `owner` and `editor` can edit the team/roster; `viewer` is read-only
   "schedule_time": "20:00",
   "schedule_timezone": "America/New_York",
   "players": [
-    { "slot": 1, "name": "Aedric", "discord_handle": "aedric#1234", "role": "tank", "class": "dragonknight" }
+    {
+      "slot": 1, "name": "Aedric", "discord_handle": "aedric#1234",
+      "role": "tank", "class": "dragonknight",
+      "subclassed": true,
+      "skill_line_1": "ardent_flame", "skill_line_2": "draconic_power", "skill_line_3": "grave_lord",
+      "mastery_1": "", "mastery_2": ""
+    }
   ]
 }
 ```
@@ -149,19 +156,68 @@ Roles: `owner` and `editor` can edit the team/roster; `viewer` is read-only
   validated via `time.LoadLocation`, anything else returns `400`. The frontend
   defaults this to the viewer's current zone.
 - `players` is optional; omitted slots are left unchanged. Invalid slot/role/
-  class returns `400` and the whole save is rolled back.
+  class/skill-line/mastery returns `400` and the whole save is rolled back.
 
 Player slot body:
 
 ```json
-{ "name": "Aedric", "discord_handle": "aedric#1234", "role": "tank", "class": "dragonknight" }
+{
+  "name": "Aedric", "discord_handle": "aedric#1234", "role": "tank", "class": "dragonknight",
+  "subclassed": false, "mastery_1": "booming_voice", "mastery_2": "rousing_roar"
+}
 ```
 
 - `role` ∈ `""`, `tank`, `healer`, `dps`, `support_dps`.
 - `class` ∈ `""`, `arcanist`, `dragonknight`, `necromancer`, `nightblade`,
   `sorcerer`, `templar`, `warden`.
+- `subclassed` (bool) selects which build set applies:
+  - `true` → `skill_line_1..3`, each one of the 21 class skill lines (or `""`).
+  - `false` → `mastery_1..2`, each one of the **selected class's** 5 masteries
+    (or `""`).
+  - The backend validates only the active set and blanks the inactive one, so a
+    player never has both skill lines and masteries stored.
+- Subclass skill-line rules (`models.ValidateSkillLines`, enforced on save):
+  - selected skill lines must be **unique**;
+  - if `class` is set **and at least one line is chosen**, **at least one**
+    selected line must be from that class (a fully-empty subclass build is
+    allowed);
+  - if `class` is set, **at most one** selected line may come from any single
+    other class. Class checks are skipped when `class` is `""`. Violations
+    return `400` (the UI pre-checks and names the offending slot).
 
-Invalid `role`/`class` values return `400`.
+Invalid `role`/`class`/`skill_line_*`/`mastery_*` values return `400`.
+
+### Encounters (all protected)
+
+Nested under a team; the same access rules apply (viewer reads; editor/owner
+edits). Mutations return the refreshed encounter with its 12 loadouts.
+
+| Method & path                                          | Who     | Description                                |
+|--------------------------------------------------------|---------|--------------------------------------------|
+| `GET /api/teams/{id}/encounters`                       | viewer+ | List a team's encounters (`{ "encounters": [...] }`, no loadouts). |
+| `POST /api/teams/{id}/encounters`                      | editor+ | Add an encounter `{ "name": "..." }`; creates 12 empty loadouts. |
+| `GET /api/teams/{id}/encounters/{eid}`                 | viewer+ | Get one encounter with its 12 `loadouts`.  |
+| `PUT /api/teams/{id}/encounters/{eid}`                 | editor+ | Rename `{ "name": "..." }`.                |
+| `DELETE /api/teams/{id}/encounters/{eid}`              | editor+ | Delete (cannot delete the team's last one).|
+| `PUT /api/teams/{id}/encounters/{eid}/loadouts`        | editor+ | Save loadouts (see body below).            |
+
+Every team always has at least one encounter (`Default`), created with the team.
+`name` must be `Default`, `Trash`, or an ESO trial boss (`ValidEncounterNames`).
+
+`PUT .../loadouts` body:
+
+```json
+{
+  "loadouts": [
+    { "slot": 1, "gear": ["perfected_relequen", "slimecraw"], "skills": ["pragmatic_fatecarver"] }
+  ]
+}
+```
+
+- `gear`/`skills` are ordered, free-form key lists (the UI constrains choices to
+  the master data in `frontend/js/data.js`). The backend sanitizes them (trim,
+  drop empties, ≤100 chars each, ≤30 items) but does not allow-list the keys.
+- `slot` must be 1–12; an invalid slot or item returns `400`.
 
 ### Quick curl test
 

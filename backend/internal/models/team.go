@@ -61,7 +61,178 @@ var (
 		"sat": true,
 		"sun": true,
 	}
+
+	// ValidSkillLines are the 21 ESO class skill lines (3 per class). A
+	// subclassed player may slot any of these in each of their 3 build slots.
+	// "" means "unset".
+	ValidSkillLines = map[string]bool{
+		"": true,
+		// Arcanist
+		"herald_of_the_tome":   true,
+		"soldier_of_apocrypha": true,
+		"curative_runeforms":   true,
+		// Dragonknight
+		"ardent_flame":   true,
+		"draconic_power": true,
+		"earthen_heart":  true,
+		// Necromancer
+		"grave_lord":   true,
+		"bone_tyrant":  true,
+		"living_death": true,
+		// Nightblade
+		"assassination": true,
+		"shadow":        true,
+		"siphoning":     true,
+		// Sorcerer
+		"dark_magic":        true,
+		"daedric_summoning": true,
+		"storm_calling":     true,
+		// Templar
+		"aedric_spear":    true,
+		"dawns_wrath":     true,
+		"restoring_light": true,
+		// Warden
+		"animal_companions": true,
+		"green_balance":     true,
+		"winters_embrace":   true,
+	}
+
+	// MasteriesByClass maps each ESO class to its 5 class masteries. A
+	// non-subclassed player may pick up to 2 masteries from their own class.
+	MasteriesByClass = map[string]map[string]bool{
+		"arcanist": {
+			"abyssal_pact":          true,
+			"mind_over_matter":      true,
+			"manifest_destiny":      true,
+			"fleshborne_fate":       true,
+			"self_perpetuated_fate": true,
+		},
+		"dragonknight": {
+			"booming_voice":      true,
+			"immovable_mountain": true,
+			"unstoppable_force":  true,
+			"rousing_roar":       true,
+			"recursive_flame":    true,
+		},
+		"necromancer": {
+			"cycle_of_death":    true,
+			"at_the_precipice":  true,
+			"lord_of_the_cycle": true,
+			"pound_of_flesh":    true,
+			"nothing_wasted":    true,
+		},
+		"nightblade": {
+			"critical_motivation": true,
+			"evasive_trance":      true,
+			"detect_weakness":     true,
+			"share_the_spoils":    true,
+			"above_and_beyond":    true,
+		},
+		"sorcerer": {
+			"conservation_of_energy": true,
+			"efficient_defense":      true,
+			"implosion":              true,
+			"font_of_power":          true,
+			"parallel_protection":    true,
+		},
+		"templar": {
+			"hold_the_line":         true,
+			"missionary_of_light":   true,
+			"sacred_anchor":         true,
+			"illuminary_of_bravery": true,
+			"in_radiance_judgement": true,
+		},
+		"warden": {
+			"hypothermia":     true,
+			"wild_adaptation": true,
+			"thick_hide":      true,
+			"one_with_winter": true,
+			"natures_bounty":  true,
+		},
+	}
 )
+
+// SkillLineClass maps each skill line value to the class it belongs to. Used to
+// enforce subclassing build rules.
+var SkillLineClass = map[string]string{
+	"herald_of_the_tome":   "arcanist",
+	"soldier_of_apocrypha": "arcanist",
+	"curative_runeforms":   "arcanist",
+	"ardent_flame":         "dragonknight",
+	"draconic_power":       "dragonknight",
+	"earthen_heart":        "dragonknight",
+	"grave_lord":           "necromancer",
+	"bone_tyrant":          "necromancer",
+	"living_death":         "necromancer",
+	"assassination":        "nightblade",
+	"shadow":               "nightblade",
+	"siphoning":            "nightblade",
+	"dark_magic":           "sorcerer",
+	"daedric_summoning":    "sorcerer",
+	"storm_calling":        "sorcerer",
+	"aedric_spear":         "templar",
+	"dawns_wrath":          "templar",
+	"restoring_light":      "templar",
+	"animal_companions":    "warden",
+	"green_balance":        "warden",
+	"winters_embrace":      "warden",
+}
+
+// ValidSkillLine reports whether v is a known skill line value ("" allowed).
+func ValidSkillLine(v string) bool {
+	return ValidSkillLines[v]
+}
+
+// ValidateSkillLines enforces the subclassing build rules for a player's chosen
+// skill lines (empty entries are ignored):
+//   - all selected skill lines must be unique;
+//   - if class is set, at least one selected line must belong to that class;
+//   - if class is set, at most one selected line may come from any single class
+//     other than the player's class.
+//
+// The class checks are skipped when class is "" (unset).
+func ValidateSkillLines(class string, lines []string) error {
+	seen := map[string]bool{}
+	classCounts := map[string]int{}
+	for _, l := range lines {
+		if l == "" {
+			continue
+		}
+		if seen[l] {
+			return errors.New("skill lines must be unique")
+		}
+		seen[l] = true
+		classCounts[SkillLineClass[l]]++
+	}
+
+	if class == "" {
+		return nil
+	}
+	// Only require a class skill line once at least one line has been chosen, so
+	// a fully-empty subclass build is still allowed.
+	if len(seen) > 0 && classCounts[class] < 1 {
+		return errors.New("at least one skill line must be from the player's class")
+	}
+	for c, n := range classCounts {
+		if c != class && n > 1 {
+			return errors.New("cannot have more than one skill line from another class")
+		}
+	}
+	return nil
+}
+
+// ValidMastery reports whether mastery m is valid for the given class. "" is
+// always allowed; a non-empty mastery must belong to a non-empty, known class.
+func ValidMastery(class, m string) bool {
+	if m == "" {
+		return true
+	}
+	set, ok := MasteriesByClass[class]
+	if !ok {
+		return false
+	}
+	return set[m]
+}
 
 // Team member role constants.
 const (
@@ -70,7 +241,26 @@ const (
 	RoleViewer = "viewer"
 )
 
+// defaultPlayerRole returns the role a freshly created slot starts with. New
+// teams default to a standard ESO trial composition: 2 tanks, 2 healers, and
+// 8 DPS (slots 1–2 tank, 3–4 healer, 5–12 dps).
+func defaultPlayerRole(slot int) string {
+	switch {
+	case slot <= 2:
+		return "tank"
+	case slot <= 4:
+		return "healer"
+	default:
+		return "dps"
+	}
+}
+
 // Player is a single slot on a team's 12-person roster.
+//
+// A player either runs a subclassed build (three class skill lines) or a
+// standard build (two class masteries from their selected class). The two sets
+// are mutually exclusive: when Subclassed is true the masteries are blank, and
+// when it is false the skill lines are blank.
 type Player struct {
 	ID            int64  `json:"id"`
 	Slot          int    `json:"slot"`
@@ -78,6 +268,12 @@ type Player struct {
 	DiscordHandle string `json:"discord_handle"`
 	Role          string `json:"role"`
 	Class         string `json:"class"`
+	Subclassed    bool   `json:"subclassed"`
+	SkillLine1    string `json:"skill_line_1"`
+	SkillLine2    string `json:"skill_line_2"`
+	SkillLine3    string `json:"skill_line_3"`
+	Mastery1      string `json:"mastery_1"`
+	Mastery2      string `json:"mastery_2"`
 }
 
 // TeamMember is a user with access to a team. Role is "owner" or "member".
@@ -138,11 +334,16 @@ func (s *TeamStore) Create(ctx context.Context, ownerID int64, name string) (*Te
 		return nil, err
 	}
 
-	const insertSlot = `INSERT INTO players (team_id, slot) VALUES ($1, $2)`
+	const insertSlot = `INSERT INTO players (team_id, slot, role) VALUES ($1, $2, $3)`
 	for slot := 1; slot <= TeamSize; slot++ {
-		if _, err := tx.Exec(ctx, insertSlot, team.ID, slot); err != nil {
+		if _, err := tx.Exec(ctx, insertSlot, team.ID, slot, defaultPlayerRole(slot)); err != nil {
 			return nil, err
 		}
+	}
+
+	// Every team starts with one "Default" encounter (with its 12 loadouts).
+	if err := createDefaultEncounterTx(ctx, tx, team.ID); err != nil {
+		return nil, err
 	}
 
 	if err := tx.Commit(ctx); err != nil {
@@ -195,7 +396,8 @@ func (s *TeamStore) Get(ctx context.Context, teamID int64) (*Team, error) {
 	}
 
 	const playersQ = `
-		SELECT id, slot, name, discord_handle, role, class
+		SELECT id, slot, name, discord_handle, role, class,
+		       subclassed, skill_line_1, skill_line_2, skill_line_3, mastery_1, mastery_2
 		FROM players WHERE team_id = $1 ORDER BY slot`
 	pRows, err := s.pool.Query(ctx, playersQ, teamID)
 	if err != nil {
@@ -204,7 +406,10 @@ func (s *TeamStore) Get(ctx context.Context, teamID int64) (*Team, error) {
 	defer pRows.Close()
 	for pRows.Next() {
 		var p Player
-		if err := pRows.Scan(&p.ID, &p.Slot, &p.Name, &p.DiscordHandle, &p.Role, &p.Class); err != nil {
+		if err := pRows.Scan(
+			&p.ID, &p.Slot, &p.Name, &p.DiscordHandle, &p.Role, &p.Class,
+			&p.Subclassed, &p.SkillLine1, &p.SkillLine2, &p.SkillLine3, &p.Mastery1, &p.Mastery2,
+		); err != nil {
 			return nil, err
 		}
 		team.Players = append(team.Players, p)
@@ -269,10 +474,16 @@ func (s *TeamStore) Save(ctx context.Context, teamID int64, name string, days []
 
 	const updatePlayer = `
 		UPDATE players
-		SET name = $1, discord_handle = $2, role = $3, class = $4
-		WHERE team_id = $5 AND slot = $6`
+		SET name = $1, discord_handle = $2, role = $3, class = $4,
+		    subclassed = $5, skill_line_1 = $6, skill_line_2 = $7, skill_line_3 = $8,
+		    mastery_1 = $9, mastery_2 = $10
+		WHERE team_id = $11 AND slot = $12`
 	for _, p := range players {
-		if _, err := tx.Exec(ctx, updatePlayer, p.Name, p.DiscordHandle, p.Role, p.Class, teamID, p.Slot); err != nil {
+		if _, err := tx.Exec(ctx, updatePlayer,
+			p.Name, p.DiscordHandle, p.Role, p.Class,
+			p.Subclassed, p.SkillLine1, p.SkillLine2, p.SkillLine3, p.Mastery1, p.Mastery2,
+			teamID, p.Slot,
+		); err != nil {
 			return err
 		}
 	}

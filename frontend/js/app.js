@@ -24,22 +24,34 @@
   const teamsView = el("teams-view");
   const detailView = el("team-detail-view");
   const shareView = el("share-view");
+  const encounterView = el("encounter-view");
 
   let currentUser = null;
   let currentTeam = null;
+  let currentEncounters = [];
+  let currentEncounter = null;
 
   // --- Helpers ---
+  // A fixed toast at the top of the screen (see #message in index.html). It is
+  // position:fixed so it shows regardless of scroll position.
+  let messageTimer = null;
+
   function showMessage(text, kind = "error") {
+    if (messageTimer) clearTimeout(messageTimer);
     message.textContent = text;
-    message.className = `message message--${kind}`;
-    if (kind === "success") {
-      setTimeout(clearMessage, 2500);
-    }
+    message.className = `toast toast--${kind} message--${kind}`;
+    // Auto-dismiss; errors linger a bit longer than success confirmations.
+    const ttl = kind === "success" ? 2500 : 5000;
+    messageTimer = setTimeout(clearMessage, ttl);
   }
 
   function clearMessage() {
+    if (messageTimer) {
+      clearTimeout(messageTimer);
+      messageTimer = null;
+    }
     message.textContent = "";
-    message.className = "message is-hidden";
+    message.className = "toast is-hidden";
   }
 
   function handleError(err) {
@@ -55,6 +67,7 @@
     teamsView.classList.toggle("is-hidden", view !== "teams");
     detailView.classList.toggle("is-hidden", view !== "detail");
     shareView.classList.toggle("is-hidden", view !== "share");
+    encounterView.classList.toggle("is-hidden", view !== "encounter");
     window.scrollTo(0, 0);
   }
 
@@ -137,7 +150,10 @@
     clearMessage();
     try {
       currentTeam = await api.getTeam(id);
+      const { encounters } = await api.listEncounters(id);
+      currentEncounters = encounters || [];
       renderTeamDetail();
+      renderEncountersBar();
       showView("detail");
     } catch (err) {
       handleError(err);
@@ -190,7 +206,8 @@
       : `Shared with you (${memberRoleLabel(myRole())})`;
     el("team-meta").textContent = `${roleLabel} · created ${created.toLocaleDateString()}`;
 
-    el("save-all-btn").classList.toggle("is-hidden", !editable);
+    el("team-save-status").classList.toggle("is-hidden", !editable);
+    setSaveStatus("team", "");
     el("delete-team-btn").classList.toggle("is-hidden", !isOwner());
 
     renderSchedule(editable);
@@ -253,13 +270,60 @@
   }
 
   function collectPlayers() {
-    return Array.from(el("roster").querySelectorAll(".player-slot")).map((slot) => ({
-      slot: Number(slot.dataset.slot),
-      name: slot.querySelector('[data-field="name"]').value.trim(),
-      discord_handle: slot.querySelector('[data-field="discord_handle"]').value.trim(),
-      role: slot.querySelector('[data-field="role"]').value,
-      class: slot.querySelector('[data-field="class"]').value,
-    }));
+    return Array.from(el("roster").querySelectorAll(".player-slot")).map((slot) => {
+      const val = (f) => {
+        const e = slot.querySelector(`[data-field="${f}"]`);
+        return e ? e.value : "";
+      };
+      const subEl = slot.querySelector('[data-field="subclassed"]');
+      const subclassed = subEl ? subEl.checked : false;
+      return {
+        slot: Number(slot.dataset.slot),
+        name: val("name").trim(),
+        discord_handle: val("discord_handle").trim(),
+        role: val("role"),
+        class: val("class"),
+        subclassed,
+        // Only the active build set is sent; the backend clears the rest too.
+        skill_line_1: subclassed ? val("skill_line_1") : "",
+        skill_line_2: subclassed ? val("skill_line_2") : "",
+        skill_line_3: subclassed ? val("skill_line_3") : "",
+        mastery_1: subclassed ? "" : val("mastery_1"),
+        mastery_2: subclassed ? "" : val("mastery_2"),
+      };
+    });
+  }
+
+  // Validate subclass skill-line rules before saving. Returns an error message
+  // (naming the slot) or null when all builds are valid. Mirrors the backend
+  // rules in models.ValidateSkillLines.
+  function validateBuilds(players) {
+    for (const p of players) {
+      if (!p.subclassed) continue;
+      const lines = [p.skill_line_1, p.skill_line_2, p.skill_line_3].filter(Boolean);
+
+      if (new Set(lines).size !== lines.length) {
+        return `Slot ${p.slot}: skill lines must be unique.`;
+      }
+      if (!p.class) continue;
+
+      const counts = {};
+      for (const l of lines) {
+        const c = skillLineClass(l);
+        counts[c] = (counts[c] || 0) + 1;
+      }
+      // Only require a class skill line once at least one line is chosen, so a
+      // fully-empty subclass build is allowed.
+      if (lines.length > 0 && (counts[p.class] || 0) < 1) {
+        return `Slot ${p.slot}: at least one skill line must be from the player's class.`;
+      }
+      for (const c of Object.keys(counts)) {
+        if (c !== p.class && counts[c] > 1) {
+          return `Slot ${p.slot}: only one skill line allowed from a class other than the player's class.`;
+        }
+      }
+    }
+    return null;
   }
 
   el("back-btn").addEventListener("click", () => {
@@ -274,10 +338,67 @@
     loadTeams();
   });
 
-  el("save-all-btn").addEventListener("click", async () => {
+  // --- Autosave ---
+  // Changes are persisted automatically: text inputs fire on `change` (i.e. when
+  // the field loses focus after editing — "input finished"); selects, checkboxes,
+  // toggles, and loadout chips fire immediately. Saves are debounced and
+  // coalesced, and we intentionally do NOT re-render after an autosave so focus
+  // and in-progress edits (e.g. adding multiple chips) are never interrupted.
+  const AUTOSAVE_DELAY = 700;
+  let autosaveTimer = null;
+  let autosavePending = null; // "team" | "encounter"
+
+  function setSaveStatus(scope, state) {
+    const node = el(scope === "encounter" ? "encounter-save-status" : "team-save-status");
+    if (!node) return;
+    node.classList.remove("is-saving", "is-saved", "is-error");
+    if (state === "saving") {
+      node.textContent = "Saving…";
+      node.classList.add("is-saving");
+    } else if (state === "saved") {
+      node.textContent = "Saved ✓";
+      node.classList.add("is-saved");
+    } else if (state === "error") {
+      node.textContent = "Not saved";
+      node.classList.add("is-error");
+    } else {
+      node.textContent = "";
+    }
+  }
+
+  function scheduleAutosave(scope) {
+    if (!canEdit()) return;
+    autosavePending = scope;
+    setSaveStatus(scope, "saving");
+    clearTimeout(autosaveTimer);
+    autosaveTimer = setTimeout(flushAutosave, AUTOSAVE_DELAY);
+  }
+
+  function flushAutosave() {
+    clearTimeout(autosaveTimer);
+    autosaveTimer = null;
+    const scope = autosavePending;
+    autosavePending = null;
+    if (scope === "encounter") saveLoadouts();
+    else if (scope === "team") saveAll();
+  }
+
+  async function saveAll() {
+    // Only saveable from the team detail view as an editor/owner.
+    if (!currentTeam || detailView.classList.contains("is-hidden") || !canEdit()) {
+      return;
+    }
     const name = el("team-name-input").value.trim();
     if (!name) {
+      setSaveStatus("team", "error");
       showMessage("Team name cannot be empty");
+      return;
+    }
+    const players = collectPlayers();
+    const buildError = validateBuilds(players);
+    if (buildError) {
+      setSaveStatus("team", "error");
+      showMessage(buildError);
       return;
     }
     const payload = {
@@ -285,14 +406,39 @@
       schedule_days: collectScheduleDays(),
       schedule_time: el("schedule-time").value,
       schedule_timezone: el("schedule-timezone").value,
-      players: collectPlayers(),
+      players,
     };
+    setSaveStatus("team", "saving");
     try {
       currentTeam = await api.saveTeam(currentTeam.id, payload);
-      renderTeamDetail();
-      showMessage("All changes saved", "success");
+      setSaveStatus("team", "saved");
     } catch (err) {
+      setSaveStatus("team", "error");
       handleError(err);
+    }
+  }
+
+  // Autosave on any field change within the team detail view. Native `change`
+  // covers both cases we want: text inputs fire on blur (finished), while
+  // selects/checkboxes fire immediately. The add-encounter form is excluded.
+  detailView.addEventListener("change", (e) => {
+    if (!currentTeam || !canEdit()) return;
+    if (e.target.closest("#add-encounter-form")) return;
+    if (e.target.matches("input, select, textarea")) scheduleAutosave("team");
+  });
+
+  // Ctrl+S / Cmd+S forces an immediate save of the active view.
+  document.addEventListener("keydown", (e) => {
+    if ((e.ctrlKey || e.metaKey) && (e.key === "s" || e.key === "S")) {
+      e.preventDefault();
+      clearTimeout(autosaveTimer);
+      autosaveTimer = null;
+      autosavePending = null;
+      if (!encounterView.classList.contains("is-hidden")) {
+        saveLoadouts();
+      } else {
+        saveAll();
+      }
     }
   });
 
@@ -405,27 +551,46 @@
       slot.dataset.slot = player.slot;
       slot.innerHTML = `
         <span class="slot-number">${player.slot}</span>
-        <div class="player-fields">
-          <div class="form-group">
-            <label>Name</label>
-            <input class="input" data-field="name" maxlength="100" />
+        <div class="player-body">
+          <div class="player-fields">
+            <div class="form-group">
+              <label>Name</label>
+              <input class="input" data-field="name" maxlength="100" />
+            </div>
+            <div class="form-group">
+              <label>Discord handle</label>
+              <input class="input" data-field="discord_handle" maxlength="100" />
+            </div>
+            <div class="form-group">
+              <label>Role</label>
+              <select class="input" data-field="role">${optionsHtml(ROLES, player.role)}</select>
+            </div>
+            <div class="form-group">
+              <label>Class</label>
+              <select class="input" data-field="class">${optionsHtml(CLASSES, player.class)}</select>
+            </div>
           </div>
-          <div class="form-group">
-            <label>Discord handle</label>
-            <input class="input" data-field="discord_handle" maxlength="100" />
-          </div>
-          <div class="form-group">
-            <label>Role</label>
-            <select class="input" data-field="role">${optionsHtml(ROLES, player.role)}</select>
-          </div>
-          <div class="form-group">
-            <label>Class</label>
-            <select class="input" data-field="class">${optionsHtml(CLASSES, player.class)}</select>
+          <div class="player-build">
+            <label class="subclass-toggle">
+              <input type="checkbox" data-field="subclassed" />
+              <span>Subclassed</span>
+            </label>
+            <div class="build-selects" data-build></div>
           </div>
         </div>`;
 
       slot.querySelector('[data-field="name"]').value = player.name;
       slot.querySelector('[data-field="discord_handle"]').value = player.discord_handle;
+      slot.querySelector('[data-field="subclassed"]').checked = player.subclassed;
+
+      // Re-render the conditional build area when subclass or class changes.
+      const subCb = slot.querySelector('[data-field="subclassed"]');
+      const classSel = slot.querySelector('[data-field="class"]');
+      subCb.addEventListener("change", () => renderBuild(slot, player));
+      classSel.addEventListener("change", () => {
+        if (!subCb.checked) renderBuild(slot, player);
+      });
+      renderBuild(slot, player);
 
       // Viewers get a read-only roster; editors/owner save via the top Save All.
       if (!editable) {
@@ -437,6 +602,303 @@
       roster.appendChild(slot);
     });
   }
+
+  // Render the conditional build controls for one slot based on its current
+  // subclass checkbox and selected class. `player` supplies the saved values to
+  // pre-select on (re)render.
+  function renderBuild(slot, player) {
+    const subclassed = slot.querySelector('[data-field="subclassed"]').checked;
+    const cls = slot.querySelector('[data-field="class"]').value;
+    const buildEl = slot.querySelector("[data-build]");
+
+    if (subclassed) {
+      buildEl.innerHTML = [1, 2, 3]
+        .map(
+          (n) => `
+        <div class="form-group">
+          <label>Skill line ${n}</label>
+          <select class="input" data-field="skill_line_${n}">${skillLineOptionsHtml(
+            player[`skill_line_${n}`]
+          )}</select>
+        </div>`
+        )
+        .join("");
+    } else if (!cls) {
+      buildEl.innerHTML = `<p class="text-muted build-hint">Select a class to choose class masteries.</p>`;
+    } else {
+      const masteries = MASTERIES_BY_CLASS[cls] || [];
+      buildEl.innerHTML = [1, 2]
+        .map(
+          (n) => `
+        <div class="form-group">
+          <label>Class mastery ${n}</label>
+          <select class="input" data-field="mastery_${n}" title="${escapeAttr(
+            masteryDesc(cls, player[`mastery_${n}`])
+          )}">${masteryOptionsHtml(masteries, player[`mastery_${n}`])}</select>
+        </div>`
+        )
+        .join("");
+
+      // Hovering a mastery dropdown shows the selected mastery's description;
+      // keep the field's tooltip in sync as the selection changes.
+      buildEl.querySelectorAll('select[data-field^="mastery_"]').forEach((sel) => {
+        sel.addEventListener("change", () => {
+          sel.title = masteryDesc(cls, sel.value);
+        });
+      });
+    }
+
+    // Keep newly created controls read-only for viewers.
+    if (!canEdit()) {
+      buildEl.querySelectorAll("input, select").forEach((f) => (f.disabled = true));
+    }
+  }
+
+  // --- Encounters bar (team detail) ---
+  function renderEncountersBar() {
+    const bar = el("encounters-bar");
+    bar.innerHTML = "";
+    currentEncounters.forEach((enc) => {
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "encounter-chip";
+      chip.textContent = enc.name;
+      chip.addEventListener("click", () => openEncounter(enc.id));
+      bar.appendChild(chip);
+    });
+    el("add-encounter-btn").classList.toggle("is-hidden", !canEdit());
+  }
+
+  // Populate the "add encounter" picker once with grouped boss names.
+  function populateEncounterNameSelect(select) {
+    if (select.options.length > 0) return;
+    select.innerHTML = ENCOUNTER_NAME_GROUPS.map(
+      (g) =>
+        `<optgroup label="${g.group}">` +
+        g.names.map((n) => `<option value="${escapeAttr(n)}">${n}</option>`).join("") +
+        `</optgroup>`
+    ).join("");
+  }
+
+  const addEncounterForm = el("add-encounter-form");
+  el("add-encounter-btn").addEventListener("click", () => {
+    populateEncounterNameSelect(el("add-encounter-name"));
+    addEncounterForm.classList.remove("is-hidden");
+  });
+  el("add-encounter-cancel").addEventListener("click", () => {
+    addEncounterForm.classList.add("is-hidden");
+  });
+  addEncounterForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const name = el("add-encounter-name").value;
+    try {
+      const enc = await api.createEncounter(currentTeam.id, name);
+      addEncounterForm.classList.add("is-hidden");
+      const { encounters } = await api.listEncounters(currentTeam.id);
+      currentEncounters = encounters || [];
+      renderEncountersBar();
+      showMessage(`Added encounter “${enc.name}”`, "success");
+      openEncounter(enc.id);
+    } catch (err) {
+      handleError(err);
+    }
+  });
+
+  // --- Encounter detail (loadouts) ---
+  async function openEncounter(encounterId) {
+    clearMessage();
+    try {
+      currentEncounter = await api.getEncounter(currentTeam.id, encounterId);
+      renderEncounter();
+      showView("encounter");
+    } catch (err) {
+      handleError(err);
+    }
+  }
+
+  function renderEncounter() {
+    const editable = canEdit();
+    el("encounter-team-name").textContent = currentTeam.name;
+    el("encounter-name").textContent = currentEncounter.name;
+
+    // Editors get a rename dropdown alongside the title.
+    const rename = el("encounter-rename");
+    rename.classList.toggle("is-hidden", !editable);
+    if (editable) {
+      populateEncounterNameSelect(rename);
+      rename.value = currentEncounter.name;
+    }
+
+    // Delete only when editable and more than one encounter exists.
+    el("encounter-delete-btn").classList.toggle(
+      "is-hidden",
+      !editable || currentEncounters.length <= 1
+    );
+    el("encounter-save-status").classList.toggle("is-hidden", !editable);
+    setSaveStatus("encounter", "");
+
+    renderLoadouts(editable);
+  }
+
+  function renderLoadouts(editable) {
+    const list = el("loadout-list");
+    list.innerHTML = "";
+
+    // Map slot -> player name for read-only display.
+    const nameBySlot = {};
+    (currentTeam.players || []).forEach((p) => {
+      nameBySlot[p.slot] = p.name;
+    });
+    // Map slot -> loadout.
+    const loadoutBySlot = {};
+    (currentEncounter.loadouts || []).forEach((l) => {
+      loadoutBySlot[l.slot] = l;
+    });
+
+    for (let slot = 1; slot <= 12; slot++) {
+      const lo = loadoutBySlot[slot] || { slot, gear: [], skills: [] };
+      const name = nameBySlot[slot] || "";
+
+      const row = document.createElement("div");
+      row.className = "loadout-row";
+      row.dataset.slot = slot;
+      row.innerHTML = `
+        <div class="loadout-player">
+          <span class="slot-number">${slot}</span>
+          <span class="loadout-name">${name ? escapeAttr(name) : '<em class="text-muted">Empty slot</em>'}</span>
+        </div>
+        <div class="loadout-lists">
+          <div class="loadout-col" data-type="gear">
+            <label>Gear</label>
+            <div class="chip-list" data-list></div>
+          </div>
+          <div class="loadout-col" data-type="skills">
+            <label>Skills</label>
+            <div class="chip-list" data-list></div>
+          </div>
+        </div>`;
+
+      row.querySelectorAll(".loadout-col").forEach((col) => {
+        const type = col.dataset.type;
+        const listEl = col.querySelector("[data-list]");
+        (lo[type] || []).forEach((key) => addChip(listEl, type, key, editable));
+        if (editable) col.appendChild(buildAddControl(listEl, type));
+      });
+
+      list.appendChild(row);
+    }
+  }
+
+  // Create a removable chip for one loadout item.
+  function addChip(listEl, type, key, editable) {
+    if (!key) return;
+    // Avoid duplicates within the same list.
+    if (listEl.querySelector(`.chip[data-value="${escapeAttr(key)}"]`)) return;
+
+    const cfg = LOADOUT_TYPES[type];
+    const chip = document.createElement("span");
+    chip.className = "chip";
+    chip.dataset.value = key;
+    const desc = cfg.desc(key);
+    if (desc) chip.title = desc;
+    chip.innerHTML = `<span class="chip-label">${escapeAttr(cfg.label(key))}</span>`;
+    if (editable) {
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "chip-remove";
+      remove.setAttribute("aria-label", "Remove");
+      remove.textContent = "×";
+      remove.addEventListener("click", () => {
+        chip.remove();
+        scheduleAutosave("encounter");
+      });
+      chip.appendChild(remove);
+    }
+    listEl.appendChild(chip);
+  }
+
+  // Build the add-control for a loadout list. Both gear and skills use the same
+  // searchable-select component (createSearchableSelect); skills supply skill-
+  // line group headers, gear is a single headerless group.
+  function buildAddControl(listEl, type) {
+    const cfg = LOADOUT_TYPES[type];
+    return createSearchableSelect({
+      groups: cfg.groups,
+      placeholder: cfg.addPlaceholder,
+      onSelect: (value) => {
+        addChip(listEl, type, value, true);
+        scheduleAutosave("encounter");
+      },
+    });
+  }
+
+  function collectLoadouts() {
+    return Array.from(el("loadout-list").querySelectorAll(".loadout-row")).map((row) => {
+      const read = (type) =>
+        Array.from(
+          row.querySelector(`.loadout-col[data-type="${type}"] .chip-list`).querySelectorAll(".chip")
+        ).map((c) => c.dataset.value);
+      return {
+        slot: Number(row.dataset.slot),
+        gear: read("gear"),
+        skills: read("skills"),
+      };
+    });
+  }
+
+  async function saveLoadouts() {
+    if (!currentEncounter || encounterView.classList.contains("is-hidden") || !canEdit()) {
+      return;
+    }
+    setSaveStatus("encounter", "saving");
+    try {
+      currentEncounter = await api.saveLoadouts(
+        currentTeam.id,
+        currentEncounter.id,
+        collectLoadouts()
+      );
+      setSaveStatus("encounter", "saved");
+    } catch (err) {
+      setSaveStatus("encounter", "error");
+      handleError(err);
+    }
+  }
+
+  el("encounter-rename").addEventListener("change", async (e) => {
+    const name = e.target.value;
+    try {
+      currentEncounter = await api.renameEncounter(currentTeam.id, currentEncounter.id, name);
+      const { encounters } = await api.listEncounters(currentTeam.id);
+      currentEncounters = encounters || [];
+      renderEncounter();
+      showMessage("Encounter renamed", "success");
+    } catch (err) {
+      handleError(err);
+    }
+  });
+
+  el("encounter-delete-btn").addEventListener("click", async () => {
+    if (!confirm(`Delete encounter “${currentEncounter.name}”? This cannot be undone.`)) {
+      return;
+    }
+    try {
+      await api.deleteEncounter(currentTeam.id, currentEncounter.id);
+      const { encounters } = await api.listEncounters(currentTeam.id);
+      currentEncounters = encounters || [];
+      currentEncounter = null;
+      renderEncountersBar();
+      showView("detail");
+      showMessage("Encounter deleted", "success");
+    } catch (err) {
+      handleError(err);
+    }
+  });
+
+  el("encounter-back-btn").addEventListener("click", () => {
+    currentEncounter = null;
+    renderEncountersBar();
+    showView("detail");
+  });
 
   // --- Bootstrap ---
   async function init() {

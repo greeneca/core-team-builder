@@ -40,9 +40,15 @@ Plain static files — no build step. nginx serves them and reverse-proxies
 `/api/*` to the backend, keeping API calls same-origin (so the browser does not
 hit CORS). The JS is split into:
 
-- `js/api.js` — fetch wrapper, token storage, typed-ish endpoint helpers.
+- `js/api.js` — fetch wrapper, token storage, typed-ish endpoint helpers, plus
+  shared constants (roles, classes, skill lines, masteries).
+- `js/data.js` — ESO master/seed data for encounters (boss names grouped by
+  trial, gear sets with tooltips, skills) and lookup helpers.
+- `js/components.js` — reusable, framework-free UI components
+  (`createSearchableSelect`: a search box with optional group headers, used by
+  the loadout gear/skills pickers).
 - `js/auth.js` — login/register page logic.
-- `js/app.js` — dashboard logic + route guard.
+- `js/app.js` — dashboard logic + route guard (teams, sharing, encounters).
 
 ### Backend (`backend/`)
 
@@ -113,13 +119,48 @@ single membership lookup.
 | discord_handle | varchar(100) | default `''`                             |
 | role           | varchar(20)  | `''`/`tank`/`healer`/`dps`/`support_dps` |
 | class          | varchar(30)  | `''` or current ESO class                |
+| subclassed     | boolean      | default `false`                          |
+| skill_line_1..3| varchar(40)  | `''` or one of 21 class skill lines      |
+| mastery_1..2   | varchar(40)  | `''` or one of the class's 5 masteries   |
 | created_at     | timestamptz  | default `now()`                          |
 | updated_at     | timestamptz  | auto-updated via trigger                 |
 
 Every team is created with all 12 player slots pre-populated (in a single
-transaction), so slots are edited rather than added/removed. Role and class
+transaction), so slots are edited rather than added/removed. New slots default
+their roles to 2 tanks / 2 healers / 8 dps. Role, class, skill-line, and mastery
 values are validated against allow-lists in the backend
-(`internal/models/team.go`).
+(`internal/models/team.go`). Subclassing (`006_player_subclass.sql`) is
+mutually exclusive: when `subclassed` is true the three `skill_line_*` columns
+apply and the masteries are blanked; when false the two `mastery_*` columns
+apply (drawn from the player's class) and the skill lines are blanked.
+
+### `encounters` + `encounter_loadouts`
+
+`encounters` (`007_encounters.sql`) holds per-team named fights:
+
+| column     | type              | notes                                 |
+|------------|-------------------|---------------------------------------|
+| id         | bigint (IDENTITY) | primary key                           |
+| team_id    | bigint            | FK → `teams(id)`, cascade             |
+| name       | varchar(100)      | `Default`, `Trash`, or a trial boss   |
+| position   | int               | ordering within the team              |
+| created_at | timestamptz       | default `now()`                       |
+| updated_at | timestamptz       | auto-updated via trigger              |
+
+`encounter_loadouts` holds one loadout per player slot per encounter:
+
+| column       | type     | notes                                       |
+|--------------|----------|---------------------------------------------|
+| encounter_id | bigint   | FK → `encounters(id)`, cascade; PK part     |
+| slot         | smallint | 1–12; PK part                               |
+| gear         | text[]   | ordered list of gear-set keys (default `{}`)|
+| skills       | text[]   | ordered list of skill keys (default `{}`)   |
+
+Every team has at least one encounter (`Default`), created with the team and
+backfilled for existing teams. Encounter names are validated against
+`ValidEncounterNames`; gear/skill items are free-form (sanitized, not
+allow-listed) — the searchable options + gear tooltips live in the frontend
+master data (`frontend/js/data.js`).
 
 ## Authentication & security
 
