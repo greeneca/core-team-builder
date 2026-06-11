@@ -8,7 +8,8 @@ quickly. Keep it current when the architecture changes.
 `core-team-builder` helps design and organize a **trial core team** for *The
 Elder Scrolls Online*. It provides accounts + login and **teams**: a user can
 own multiple teams and share them with others (viewer/editor roles). Each team
-has a trial schedule (days/time/timezone) and a fixed 12-player roster — name,
+has a trial schedule (days + a UTC time shown in each viewer's own zone, plus
+optional team display timezones) and a fixed 12-player roster — name,
 discord handle, role, ESO class, and a per-player build (either a subclassed set
 of 3 skill lines or 2 class masteries). Teams also have **encounters** (Default,
 Trash, or a trial boss), each holding a per-player gear/skills loadout. The UI
@@ -43,12 +44,23 @@ column; the `User` JSON model hides it (`json:"-"`).
 
 - **Tables** (`002_teams.sql`): `teams` (owner + name), `team_members`
   (sharing; the owner is a row with role `owner`), `players` (12 rows per team,
-  one per `slot` 1–12). `004_team_schedule.sql` + `005_team_timezone.sql` add the
-  trial schedule to `teams`: `schedule_days TEXT[]` (e.g. `{mon,wed}`),
-  `schedule_time` (`"HH:MM"` 24h, `''` when unset), and `schedule_timezone`
-  (IANA name, e.g. `America/New_York`, `''` when unset). Day keys validated
-  against `ValidDays`; timezone validated via `time.LoadLocation` (the server
-  embeds `time/tzdata` so this works in the Alpine image).
+  one per `slot` 1–12). `004_team_schedule.sql` adds the trial schedule to
+  `teams`: `schedule_days TEXT[]` (e.g. `{mon,wed}`) and `schedule_time`
+  (`"HH:MM"` 24h **in UTC**, `''` when unset). Day keys validated against
+  `ValidDays`. (`005_team_timezone.sql` added a `schedule_timezone` column that
+  `010_drop_schedule_timezone.sql` later removes — see Timezones below.)
+- **Timezones**: `schedule_time` is stored in **UTC** and is **always set and
+  shown in the viewer's own current timezone** — there is no manual timezone
+  picker. The frontend converts the time UTC→local on read and local→UTC on save
+  (`convertWallTime` / `formatSchedule` in `data.js`); the server just stores the
+  UTC `"HH:MM"`. (Earlier the time was stored in a per-team reference zone
+  `schedule_timezone`; that column is dropped in `010_drop_schedule_timezone.sql`.)
+  `009_team_timezones.sql` adds `team_timezones TEXT[]` — extra IANA zones the
+  team wants the time shown in (managed via removable chips + a searchable
+  add-picker on the team page). The handler validates + de-dupes them via
+  `normalizeTimezones` (`time.LoadLocation`; the server embeds `time/tzdata` so
+  this works in the Alpine image). Note: recurring weekly times have no date, so conversions
+  near a DST boundary can be off by an hour (acceptable trade-off).
 - **Access**: a single `team_members` lookup yields the caller's role —
   `owner`, `editor`, or `viewer`. Owners and editors can rename a team and edit
   players; **viewers are read-only**; **only the owner** can delete the team or
@@ -108,11 +120,11 @@ column; the `User` JSON model hides it (`json:"-"`).
   `DELETE /api/teams/{id}/members/{userID}`. Mutations return the full refreshed
   team.
 - **Save-all**: `PUT /api/teams/{id}` is the single "save everything" call —
-  body is `{ name, schedule_days, schedule_time, schedule_timezone, players: [{slot,name,discord_handle,role,class,subclassed,skill_line_1..3,mastery_1..2}] }`
+  body is `{ name, schedule_days, schedule_time, team_timezones, players: [{slot,name,discord_handle,role,class,subclassed,skill_line_1..3,mastery_1..2}] }`
   and the backend (`TeamStore.Save`) updates team meta + roster in one
-  transaction (there is no per-player save endpoint). The timezone field defaults
-  in the UI to the viewer's current zone
-  (`Intl.DateTimeFormat().resolvedOptions().timeZone`).
+  transaction (there is no per-player save endpoint). `schedule_time` is sent in
+  UTC (the UI converts from the viewer's current zone,
+  `Intl.DateTimeFormat().resolvedOptions().timeZone`, before saving).
 - **Autosave (UI)**: there are no Save buttons. Changes are persisted
   automatically and debounced/coalesced (~700ms) via `scheduleAutosave` in
   `app.js`: text inputs save on `change` (blur — "input finished"), while

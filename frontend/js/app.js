@@ -37,6 +37,8 @@
   // The encounter currently selected on the team page; its per-player loadouts
   // are shown inline in the roster. Always set once a team is open.
   let currentEncounter = null;
+  // The team's extra display timezones (chips); edited on the team page.
+  let teamTimezones = [];
 
   // --- Helpers ---
   // A fixed toast at the top of the screen (see #message in index.html). It is
@@ -155,8 +157,7 @@
       card.querySelector(".team-card-name").textContent = team.name;
       card.querySelector(".team-card-schedule").textContent = formatSchedule(
         team.schedule_days,
-        team.schedule_time,
-        team.schedule_timezone
+        team.schedule_time
       );
       card.querySelector(".team-card-open").addEventListener("click", () => openTeam(team.id));
       card.querySelector(".team-card-share").addEventListener("click", () => openShare(team.id));
@@ -301,32 +302,74 @@
       container.appendChild(label);
     });
 
+    // The stored time is in UTC. Always show/edit it in the **viewer's**
+    // current timezone.
+    const localZone = localTimezone();
     const timeInput = el("schedule-time");
-    timeInput.value = currentTeam.schedule_time || "";
+    timeInput.value = currentTeam.schedule_time
+      ? convertWallTime(currentTeam.schedule_time, "UTC", localZone)
+      : "";
     timeInput.disabled = !editable;
+    el("schedule-tz-note").textContent = `(in your timezone: ${localZone})`;
 
-    // Default an unset timezone to the viewer's current zone.
-    const tz = currentTeam.schedule_timezone || localTimezone();
-    populateTimezones(tz);
-    const tzSelect = el("schedule-timezone");
-    tzSelect.value = tz;
-    tzSelect.disabled = !editable;
+    // Extra display timezones the team uses.
+    teamTimezones = (currentTeam.team_timezones || []).slice();
+    populateTeamTzAdd();
+    renderTeamTimezones(editable);
   }
 
-  // Fill the timezone <select> once, ensuring `desired` is present even if the
-  // browser's list omits it.
-  function populateTimezones(desired) {
-    const select = el("schedule-timezone");
-    const zones = timezoneList();
-    if (desired && !zones.includes(desired)) {
-      zones.unshift(desired);
-    }
-    if (select.options.length === zones.length) {
-      return; // already populated
-    }
-    select.innerHTML = zones
-      .map((z) => `<option value="${z}">${z}</option>`)
-      .join("");
+  // (Re)build the "add timezone" picker — the same searchable select used by
+  // gear/skills — with every known zone not already in the team's list. Viewers
+  // see no picker (they cannot edit).
+  function populateTeamTzAdd() {
+    const mount = el("team-tz-add");
+    mount.innerHTML = "";
+    if (!canEdit()) return;
+    const already = new Set(teamTimezones);
+    const zones = timezoneList().filter((z) => !already.has(z));
+    const select = createSearchableSelect({
+      groups: [{ group: null, items: zones.map((z) => ({ value: z, label: tzLabel(z) })) }],
+      placeholder: "Add a timezone…",
+      onSelect: (tz) => addTeamTimezone(tz),
+    });
+    mount.appendChild(select);
+  }
+
+  // Render the removable chips for the team's display timezones.
+  function renderTeamTimezones(editable) {
+    if (editable === undefined) editable = canEdit();
+    const list = el("team-tz-list");
+    list.innerHTML = "";
+    teamTimezones.forEach((tz) => {
+      const chip = document.createElement("span");
+      chip.className = "chip";
+      chip.innerHTML = `<span class="chip-label">${escapeAttr(tzLabel(tz))}</span>`;
+      if (editable) {
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "chip-remove";
+        remove.setAttribute("aria-label", "Remove");
+        remove.textContent = "×";
+        remove.addEventListener("click", () => removeTeamTimezone(tz));
+        chip.appendChild(remove);
+      }
+      list.appendChild(chip);
+    });
+  }
+
+  function addTeamTimezone(tz) {
+    if (!tz || teamTimezones.includes(tz)) return;
+    teamTimezones.push(tz);
+    populateTeamTzAdd();
+    renderTeamTimezones();
+    scheduleAutosave("team");
+  }
+
+  function removeTeamTimezone(tz) {
+    teamTimezones = teamTimezones.filter((z) => z !== tz);
+    populateTeamTzAdd();
+    renderTeamTimezones();
+    scheduleAutosave("team");
   }
 
   function collectScheduleDays() {
@@ -474,8 +517,10 @@
     const payload = {
       name,
       schedule_days: collectScheduleDays(),
-      schedule_time: el("schedule-time").value,
-      schedule_timezone: el("schedule-timezone").value,
+      // The time input is in the viewer's current zone; store it in UTC so any
+      // viewer can convert it back to their own zone.
+      schedule_time: convertWallTime(el("schedule-time").value, localTimezone(), "UTC"),
+      team_timezones: teamTimezones,
       players,
     };
     setSaveStatus("team", "saving");
@@ -498,6 +543,8 @@
     if (e.target.closest("#add-encounter-form")) return;
     if (e.target.closest("#encounter-controls")) return;
     if (e.target.closest("[data-loadout]")) return;
+    // The team-timezone picker manages its own state + autosave (via onSelect).
+    if (e.target.closest("#team-tz-add")) return;
     if (e.target.matches("input, select, textarea")) scheduleAutosave("team");
   });
 

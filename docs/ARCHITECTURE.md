@@ -98,13 +98,21 @@ PostgreSQL. The schema in `migrations/*.sql` (e.g. `001_init.sql`,
 
 ### `teams`
 
-| column     | type              | notes                          |
-|------------|-------------------|--------------------------------|
-| id         | bigint (IDENTITY) | primary key                    |
-| name       | varchar(100)      | not null                       |
-| owner_id   | bigint            | FK → `users(id)`, cascade      |
-| created_at | timestamptz       | default `now()`                |
-| updated_at | timestamptz       | auto-updated via trigger       |
+| column         | type              | notes                                      |
+|----------------|-------------------|--------------------------------------------|
+| id             | bigint (IDENTITY) | primary key                                |
+| name           | varchar(100)      | not null                                   |
+| owner_id       | bigint            | FK → `users(id)`, cascade                  |
+| schedule_days  | text[]            | weekday keys, e.g. `{mon,wed}` (default `{}`) |
+| schedule_time  | varchar(5)        | `"HH:MM"` 24h **in UTC**, `''` when unset  |
+| team_timezones | text[]            | extra IANA zones to display the time in (default `{}`) |
+| created_at     | timestamptz       | default `now()`                            |
+| updated_at     | timestamptz       | auto-updated via trigger                   |
+
+The trial schedule lives on `teams` (`004_team_schedule.sql`,
+`009_team_timezones.sql`). `schedule_time` is stored in UTC and converted to/from
+each viewer's current timezone in the browser; the old per-team
+`schedule_timezone` column was removed in `010_drop_schedule_timezone.sql`.
 
 ### `team_members` (sharing)
 

@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Dashboard — Core Team Builder</title>
-  <link rel="stylesheet" href="css/styles.css?v=37" />
+  <link rel="stylesheet" href="css/styles.css?v=42" />
 </head>
 <body>
   <div id="message" class="toast is-hidden" role="alert" aria-live="assertive"></div>
@@ -76,13 +76,14 @@
           </div>
           <div class="schedule-time-row">
             <div class="form-group schedule-time-group">
-              <label for="schedule-time">Time</label>
+              <label for="schedule-time">Time <span id="schedule-tz-note" class="text-muted"></span></label>
               <input id="schedule-time" class="input" type="time" />
             </div>
-            <div class="form-group schedule-tz-group">
-              <label for="schedule-timezone">Timezone</label>
-              <select id="schedule-timezone" class="input"></select>
-            </div>
+          </div>
+          <div class="form-group mt-6">
+            <label>Team timezones<span class="info-indicator" tabindex="0" role="img" aria-label="Team timezones: The trial time is always set and shown in your own current timezone. Add the timezones your team members are in here so the time can be displayed in each of them." data-tip="The trial time is always set and shown in your own current timezone. Add the timezones your team members are in here so the time can be displayed in each of them.">i</span></label>
+            <div id="team-tz-add"></div>
+            <div id="team-tz-list" class="chip-list mt-2"></div>
           </div>
         </div>
       </div>
@@ -166,9 +167,9 @@
     </section>
   </main>
 
-  <script src="js/api.js?v=37"></script>
-  <script src="js/data.js?v=37"></script>
-  <script src="js/components.js?v=37"></script>
-  <script src="js/app.js?v=37"></script>
+  <script src="js/api.js?v=42"></script>
+  <script src="js/data.js?v=42"></script>
+  <script src="js/components.js?v=42"></script>
+  <script src="js/app.js?v=42"></script>
 </body>
 </html>

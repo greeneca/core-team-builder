@@ -458,12 +458,6 @@ a.brand--home:hover {
 .schedule-time-group .input {
   color-scheme: dark;
 }
-.schedule-tz-group {
-  flex: 1;
-  min-width: 220px;
-  max-width: 360px;
-  margin-bottom: 0;
-}
 
 /* Editable team name */
 .team-name-input {
@@ -866,7 +860,9 @@ a.brand--home:hover {
 }
 .ss-panel {
   position: absolute;
-  z-index: 50;
+  /* Above the sticky encounters panel (z-index 100) so the open list (e.g. the
+     timezone picker) is never clipped behind it; still below the topbar (200). */
+  z-index: 150;
   top: calc(100% + 4px);
   left: 0;
   min-width: 100%;

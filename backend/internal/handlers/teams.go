@@ -138,11 +138,14 @@ func (s *Server) handleGetTeam(w http.ResponseWriter, r *http.Request) {
 // (optionally) the full roster. Players is keyed by Slot; omitted slots are
 // left unchanged.
 type updateTeamRequest struct {
-	Name             string          `json:"name"`
-	ScheduleDays     []string        `json:"schedule_days"`
-	ScheduleTime     string          `json:"schedule_time"`
-	ScheduleTimezone string          `json:"schedule_timezone"`
-	Players          []playerPayload `json:"players"`
+	Name         string   `json:"name"`
+	ScheduleDays []string `json:"schedule_days"`
+	// ScheduleTime is the recurring trial time in UTC ("HH:MM"); the client
+	// converts from the editor's current timezone before sending.
+	ScheduleTime string `json:"schedule_time"`
+	// TeamTimezones are extra IANA zones the team wants the time shown in.
+	TeamTimezones []string        `json:"team_timezones"`
+	Players       []playerPayload `json:"players"`
 }
 
 type playerPayload struct {
@@ -193,9 +196,9 @@ func (s *Server) handleUpdateTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	scheduleTimezone := strings.TrimSpace(req.ScheduleTimezone)
-	if !validTimezone(scheduleTimezone) {
-		writeError(w, http.StatusBadRequest, "invalid timezone")
+	teamTimezones, err := normalizeTimezones(req.TeamTimezones)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -253,7 +256,7 @@ func (s *Server) handleUpdateTeam(w http.ResponseWriter, r *http.Request) {
 		players = append(players, player)
 	}
 
-	if err := s.teams.Save(r.Context(), teamID, req.Name, days, scheduleTime, scheduleTimezone, players); err != nil {
+	if err := s.teams.Save(r.Context(), teamID, req.Name, days, scheduleTime, teamTimezones, players); err != nil {
 		log.Printf("update team: %v", err)
 		writeError(w, http.StatusInternalServerError, "could not update team")
 		return
@@ -302,17 +305,27 @@ func validTimeOfDay(t string) bool {
 	return parsed.Format("15:04") == t
 }
 
-// validTimezone accepts "" (unset) or a loadable IANA timezone name. UTC is
-// always valid; other names depend on the host tz database (present in the
-// backend container).
-func validTimezone(tz string) bool {
-	if tz == "" {
-		return true
+// normalizeTimezones validates, de-duplicates, and orders a team's timezone
+// list. Each must be a non-empty, loadable IANA name; empties are dropped.
+// Order is preserved (first occurrence wins).
+func normalizeTimezones(in []string) ([]string, error) {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(in))
+	for _, tz := range in {
+		tz = strings.TrimSpace(tz)
+		if tz == "" {
+			continue
+		}
+		if _, err := time.LoadLocation(tz); err != nil {
+			return nil, errors.New("invalid timezone: " + tz)
+		}
+		if seen[tz] {
+			continue
+		}
+		seen[tz] = true
+		out = append(out, tz)
 	}
-	if _, err := time.LoadLocation(tz); err != nil {
-		return false
-	}
-	return true
+	return out, nil
 }
 
 func (s *Server) handleDeleteTeam(w http.ResponseWriter, r *http.Request) {

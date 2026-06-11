@@ -85,31 +85,152 @@ function localTimezone() {
   }
 }
 
-// All IANA timezone names the browser knows, falling back to the local zone
-// (and UTC) when Intl.supportedValuesOf is unavailable.
+// A curated set of popular IANA timezones — one representative zone per UTC
+// offset — to keep the team-timezone picker short and unambiguous (rather than
+// the browser's full ~400-entry list).
+const POPULAR_TIMEZONES = [
+  "Pacific/Honolulu", // UTC-10
+  "America/Anchorage", // UTC-9
+  "America/Los_Angeles", // UTC-8
+  "America/Denver", // UTC-7
+  "America/Chicago", // UTC-6
+  "America/New_York", // UTC-5
+  "America/Halifax", // UTC-4
+  "America/Sao_Paulo", // UTC-3
+  "Atlantic/Azores", // UTC-1
+  "Europe/London", // UTC+0
+  "Europe/Paris", // UTC+1
+  "Europe/Athens", // UTC+2
+  "Europe/Moscow", // UTC+3
+  "Asia/Dubai", // UTC+4
+  "Asia/Karachi", // UTC+5
+  "Asia/Dhaka", // UTC+6
+  "Asia/Bangkok", // UTC+7
+  "Asia/Shanghai", // UTC+8
+  "Asia/Tokyo", // UTC+9
+  "Australia/Sydney", // UTC+10
+  "Pacific/Auckland", // UTC+12
+];
+
+// The popular timezone list. (Kept as a function so callers stay unchanged.)
 function timezoneList() {
-  try {
-    if (typeof Intl.supportedValuesOf === "function") {
-      return Intl.supportedValuesOf("timeZone");
-    }
-  } catch {
-    /* fall through */
-  }
-  const local = localTimezone();
-  return local === "UTC" ? ["UTC"] : [local, "UTC"];
+  return POPULAR_TIMEZONES.slice();
 }
 
-// Build a short, human-readable schedule string, e.g.
-// "Mon, Wed · 20:00 (America/New_York)".
-function formatSchedule(days, time, timezone) {
+// tzOffsetMinutes(timeZone, date): the zone's UTC offset in minutes at the
+// given instant (positive = ahead of UTC). Derived by reading the wall-clock
+// fields the zone shows for that instant via Intl.
+function tzOffsetMinutes(timeZone, date) {
+  try {
+    const dtf = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      hourCycle: "h23",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
+    const p = {};
+    for (const part of dtf.formatToParts(date)) p[part.type] = part.value;
+    const asUTC = Date.UTC(
+      Number(p.year),
+      Number(p.month) - 1,
+      Number(p.day),
+      Number(p.hour),
+      Number(p.minute),
+      Number(p.second)
+    );
+    return Math.round((asUTC - date.getTime()) / 60000);
+  } catch {
+    return 0;
+  }
+}
+
+// convertWallTime(hhmm, fromZone, toZone): convert a recurring "HH:MM" wall
+// time from one IANA zone to another, anchored on today's date for DST.
+// Returns "HH:MM" (24h). Empty/invalid input or matching zones pass through.
+// Note: recurring times have no real date, so conversions near a DST boundary
+// can be off by an hour — acceptable for a weekly schedule display.
+function convertWallTime(hhmm, fromZone, toZone) {
+  if (!hhmm || !fromZone || !toZone || fromZone === toZone) return hhmm || "";
+  const m = /^(\d{1,2}):(\d{2})$/.exec(hhmm);
+  if (!m) return hhmm;
+  const hour = Number(m[1]);
+  const minute = Number(m[2]);
+  try {
+    // Anchor on today's date as seen in the source zone.
+    const dp = {};
+    for (const part of new Intl.DateTimeFormat("en-US", {
+      timeZone: fromZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(new Date())) {
+      dp[part.type] = part.value;
+    }
+    // Find the UTC instant whose wall time in fromZone is the given HH:MM.
+    const guess = Date.UTC(Number(dp.year), Number(dp.month) - 1, Number(dp.day), hour, minute, 0);
+    const instant = new Date(guess - tzOffsetMinutes(fromZone, new Date(guess)) * 60000);
+    // Read that instant's wall time in the target zone.
+    const op = {};
+    for (const part of new Intl.DateTimeFormat("en-US", {
+      timeZone: toZone,
+      hourCycle: "h23",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).formatToParts(instant)) {
+      op[part.type] = part.value;
+    }
+    return `${op.hour}:${op.minute}`;
+  } catch {
+    return hhmm;
+  }
+}
+
+// tzLabel(timeZone): the IANA name plus its current UTC offset, e.g.
+// "America/New_York (UTC-5)" or "Asia/Kolkata (UTC+5:30)". Used to label the
+// team-timezone picker options and chips so the offset is clear at a glance.
+function tzLabel(timeZone) {
+  const offset = tzOffsetMinutes(timeZone, new Date());
+  const sign = offset < 0 ? "-" : "+";
+  const abs = Math.abs(offset);
+  const hours = Math.floor(abs / 60);
+  const mins = abs % 60;
+  const offsetText = mins ? `${hours}:${String(mins).padStart(2, "0")}` : `${hours}`;
+  return `${timeZone} (UTC${sign}${offsetText})`;
+}
+
+// shortZoneName(timeZone): a compact zone label (e.g. "EST", "GMT+2") for the
+// zone right now, falling back to the IANA name.
+function shortZoneName(timeZone) {
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      timeZoneName: "short",
+    }).formatToParts(new Date());
+    const tzPart = parts.find((p) => p.type === "timeZoneName");
+    return tzPart ? tzPart.value : timeZone;
+  } catch {
+    return timeZone;
+  }
+}
+
+// Build a short, human-readable schedule string in the **viewer's** current
+// timezone, e.g. "Mon, Wed · 17:00 PST". The stored `time` is in UTC and is
+// converted to the viewer's zone for display.
+function formatSchedule(days, time) {
   const labels = (days || []).map((d) => labelFor(DAYS, d));
   const dayText = labels.length ? labels.join(", ") : "";
+  const localZone = localTimezone();
+  const localTime = time ? convertWallTime(time, "UTC", localZone) : "";
   let core = "";
-  if (dayText && time) core = `${dayText} · ${time}`;
+  if (dayText && localTime) core = `${dayText} · ${localTime}`;
   else if (dayText) core = dayText;
-  else if (time) core = time;
+  else if (localTime) core = localTime;
   if (!core) return "No schedule set";
-  return timezone ? `${core} (${timezone})` : core;
+  return localTime ? `${core} ${shortZoneName(localZone)}` : core;
 }
 
 // --- Subclassing: skill lines + class masteries ---

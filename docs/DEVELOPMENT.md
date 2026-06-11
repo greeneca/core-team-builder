@@ -128,9 +128,9 @@ Mutating endpoints return the full refreshed team (with `players` and `members`)
 | Method & path                              | Who      | Description                          |
 |--------------------------------------------|----------|--------------------------------------|
 | `GET /api/teams`                           | member   | List teams you own or that are shared with you (`{ "teams": [...] }`). |
-| `POST /api/teams`                          | any user | Create a team `{ "name": "..." }`; auto-creates 12 empty slots. |
+| `POST /api/teams`                          | any user | Create a team `{ "name": "...", "copy_from"?: <teamID> }` → `201`. Without `copy_from`: 12 empty slots + a `Default` encounter. With `copy_from` (a team you can access): copies its schedule, roster, and encounters/loadouts (never its sharing). |
 | `GET /api/teams/{id}`                      | viewer+  | Get one team with `players` + `members`. |
-| `PUT /api/teams/{id}`                      | editor+  | Save everything: `{ name, schedule_days, schedule_time, schedule_timezone, players }`. |
+| `PUT /api/teams/{id}`                      | editor+  | Save everything: `{ name, schedule_days, schedule_time, team_timezones, players }`. |
 | `DELETE /api/teams/{id}`                   | owner    | Delete the team (cascades).          |
 | `POST /api/teams/{id}/share`              | owner    | Share/update role `{ "username": "...", "role": "viewer"\|"editor" }` (role defaults to `editor`; upsert). |
 | `DELETE /api/teams/{id}/members/{userID}` | owner    | Revoke a member's access.            |
@@ -145,8 +145,8 @@ in `docs/AGENT_CONTEXT.md`):
 {
   "name": "Sunday Trial Core",
   "schedule_days": ["mon", "wed"],
-  "schedule_time": "20:00",
-  "schedule_timezone": "America/New_York",
+  "schedule_time": "00:00",
+  "team_timezones": ["America/New_York", "Europe/London"],
   "players": [
     {
       "slot": 1, "name": "Aedric", "discord_handle": "aedric#1234",
@@ -160,10 +160,14 @@ in `docs/AGENT_CONTEXT.md`):
 ```
 
 - `schedule_days` ⊆ `mon,tue,wed,thu,fri,sat,sun` (validated, de-duped, ordered).
-- `schedule_time` is `""` or `"HH:MM"` (24h); anything else returns `400`.
-- `schedule_timezone` is `""` or a valid IANA name (e.g. `America/New_York`);
-  validated via `time.LoadLocation`, anything else returns `400`. The frontend
-  defaults this to the viewer's current zone.
+- `schedule_time` is `""` or `"HH:MM"` (24h) **in UTC**; anything else returns
+  `400`. There is no manual timezone picker — the UI converts the time from the
+  viewer's current zone to UTC before saving and back to the viewer's zone on
+  load, so each viewer sees the time in their own zone.
+- `team_timezones` is an optional list of IANA names — extra zones the team wants
+  the time shown in. Validated + de-duped via `normalizeTimezones`
+  (`time.LoadLocation`); invalid names return `400`. Managed as removable chips
+  plus a searchable add-picker on the team page (default `[]`).
 - `players` is optional; omitted slots are left unchanged. Invalid slot/role/
   class/skill-line/mastery returns `400` and the whole save is rolled back.
 
@@ -204,7 +208,7 @@ edits). Mutations return the refreshed encounter with its 12 loadouts.
 | Method & path                                          | Who     | Description                                |
 |--------------------------------------------------------|---------|--------------------------------------------|
 | `GET /api/teams/{id}/encounters`                       | viewer+ | List a team's encounters (`{ "encounters": [...] }`, no loadouts). |
-| `POST /api/teams/{id}/encounters`                      | editor+ | Add an encounter `{ "name": "..." }`; creates 12 empty loadouts. |
+| `POST /api/teams/{id}/encounters`                      | editor+ | Add an encounter `{ "name": "...", "copy_from"?: <encounterID> }` → `201`; creates 12 loadouts (empty, or copied slot-for-slot from `copy_from` in the same team). |
 | `GET /api/teams/{id}/encounters/{eid}`                 | viewer+ | Get one encounter with its 12 `loadouts`.  |
 | `PUT /api/teams/{id}/encounters/{eid}`                 | editor+ | Rename `{ "name": "..." }`.                |
 | `DELETE /api/teams/{id}/encounters/{eid}`              | editor+ | Delete (cannot delete the team's last one).|
@@ -212,6 +216,10 @@ edits). Mutations return the refreshed encounter with its 12 loadouts.
 
 Every team always has at least one encounter (`Default`), created with the team.
 `name` must be `Default`, `Trash`, or an ESO trial boss (`ValidEncounterNames`).
+On create/rename the name is also checked by `ValidateEncounterSelection`: names
+are **unique** per team, and all non-`General` encounters must come from a
+**single trial** (the `General` group — `Default`/`Trash` — is always allowed
+alongside one trial). Violations return `400`.
 
 `PUT .../loadouts` body:
 
