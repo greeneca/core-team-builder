@@ -88,8 +88,13 @@ const api = {
     return this.request("/api/teams");
   },
 
-  createTeam(name) {
-    return this.request("/api/teams", { method: "POST", body: { name } });
+  // copyFrom (optional) is an existing team id to seed the new team from
+  // (schedule, roster, encounters/loadouts); pass a falsy value for an empty one.
+  createTeam(name, copyFrom) {
+    return this.request("/api/teams", {
+      method: "POST",
+      body: { name, copy_from: copyFrom || null },
+    });
   },
 
   getTeam(id) {
@@ -124,10 +129,12 @@ const api = {
     return this.request(`/api/teams/${teamId}/encounters`);
   },
 
-  createEncounter(teamId, name) {
+  // copyFrom (optional) is an existing encounter id whose per-player gear/skills
+  // are copied into the new encounter; pass a falsy value for an empty one.
+  createEncounter(teamId, name, copyFrom) {
     return this.request(`/api/teams/${teamId}/encounters`, {
       method: "POST",
-      body: { name },
+      body: { name, copy_from: copyFrom || null },
     });
   },
 

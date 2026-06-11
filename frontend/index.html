@@ -4,18 +4,21 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Dashboard — Core Team Builder</title>
-  <link rel="stylesheet" href="css/styles.css?v=21" />
+  <link rel="stylesheet" href="css/styles.css?v=37" />
 </head>
 <body>
   <div id="message" class="toast is-hidden" role="alert" aria-live="assertive"></div>
 
   <header class="topbar">
-    <div class="brand">
+    <a class="brand brand--home" id="brand-home" href="index.html" title="Back to teams">
       Core Team Builder
       <small>Elder Scrolls Online · Trial Roster</small>
-    </div>
+    </a>
     <div class="topbar-actions">
       <span class="text-muted">Signed in as <strong id="username">…</strong></span>
+      <label class="toggle" title="Show set/skill descriptions on hover">
+        <input type="checkbox" id="tooltips-toggle" /> Tooltips
+      </label>
       <button id="logout-btn" class="btn btn--ghost" type="button">Sign Out</button>
     </div>
   </header>
@@ -32,6 +35,10 @@
         <div class="form-group">
           <label for="new-team-name">Team name</label>
           <input class="input" id="new-team-name" maxlength="100" placeholder="e.g. Sunday Trial Core" required />
+        </div>
+        <div class="form-group">
+          <label for="new-team-copy">Copy from team</label>
+          <select id="new-team-copy" class="input"></select>
         </div>
         <div class="form-actions">
           <button class="btn btn--primary" type="submit">Create Team</button>
@@ -80,11 +87,12 @@
         </div>
       </div>
 
-      <!-- Encounters: select the current encounter (drives the per-player
-           loadouts shown in the roster below) and add new ones. -->
-      <div class="card mt-4">
+      <!-- Encounters: manage the team's encounters (add / rename / delete).
+           The chip selector below attaches flush as this card's bottom section
+           (squared bottom corners) and splits off into a sticky strip on scroll. -->
+      <div class="card mt-4 encounters-manage-card">
         <div class="section-head">
-          <h2 style="margin: 0;">Encounters</h2>
+          <h2 style="margin: 0;">Encounters<span class="info-indicator" tabindex="0" role="img" aria-label="How encounters work: Encounters are per-fight loadout setups for your team. Add the Default/Trash encounters or bosses from a single trial, then give each player their gear and skills for that fight. Use the chips below to switch the active encounter you are editing. When adding an encounter you can copy gear and skills from an existing one." data-tip="Encounters are per-fight loadout setups for your team. Add the Default/Trash encounters or bosses from a single trial, then give each player their gear and skills for that fight. Use the chips below to switch the active encounter you are editing. When adding an encounter you can copy gear & skills from an existing one.">i</span></h2>
           <button id="add-encounter-btn" class="btn btn--ghost btn--sm is-hidden" type="button">+ Add Encounter</button>
         </div>
         <form id="add-encounter-form" class="add-encounter-form is-hidden mt-4">
@@ -92,16 +100,19 @@
             <label for="add-encounter-name">Encounter</label>
             <select id="add-encounter-name" class="input"></select>
           </div>
+          <div class="form-group">
+            <label for="add-encounter-copy">Copy gear &amp; skills from</label>
+            <select id="add-encounter-copy" class="input"></select>
+          </div>
           <div class="form-actions">
             <button class="btn btn--primary btn--sm" type="submit">Add</button>
             <button class="btn btn--ghost btn--sm" type="button" id="add-encounter-cancel">Cancel</button>
           </div>
         </form>
-        <div id="encounters-bar" class="encounters-bar mt-4"></div>
 
         <div id="encounter-controls" class="encounter-controls mt-4 is-hidden">
           <div class="encounter-title-row">
-            <span class="text-muted">Loadouts for</span>
+            <span class="text-muted">Rename Encounter</span>
             <strong id="current-encounter-name">…</strong>
             <select id="encounter-rename" class="input input--sm is-hidden"></select>
           </div>
@@ -110,6 +121,18 @@
             <button id="encounter-delete-btn" class="btn btn--danger btn--sm is-hidden" type="button">Delete Encounter</button>
           </div>
         </div>
+      </div>
+
+      <!-- Encounter chip selector, in its own titled box. Only this panel is
+           sticky: it pins just below the topbar while scrolling the roster so you
+           can switch encounters anytime. Sitting flush under the encounters card
+           (no top margin) it reads as that card's bottom section, then "splits
+           off" with elevation once pinned. The zero-height sentinel above it lets
+           app.js toggle the elevated .is-stuck style. -->
+      <div id="encounters-sentinel" aria-hidden="true"></div>
+      <div id="encounters-panel" class="encounters-panel">
+        <h3 class="encounters-panel-title">Active Encounter<span class="info-indicator" tabindex="0" role="img" aria-label="Active encounter: Pick the encounter you are editing. Its per-player gear and skills appear in the roster below. This bar stays pinned to the top while you scroll so you can switch encounters anytime." data-tip="Pick the encounter you are editing. Its per-player gear and skills appear in the roster below. This bar stays pinned to the top while you scroll so you can switch encounters anytime.">i</span></h3>
+        <div id="encounters-bar" class="encounters-bar"></div>
       </div>
 
       <!-- Roster -->
@@ -143,9 +166,9 @@
     </section>
   </main>
 
-  <script src="js/api.js?v=21"></script>
-  <script src="js/data.js?v=21"></script>
-  <script src="js/components.js?v=21"></script>
-  <script src="js/app.js?v=21"></script>
+  <script src="js/api.js?v=37"></script>
+  <script src="js/data.js?v=37"></script>
+  <script src="js/components.js?v=37"></script>
+  <script src="js/app.js?v=37"></script>
 </body>
 </html>

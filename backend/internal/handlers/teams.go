@@ -67,6 +67,10 @@ func (s *Server) handleListTeams(w http.ResponseWriter, r *http.Request) {
 
 type teamNameRequest struct {
 	Name string `json:"name"`
+	// CopyFrom optionally identifies an existing team (which the caller must be
+	// able to access) to seed the new team from: its schedule, roster, and
+	// encounters/loadouts are copied. nil/0 = a fresh, empty team.
+	CopyFrom *int64 `json:"copy_from"`
 }
 
 func (s *Server) handleCreateTeam(w http.ResponseWriter, r *http.Request) {
@@ -87,7 +91,25 @@ func (s *Server) handleCreateTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	team, err := s.teams.Create(r.Context(), userID, req.Name)
+	// Validate the optional copy source is a team the caller can access. A 404
+	// from Access is reported as a generic "not found" so other users' teams
+	// stay hidden.
+	var copyFrom int64
+	if req.CopyFrom != nil && *req.CopyFrom != 0 {
+		copyFrom = *req.CopyFrom
+		found, _, err := s.teams.Access(r.Context(), copyFrom, userID)
+		if err != nil {
+			log.Printf("create team copy access: %v", err)
+			writeError(w, http.StatusInternalServerError, "could not create team")
+			return
+		}
+		if !found {
+			writeError(w, http.StatusBadRequest, "copy source team not found")
+			return
+		}
+	}
+
+	team, err := s.teams.Create(r.Context(), userID, req.Name, copyFrom)
 	if err != nil {
 		log.Printf("create team: %v", err)
 		writeError(w, http.StatusInternalServerError, "could not create team")

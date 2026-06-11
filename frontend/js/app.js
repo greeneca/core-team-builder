@@ -30,6 +30,9 @@
 
   let currentUser = null;
   let currentTeam = null;
+  // The teams shown in the list; cached so the "copy from team" picker can list
+  // them when creating a new team.
+  let allTeams = [];
   let currentEncounters = [];
   // The encounter currently selected on the team page; its per-player loadouts
   // are shown inline in the roster. Always set once a team is open.
@@ -80,6 +83,43 @@
     window.location.replace("login.html");
   });
 
+  // --- Tooltips toggle ---
+  // Reflects the persisted preference (see setTooltipsEnabled in components.js)
+  // and lets the user turn hover descriptions off entirely.
+  const tooltipsToggle = el("tooltips-toggle");
+  if (tooltipsToggle) {
+    tooltipsToggle.checked = tooltipsEnabled();
+    tooltipsToggle.addEventListener("change", () => {
+      setTooltipsEnabled(tooltipsToggle.checked);
+    });
+  }
+
+  // --- Brand "home" link ---
+  // The title acts as a shortcut back to the teams list (SPA navigation; the
+  // href is a no-JS fallback that reloads the dashboard).
+  const brandHome = el("brand-home");
+  if (brandHome) {
+    brandHome.addEventListener("click", (e) => {
+      e.preventDefault();
+      currentTeam = null;
+      showView("teams");
+      loadTeams();
+    });
+  }
+
+  // Expose the sticky topbar's height as a CSS var so the sticky encounters
+  // panel can pin just beneath it (kept in sync on resize).
+  function syncTopbarHeight() {
+    const topbar = document.querySelector(".topbar");
+    if (!topbar) return;
+    document.documentElement.style.setProperty(
+      "--topbar-height",
+      `${topbar.offsetHeight}px`
+    );
+  }
+  syncTopbarHeight();
+  window.addEventListener("resize", syncTopbarHeight);
+
   // --- Teams list ---
   async function loadTeams() {
     clearMessage();
@@ -92,6 +132,7 @@
   }
 
   function renderTeamsList(teams) {
+    allTeams = teams;
     const list = el("teams-list");
     list.innerHTML = "";
     el("teams-empty").classList.toggle("is-hidden", teams.length > 0);
@@ -123,9 +164,22 @@
     });
   }
 
+  // Fill the "copy from team" picker with the user's teams, plus a leading
+  // "None (empty team)" option that creates a blank team.
+  function populateCopyTeamSelect(select) {
+    const none = `<option value="">None (empty team)</option>`;
+    select.innerHTML =
+      none +
+      allTeams
+        .map((t) => `<option value="${t.id}">${escapeAttr(t.name)}</option>`)
+        .join("");
+    select.value = "";
+  }
+
   // New team form toggling.
   const newTeamForm = el("new-team-form");
   el("new-team-btn").addEventListener("click", () => {
+    populateCopyTeamSelect(el("new-team-copy"));
     newTeamForm.classList.remove("is-hidden");
     el("new-team-name").focus();
   });
@@ -137,8 +191,10 @@
     e.preventDefault();
     const name = el("new-team-name").value.trim();
     if (!name) return;
+    const copyFromRaw = el("new-team-copy").value;
+    const copyFrom = copyFromRaw ? Number(copyFromRaw) : 0;
     try {
-      const team = await api.createTeam(name);
+      const team = await api.createTeam(name, copyFrom);
       newTeamForm.classList.add("is-hidden");
       newTeamForm.reset();
       showMessage(`Created team “${team.name}”`, "success");
@@ -567,6 +623,8 @@
       const slot = document.createElement("div");
       slot.className = "player-slot";
       slot.dataset.slot = player.slot;
+      // Drives the role-based background color (see .player-slot[data-role] CSS).
+      slot.dataset.role = player.role;
       slot.innerHTML = `
         <span class="slot-number">${player.slot}</span>
         <div class="player-body">
@@ -621,6 +679,13 @@
         if (!subCb.checked) renderBuild(slot, player);
       });
       renderBuild(slot, player);
+
+      // Recolor the slot live when its role changes (autosave is handled by the
+      // global roster change listener).
+      const roleSel = slot.querySelector('[data-field="role"]');
+      roleSel.addEventListener("change", () => {
+        slot.dataset.role = roleSel.value;
+      });
 
       // Build the loadout add-controls (one per gear/skills column) for the
       // currently selected encounter. The chips themselves are filled by
@@ -757,7 +822,8 @@
     const rename = el("encounter-rename");
     rename.classList.toggle("is-hidden", !editable);
     if (editable) {
-      populateEncounterNameSelect(rename);
+      const names = currentEncounters.map((enc) => enc.name);
+      populateEncounterNameSelect(rename, names, currentEncounter.name);
       rename.value = currentEncounter.name;
     }
 
@@ -791,20 +857,43 @@
     }
   }
 
-  // Populate the "add encounter" picker once with grouped boss names.
-  function populateEncounterNameSelect(select) {
-    if (select.options.length > 0) return;
-    select.innerHTML = ENCOUNTER_NAME_GROUPS.map(
-      (g) =>
-        `<optgroup label="${g.group}">` +
-        g.names.map((n) => `<option value="${escapeAttr(n)}">${n}</option>`).join("") +
-        `</optgroup>`
-    ).join("");
+  // Populate an encounter-name picker with only the valid choices for the team
+  // (unique names + a single trial; see validEncounterGroups). `keepName` is the
+  // current name when renaming. Returns true if any choice is available.
+  function populateEncounterNameSelect(select, existingNames, keepName) {
+    const groups = validEncounterGroups(existingNames || [], keepName);
+    select.innerHTML = groups
+      .map(
+        (g) =>
+          `<optgroup label="${escapeAttr(g.group)}">` +
+          g.names.map((n) => `<option value="${escapeAttr(n)}">${escapeAttr(n)}</option>`).join("") +
+          `</optgroup>`
+      )
+      .join("");
+    return groups.length > 0;
+  }
+
+  // Fill the "copy gear & skills from" picker with the team's existing
+  // encounters, plus a leading "None (empty)" option that creates a blank one.
+  function populateCopyFromSelect(select) {
+    const none = `<option value="">None (empty encounter)</option>`;
+    select.innerHTML =
+      none +
+      currentEncounters
+        .map((enc) => `<option value="${enc.id}">${escapeAttr(enc.name)}</option>`)
+        .join("");
+    select.value = "";
   }
 
   const addEncounterForm = el("add-encounter-form");
   el("add-encounter-btn").addEventListener("click", () => {
-    populateEncounterNameSelect(el("add-encounter-name"));
+    const names = currentEncounters.map((enc) => enc.name);
+    const hasChoices = populateEncounterNameSelect(el("add-encounter-name"), names);
+    if (!hasChoices) {
+      showMessage("No more encounters available to add for this trial.", "error");
+      return;
+    }
+    populateCopyFromSelect(el("add-encounter-copy"));
     addEncounterForm.classList.remove("is-hidden");
   });
   el("add-encounter-cancel").addEventListener("click", () => {
@@ -813,8 +902,10 @@
   addEncounterForm.addEventListener("submit", async (e) => {
     e.preventDefault();
     const name = el("add-encounter-name").value;
+    const copyFromRaw = el("add-encounter-copy").value;
+    const copyFrom = copyFromRaw ? Number(copyFromRaw) : 0;
     try {
-      const enc = await api.createEncounter(currentTeam.id, name);
+      const enc = await api.createEncounter(currentTeam.id, name, copyFrom);
       addEncounterForm.classList.add("is-hidden");
       const { encounters } = await api.listEncounters(currentTeam.id);
       currentEncounters = encounters || [];
@@ -839,8 +930,10 @@
     const chip = document.createElement("span");
     chip.className = "chip";
     chip.dataset.value = key;
+    // Show the gear set description on hover (same floating tooltip the picker
+    // options use; see initTooltips in components.js).
     const desc = cfg.desc(key);
-    if (desc) chip.title = desc;
+    if (desc) chip.dataset.tip = desc;
     chip.innerHTML = `<span class="chip-label">${escapeAttr(cfg.label(key))}</span>`;
     if (editable) {
       const remove = document.createElement("button");
@@ -942,6 +1035,32 @@
     }
   });
 
+  // --- Encounter chip panel stickiness ---
+  // Only the chip panel (#encounters-panel) is `position: sticky`; it pins just
+  // below the topbar while scrolling the roster. A zero-height sentinel placed
+  // just above the panel tells us (via IntersectionObserver) when it has reached
+  // the pin point, so we can toggle the elevated "stuck" style that splits it off
+  // from the encounters card above. The observer's top rootMargin matches the
+  // topbar height so the style flips exactly as the panel pins.
+  function setupEncounterStickiness() {
+    const sentinel = el("encounters-sentinel");
+    const panel = el("encounters-panel");
+    if (!sentinel || !panel || typeof IntersectionObserver === "undefined") {
+      return;
+    }
+    const topbar = document.querySelector(".topbar");
+    const topOffset = topbar ? topbar.offsetHeight : 0;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        // Not intersecting means the sentinel has scrolled past the pin point,
+        // i.e. the chip panel is now pinned.
+        panel.classList.toggle("is-stuck", !entry.isIntersecting);
+      },
+      { threshold: [0], rootMargin: `-${topOffset}px 0px 0px 0px` }
+    );
+    observer.observe(sentinel);
+  }
+
   // --- Bootstrap ---
   async function init() {
     try {
@@ -953,5 +1072,6 @@
     }
   }
 
+  setupEncounterStickiness();
   init();
 })();

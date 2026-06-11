@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "hooks": {
+    "afterFileEdit": [
+      {
+        "command": ".cursor/hooks/mark-docker-dirty.sh"
+      }
+    ],
+    "stop": [
+      {
+        "command": ".cursor/hooks/rebuild-docker.sh",
+        "timeout": 1200
+      }
+    ]
+  }
+}

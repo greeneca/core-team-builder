@@ -50,7 +50,11 @@ hit CORS). The JS is split into:
   trial, gear sets with tooltips, skills) with lookup helpers.
 - `js/components.js` — reusable, framework-free UI components
   (`createSearchableSelect`: a search box with optional group headers, used by
-  the loadout gear/skills pickers).
+  the loadout gear/skills pickers) plus `initTooltips`: an app-wide floating
+  tooltip driven by `data-tip` attributes (gear set + skill descriptions, and
+  the encounters `.info-indicator` help badges) on both
+  the picker options and the selected chips). Tooltips can be toggled off from
+  the topbar; the preference persists in `localStorage`.
 - `js/auth.js` — login/register page logic.
 - `js/app.js` — dashboard logic + route guard (teams, sharing, encounters).
 
@@ -164,7 +168,10 @@ apply (drawn from the player's class) and the skill lines are blanked.
 
 Every team has at least one encounter (`Default`), created with the team and
 backfilled for existing teams. Encounter names are validated against
-`ValidEncounterNames`; gear/skill items are free-form (sanitized, not
+`ValidEncounterNames` and must be **unique per team** and all from a **single
+trial** (plus the always-allowed `General` group) — see
+`ValidateEncounterSelection`, with a unique index on `encounters(team_id, name)`
+as a DB backstop. gear/skill items are free-form (sanitized, not
 allow-listed) — the searchable options + gear tooltips live in the frontend
 master data (`frontend/js/data.js`).
 

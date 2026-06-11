@@ -17,3 +17,6 @@
 
 # Logs
 *.log
+
+# Cursor hook transient state (auto-docker-rebuild sentinel)
+.cursor/.docker-rebuild-pending

@@ -5,7 +5,103 @@
  * optional group headers (an optgroup-style experience that native <select> /
  * <datalist> cannot provide together). Used for the encounter loadout pickers
  * (skills grouped by skill line; gear as a single headerless group).
+ *
+ * Tooltips: any element with a non-empty `data-tip` attribute shows a floating
+ * tooltip on hover/focus (see initTooltips). This replaces the native `title`
+ * attribute, which is unreliable (slow, can't be styled, and inconsistent on
+ * small elements like chips). Used for gear set descriptions on both the picker
+ * options and the selected gear chips.
  */
+
+// Lightweight, app-wide hover/focus tooltip. A single tooltip element is reused
+// and appended to <body> so it is never clipped by overflow or stacking
+// contexts (unlike a CSS ::after tooltip). Driven by delegated events, so it
+// works for elements added dynamically after load (e.g. loadout chips).
+//
+// Tooltips can be turned off via setTooltipsEnabled(false); the preference is
+// persisted in localStorage so it survives reloads.
+
+const TOOLTIPS_PREF_KEY = "ctb_tooltips_disabled";
+let tooltipsOn = localStorage.getItem(TOOLTIPS_PREF_KEY) !== "1";
+let tooltipEl = null;
+let tooltipTarget = null;
+
+// tooltipsEnabled() -> boolean: whether tooltips are currently shown.
+function tooltipsEnabled() {
+  return tooltipsOn;
+}
+
+// setTooltipsEnabled(on): enable/disable tooltips app-wide and persist the
+// choice. Disabling also hides any tooltip currently on screen.
+function setTooltipsEnabled(on) {
+  tooltipsOn = !!on;
+  if (tooltipsOn) {
+    localStorage.removeItem(TOOLTIPS_PREF_KEY);
+  } else {
+    localStorage.setItem(TOOLTIPS_PREF_KEY, "1");
+    hideTooltip();
+  }
+}
+
+function hideTooltip() {
+  tooltipTarget = null;
+  if (tooltipEl) tooltipEl.classList.add("is-hidden");
+}
+
+function initTooltips() {
+  function ensureEl() {
+    if (!tooltipEl) {
+      tooltipEl = document.createElement("div");
+      tooltipEl.className = "tooltip is-hidden";
+      tooltipEl.setAttribute("role", "tooltip");
+      document.body.appendChild(tooltipEl);
+    }
+    return tooltipEl;
+  }
+
+  function position(target) {
+    const el = ensureEl();
+    const r = target.getBoundingClientRect();
+    const tr = el.getBoundingClientRect();
+    const margin = 8;
+    let left = r.left + r.width / 2 - tr.width / 2;
+    left = Math.max(margin, Math.min(left, window.innerWidth - tr.width - margin));
+    // Prefer above the target; flip below when there is no room.
+    let top = r.top - tr.height - margin;
+    if (top < margin) top = r.bottom + margin;
+    el.style.left = `${left}px`;
+    el.style.top = `${top}px`;
+  }
+
+  function show(target) {
+    if (!tooltipsOn) return;
+    const text = target.getAttribute("data-tip");
+    if (!text) return;
+    const el = ensureEl();
+    el.textContent = text;
+    el.classList.remove("is-hidden");
+    tooltipTarget = target;
+    position(target);
+  }
+
+  document.addEventListener("mouseover", (e) => {
+    const t = e.target.closest ? e.target.closest("[data-tip]") : null;
+    if (t) {
+      if (t !== tooltipTarget) show(t);
+    } else if (tooltipTarget) {
+      hideTooltip();
+    }
+  });
+  document.addEventListener("focusin", (e) => {
+    const t = e.target.closest ? e.target.closest("[data-tip]") : null;
+    if (t) show(t);
+  });
+  document.addEventListener("focusout", hideTooltip);
+  // Reposition is cheap to skip — just hide while the page moves under it.
+  window.addEventListener("scroll", hideTooltip, true);
+}
+
+initTooltips();
 
 // createSearchableSelect({ groups, placeholder, onSelect }) -> HTMLElement
 //
@@ -99,7 +195,7 @@ function createSearchableSelect({ groups, placeholder, onSelect }) {
         opt.setAttribute("role", "option");
         opt.dataset.value = it.value;
         opt.textContent = it.label;
-        if (it.desc) opt.title = it.desc;
+        if (it.desc) opt.dataset.tip = it.desc;
 
         const idx = currentOptions.length;
         // mousedown (not click) fires before the input loses focus.

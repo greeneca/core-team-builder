@@ -59,6 +59,22 @@ func (s *Server) handleListEncounters(w http.ResponseWriter, r *http.Request) {
 
 type encounterNameRequest struct {
 	Name string `json:"name"`
+	// CopyFrom optionally identifies an existing encounter (same team) whose
+	// per-player gear/skills are copied into the new one. nil/0 = empty.
+	CopyFrom *int64 `json:"copy_from"`
+}
+
+// encounterNames returns the names of the given encounters, skipping excludeID
+// (pass 0 to keep all). Used to validate uniqueness + single-trial rules.
+func encounterNames(encs []models.Encounter, excludeID int64) []string {
+	names := make([]string, 0, len(encs))
+	for _, e := range encs {
+		if e.ID == excludeID {
+			continue
+		}
+		names = append(names, e.Name)
+	}
+	return names
 }
 
 func (s *Server) handleCreateEncounter(w http.ResponseWriter, r *http.Request) {
@@ -77,12 +93,35 @@ func (s *Server) handleCreateEncounter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Name = strings.TrimSpace(req.Name)
-	if !models.ValidEncounterNames[req.Name] {
-		writeError(w, http.StatusBadRequest, "invalid encounter name")
+	existing, err := s.encounters.ListForTeam(r.Context(), teamID)
+	if err != nil {
+		log.Printf("list encounters: %v", err)
+		writeError(w, http.StatusInternalServerError, "could not create encounter")
+		return
+	}
+	if verr := models.ValidateEncounterSelection(encounterNames(existing, 0), req.Name); verr != nil {
+		writeError(w, http.StatusBadRequest, verr.Error())
 		return
 	}
 
-	enc, err := s.encounters.Create(r.Context(), teamID, req.Name)
+	// Validate the optional copy source belongs to this team.
+	var copyFrom int64
+	if req.CopyFrom != nil && *req.CopyFrom != 0 {
+		copyFrom = *req.CopyFrom
+		found := false
+		for _, e := range existing {
+			if e.ID == copyFrom {
+				found = true
+				break
+			}
+		}
+		if !found {
+			writeError(w, http.StatusBadRequest, "copy source encounter not found")
+			return
+		}
+	}
+
+	enc, err := s.encounters.Create(r.Context(), teamID, req.Name, copyFrom)
 	if err != nil {
 		log.Printf("create encounter: %v", err)
 		writeError(w, http.StatusInternalServerError, "could not create encounter")
@@ -100,7 +139,7 @@ func (s *Server) handleGetEncounter(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleUpdateEncounter(w http.ResponseWriter, r *http.Request) {
-	_, role, enc, ok := s.encounterAccess(w, r)
+	teamID, role, enc, ok := s.encounterAccess(w, r)
 	if !ok {
 		return
 	}
@@ -115,8 +154,15 @@ func (s *Server) handleUpdateEncounter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Name = strings.TrimSpace(req.Name)
-	if !models.ValidEncounterNames[req.Name] {
-		writeError(w, http.StatusBadRequest, "invalid encounter name")
+	existing, err := s.encounters.ListForTeam(r.Context(), teamID)
+	if err != nil {
+		log.Printf("list encounters: %v", err)
+		writeError(w, http.StatusInternalServerError, "could not update encounter")
+		return
+	}
+	// Exclude the encounter being renamed so it doesn't conflict with itself.
+	if verr := models.ValidateEncounterSelection(encounterNames(existing, enc.ID), req.Name); verr != nil {
+		writeError(w, http.StatusBadRequest, verr.Error())
 		return
 	}
 

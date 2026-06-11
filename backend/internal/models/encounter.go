@@ -13,6 +13,18 @@ import (
 // ErrEncounterNotFound is returned when an encounter lookup matches nothing.
 var ErrEncounterNotFound = errors.New("encounter not found")
 
+// Encounter selection validation errors. These are surfaced to the client as
+// 400s with a friendly message (see handlers).
+var (
+	// ErrEncounterNameInvalid means the name is not in the allow-list.
+	ErrEncounterNameInvalid = errors.New("invalid encounter name")
+	// ErrEncounterNameTaken means the team already has an encounter with that name.
+	ErrEncounterNameTaken = errors.New("this encounter already exists for the team")
+	// ErrEncounterTrialMismatch means the name belongs to a different trial than
+	// the team's other encounters (only one trial is allowed per team).
+	ErrEncounterTrialMismatch = errors.New("encounters must all be from the same trial")
+)
+
 // Loadout limits keep stored lists sane; the UI constrains choices to master
 // data, but the backend still bounds free-form input defensively.
 const (
@@ -20,47 +32,92 @@ const (
 	maxLoadoutKeyLen = 100
 )
 
-// ValidEncounterNames is the allow-list for an encounter's name: "Default",
-// "Trash", or any ESO trial boss (grouped by trial in the frontend). Stored as
-// the display string. Seed list — extend as trials/bosses are added.
-var ValidEncounterNames = buildEncounterNameSet([]string{
-	"Default", "Trash",
-	// Aetherian Archive
-	"Lightning Storm Atronach", "Foundation Stone Atronach", "Varlariel", "The Celestial Mage",
-	// Hel Ra Citadel
-	"Ra Kotu", "Yokeda Kai and Yokeda Rok'dun", "The Celestial Warrior",
-	// Sanctum Ophidia
-	"Possessed Mantikora", "Stonebreaker", "Ozara", "The Celestial Serpent",
-	// Maw of Lorkhaj
-	"Zhaj'hassa the Forgotten", "The Twins", "Rakkhat",
-	// Halls of Fabrication
-	"Hunter-Killer Fabricants", "Pinnacle Factotum", "Archcustodian", "Refabrication Committee", "The Assembly General",
-	// Asylum Sanctorium
-	"Saint Llothis the Pious", "Saint Felms the Bold", "Saint Olms the Just",
-	// Cloudrest
-	"Shade of Galenwe", "Shade of Siroria", "Shade of Relequen", "Z'Maja",
-	// Sunspire
-	"Lokkestiiz", "Yolnahkriin", "Nahviintaas",
-	// Kyne's Aegis
-	"Yandir the Butcher", "Captain Vrol", "Lord Falgravn",
-	// Rockgrove
-	"Oaxiltso", "Flame-Herald Bahsei", "Xalvakka",
-	// Dreadsail Reef
-	"Lylanar and Turlassil", "Reef Guardian", "Tideborn Taleria",
-	// Sanity's Edge
-	"Exarchanic Yaseyla", "Archwizard Twelvane and Chimera", "Ansuul the Tormentor",
-	// Lucent Citadel
-	"Count Ryelaz and Zilyesset", "Orphic Shattered Shard", "Xoryn",
-	// Ossein Cage
-	"Shapers of Flesh", "Jynorah and Skorkhif", "Overfiend Kazpian",
-})
+// GeneralEncounterGroup is the group holding non-trial encounters (Default,
+// Trash). General encounters may always coexist with a single trial's bosses.
+const GeneralEncounterGroup = "General"
 
-func buildEncounterNameSet(names []string) map[string]bool {
-	m := make(map[string]bool, len(names))
-	for _, n := range names {
-		m[n] = true
+// EncounterNameGroup is a named set of encounter names: the "General" group or
+// one ESO trial.
+type EncounterNameGroup struct {
+	Group string
+	Names []string
+}
+
+// EncounterNameGroups is the ordered allow-list of encounter names, grouped by
+// trial ("General" holds Default/Trash). This mirrors ENCOUNTER_NAME_GROUPS in
+// the frontend (frontend/js/data.js) — keep the two in sync. Seed data; extend
+// as trials/bosses are added.
+var EncounterNameGroups = []EncounterNameGroup{
+	{Group: GeneralEncounterGroup, Names: []string{"Default", "Trash"}},
+	{Group: "Aetherian Archive", Names: []string{"Lightning Storm Atronach", "Foundation Stone Atronach", "Varlariel", "The Celestial Mage"}},
+	{Group: "Hel Ra Citadel", Names: []string{"Ra Kotu", "Yokeda Kai and Yokeda Rok'dun", "The Celestial Warrior"}},
+	{Group: "Sanctum Ophidia", Names: []string{"Possessed Mantikora", "Stonebreaker", "Ozara", "The Celestial Serpent"}},
+	{Group: "Maw of Lorkhaj", Names: []string{"Zhaj'hassa the Forgotten", "The Twins", "Rakkhat"}},
+	{Group: "Halls of Fabrication", Names: []string{"Hunter-Killer Fabricants", "Pinnacle Factotum", "Archcustodian", "Refabrication Committee", "The Assembly General"}},
+	{Group: "Asylum Sanctorium", Names: []string{"Saint Llothis the Pious", "Saint Felms the Bold", "Saint Olms the Just"}},
+	{Group: "Cloudrest", Names: []string{"Shade of Galenwe", "Shade of Siroria", "Shade of Relequen", "Z'Maja"}},
+	{Group: "Sunspire", Names: []string{"Lokkestiiz", "Yolnahkriin", "Nahviintaas"}},
+	{Group: "Kyne's Aegis", Names: []string{"Yandir the Butcher", "Captain Vrol", "Lord Falgravn"}},
+	{Group: "Rockgrove", Names: []string{"Oaxiltso", "Flame-Herald Bahsei", "Xalvakka"}},
+	{Group: "Dreadsail Reef", Names: []string{"Lylanar and Turlassil", "Reef Guardian", "Tideborn Taleria"}},
+	{Group: "Sanity's Edge", Names: []string{"Exarchanic Yaseyla", "Archwizard Twelvane and Chimera", "Ansuul the Tormentor"}},
+	{Group: "Lucent Citadel", Names: []string{"Count Ryelaz and Zilyesset", "Orphic Shattered Shard", "Xoryn"}},
+	{Group: "Ossein Cage", Names: []string{"Shapers of Flesh", "Jynorah and Skorkhif", "Overfiend Kazpian"}},
+}
+
+// ValidEncounterNames is the flat allow-list for an encounter's name, derived
+// from EncounterNameGroups. Stored as the display string.
+var ValidEncounterNames = map[string]bool{}
+
+// encounterTrialByName maps each valid encounter name to its group/trial.
+var encounterTrialByName = map[string]string{}
+
+func init() {
+	for _, g := range EncounterNameGroups {
+		for _, n := range g.Names {
+			ValidEncounterNames[n] = true
+			encounterTrialByName[n] = g.Group
+		}
 	}
-	return m
+}
+
+// EncounterTrial returns the group/trial an encounter name belongs to
+// (GeneralEncounterGroup for Default/Trash), or "" if the name is unknown.
+func EncounterTrial(name string) string {
+	return encounterTrialByName[name]
+}
+
+// ValidateEncounterSelection reports whether candidate is a valid name to add or
+// rename to within a team whose other encounter names are `existing`:
+//   - candidate must be a known encounter name;
+//   - it must not duplicate one of `existing` (names are unique per team);
+//   - all non-General encounters must belong to a single trial — candidate's
+//     trial must match the team's already-chosen trial (General is always ok).
+//
+// For a rename, pass `existing` without the encounter being renamed.
+func ValidateEncounterSelection(existing []string, candidate string) error {
+	if !ValidEncounterNames[candidate] {
+		return ErrEncounterNameInvalid
+	}
+	for _, n := range existing {
+		if n == candidate {
+			return ErrEncounterNameTaken
+		}
+	}
+	candTrial := encounterTrialByName[candidate]
+	if candTrial == GeneralEncounterGroup {
+		return nil
+	}
+	for _, n := range existing {
+		t := encounterTrialByName[n]
+		if t == "" || t == GeneralEncounterGroup {
+			continue
+		}
+		if t != candTrial {
+			return ErrEncounterTrialMismatch
+		}
+	}
+	return nil
 }
 
 // Loadout is a single player's gear + skills for one encounter.
@@ -111,6 +168,58 @@ func createDefaultEncounterTx(ctx context.Context, tx pgx.Tx, teamID int64) erro
 	return nil
 }
 
+// copyEncountersTx copies every encounter (and its per-player loadouts) from
+// srcTeamID to dstTeamID within an existing transaction. Used when creating a
+// team as a copy of another. Encounters keep their names and positions.
+func copyEncountersTx(ctx context.Context, tx pgx.Tx, srcTeamID, dstTeamID int64) error {
+	// Read all source encounters first; pgx allows only one active query per
+	// transaction, so we must finish iterating before issuing the inserts below.
+	rows, err := tx.Query(ctx,
+		`SELECT id, name, position FROM encounters WHERE team_id = $1 ORDER BY position, id`,
+		srcTeamID,
+	)
+	if err != nil {
+		return err
+	}
+	type srcEncounter struct {
+		id       int64
+		name     string
+		position int
+	}
+	var srcs []srcEncounter
+	for rows.Next() {
+		var e srcEncounter
+		if err := rows.Scan(&e.id, &e.name, &e.position); err != nil {
+			rows.Close()
+			return err
+		}
+		srcs = append(srcs, e)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	for _, src := range srcs {
+		var newID int64
+		if err := tx.QueryRow(ctx,
+			`INSERT INTO encounters (team_id, name, position) VALUES ($1, $2, $3) RETURNING id`,
+			dstTeamID, src.name, src.position,
+		).Scan(&newID); err != nil {
+			return err
+		}
+		// Copy the 12 loadout rows (gear + skills) slot-for-slot.
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO encounter_loadouts (encounter_id, slot, gear, skills)
+			 SELECT $1, slot, gear, skills FROM encounter_loadouts WHERE encounter_id = $2`,
+			newID, src.id,
+		); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // ListForTeam returns a team's encounters (without loadouts), ordered.
 func (s *EncounterStore) ListForTeam(ctx context.Context, teamID int64) ([]Encounter, error) {
 	const q = `
@@ -135,9 +244,11 @@ func (s *EncounterStore) ListForTeam(ctx context.Context, teamID int64) ([]Encou
 	return encounters, rows.Err()
 }
 
-// Create inserts a new encounter (appended after existing ones) with 12 empty
-// loadout slots, in a single transaction.
-func (s *EncounterStore) Create(ctx context.Context, teamID int64, name string) (*Encounter, error) {
+// Create inserts a new encounter (appended after existing ones) with 12 loadout
+// slots, in a single transaction. When copyFromID is non-zero, each slot's
+// gear/skills are copied from the source encounter (which must belong to the
+// same team); otherwise the slots start empty.
+func (s *EncounterStore) Create(ctx context.Context, teamID int64, name string, copyFromID int64) (*Encounter, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return nil, err
@@ -163,6 +274,24 @@ func (s *EncounterStore) Create(ctx context.Context, teamID int64, name string) 
 	for slot := 1; slot <= TeamSize; slot++ {
 		if _, err := tx.Exec(ctx,
 			`INSERT INTO encounter_loadouts (encounter_id, slot) VALUES ($1, $2)`, e.ID, slot,
+		); err != nil {
+			return nil, err
+		}
+	}
+
+	if copyFromID != 0 {
+		// Copy gear/skills slot-for-slot from the source. The join on
+		// encounters(team_id) ensures we only ever copy within the same team.
+		if _, err := tx.Exec(ctx,
+			`UPDATE encounter_loadouts dst
+			 SET gear = src.gear, skills = src.skills
+			 FROM encounter_loadouts src
+			 JOIN encounters e ON e.id = src.encounter_id
+			 WHERE dst.encounter_id = $1
+			   AND src.encounter_id = $2
+			   AND e.team_id = $3
+			   AND dst.slot = src.slot`,
+			e.ID, copyFromID, teamID,
 		); err != nil {
 			return nil, err
 		}

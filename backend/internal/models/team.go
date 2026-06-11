@@ -99,7 +99,14 @@ func NewTeamStore(pool *pgxpool.Pool) *TeamStore {
 
 // Create inserts a new team owned by ownerID, records the owner as a member,
 // and pre-creates the 12 empty player slots — all in a single transaction.
-func (s *TeamStore) Create(ctx context.Context, ownerID int64, name string) (*Team, error) {
+//
+// When copyFromTeamID is non-zero, the new team is seeded from that source team
+// (which the caller must be allowed to access — enforced by the handler): its
+// trial schedule, the full 12-player roster, and every encounter with its
+// per-player gear/skill loadouts are copied. Sharing/membership is never copied;
+// the new team is owned solely by ownerID. When zero, the team starts fresh with
+// default roles and a single empty "Default" encounter.
+func (s *TeamStore) Create(ctx context.Context, ownerID int64, name string, copyFromTeamID int64) (*Team, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return nil, err
@@ -107,14 +114,28 @@ func (s *TeamStore) Create(ctx context.Context, ownerID int64, name string) (*Te
 	defer tx.Rollback(ctx)
 
 	team := &Team{}
-	const insertTeam = `
-		INSERT INTO teams (name, owner_id)
-		VALUES ($1, $2)
-		RETURNING id, name, owner_id, schedule_days, schedule_time, schedule_timezone, created_at, updated_at`
-	if err := tx.QueryRow(ctx, insertTeam, name, ownerID).Scan(
-		&team.ID, &team.Name, &team.OwnerID, &team.ScheduleDays, &team.ScheduleTime, &team.ScheduleTimezone, &team.CreatedAt, &team.UpdatedAt,
-	); err != nil {
-		return nil, err
+	if copyFromTeamID != 0 {
+		// Copy the source team's schedule onto the new team.
+		const insertTeamCopy = `
+			INSERT INTO teams (name, owner_id, schedule_days, schedule_time, schedule_timezone)
+			SELECT $1, $2, schedule_days, schedule_time, schedule_timezone
+			FROM teams WHERE id = $3
+			RETURNING id, name, owner_id, schedule_days, schedule_time, schedule_timezone, created_at, updated_at`
+		if err := tx.QueryRow(ctx, insertTeamCopy, name, ownerID, copyFromTeamID).Scan(
+			&team.ID, &team.Name, &team.OwnerID, &team.ScheduleDays, &team.ScheduleTime, &team.ScheduleTimezone, &team.CreatedAt, &team.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+	} else {
+		const insertTeam = `
+			INSERT INTO teams (name, owner_id)
+			VALUES ($1, $2)
+			RETURNING id, name, owner_id, schedule_days, schedule_time, schedule_timezone, created_at, updated_at`
+		if err := tx.QueryRow(ctx, insertTeam, name, ownerID).Scan(
+			&team.ID, &team.Name, &team.OwnerID, &team.ScheduleDays, &team.ScheduleTime, &team.ScheduleTimezone, &team.CreatedAt, &team.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
 	}
 
 	const insertOwner = `
@@ -124,16 +145,31 @@ func (s *TeamStore) Create(ctx context.Context, ownerID int64, name string) (*Te
 		return nil, err
 	}
 
-	const insertSlot = `INSERT INTO players (team_id, slot, role) VALUES ($1, $2, $3)`
-	for slot := 1; slot <= TeamSize; slot++ {
-		if _, err := tx.Exec(ctx, insertSlot, team.ID, slot, defaultPlayerRole(slot)); err != nil {
+	if copyFromTeamID != 0 {
+		// Copy the roster slot-for-slot, then all encounters + loadouts.
+		const copyPlayers = `
+			INSERT INTO players (team_id, slot, name, discord_handle, role, class,
+			                     subclassed, skill_line_1, skill_line_2, skill_line_3, mastery_1, mastery_2)
+			SELECT $1, slot, name, discord_handle, role, class,
+			       subclassed, skill_line_1, skill_line_2, skill_line_3, mastery_1, mastery_2
+			FROM players WHERE team_id = $2`
+		if _, err := tx.Exec(ctx, copyPlayers, team.ID, copyFromTeamID); err != nil {
 			return nil, err
 		}
-	}
-
-	// Every team starts with one "Default" encounter (with its 12 loadouts).
-	if err := createDefaultEncounterTx(ctx, tx, team.ID); err != nil {
-		return nil, err
+		if err := copyEncountersTx(ctx, tx, copyFromTeamID, team.ID); err != nil {
+			return nil, err
+		}
+	} else {
+		const insertSlot = `INSERT INTO players (team_id, slot, role) VALUES ($1, $2, $3)`
+		for slot := 1; slot <= TeamSize; slot++ {
+			if _, err := tx.Exec(ctx, insertSlot, team.ID, slot, defaultPlayerRole(slot)); err != nil {
+				return nil, err
+			}
+		}
+		// Every team starts with one "Default" encounter (with its 12 loadouts).
+		if err := createDefaultEncounterTx(ctx, tx, team.ID); err != nil {
+			return nil, err
+		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {

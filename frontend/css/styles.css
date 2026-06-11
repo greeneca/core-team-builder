@@ -22,6 +22,18 @@
   --color-danger:        #e0564f;
   --color-success:       #5bb98c;
 
+  /* Role colors: a saturated accent (left bar) plus a dark, slate-tinted
+     background for each roster slot. Kept muted so they sit calmly against the
+     theme and don't fight the gold accent. */
+  --role-tank:           #4a86c5; /* blue   */
+  --role-tank-bg:        #1f2a36;
+  --role-healer:         #5bb98c; /* green  */
+  --role-healer-bg:      #1b2a25;
+  --role-dps:            #d6655d; /* red    */
+  --role-dps-bg:         #2c2120;
+  --role-support:        #a884d4; /* purple */
+  --role-support-bg:     #272233;
+
   /* Typography */
   --font-sans: "Segoe UI", system-ui, -apple-system, Roboto, Helvetica, Arial, sans-serif;
   --font-size-sm:   0.875rem;
@@ -102,6 +114,15 @@ a:hover {
   font-weight: 400;
   color: var(--color-text-muted);
   letter-spacing: 0;
+}
+/* Brand as a "back to teams" link (dashboard topbar). */
+a.brand--home {
+  text-decoration: none;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+a.brand--home:hover {
+  opacity: 0.85;
 }
 
 /* Card */
@@ -219,6 +240,11 @@ a:hover {
   padding: var(--space-4) var(--space-6);
   border-bottom: 1px solid var(--color-border);
   background: var(--color-surface);
+  /* Keep the nav (and brand "home" link) reachable while scrolling. Sits below
+     the toast (z 1000) but above page content and the sticky encounters panel. */
+  position: sticky;
+  top: 0;
+  z-index: 200;
 }
 
 /* Messages */
@@ -278,6 +304,20 @@ a:hover {
   display: flex;
   align-items: center;
   gap: var(--space-4);
+}
+
+/* Inline checkbox toggle (e.g. enable/disable tooltips). */
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+.toggle input {
+  cursor: pointer;
 }
 
 /* Section header (title + action) */
@@ -489,8 +529,29 @@ a:hover {
   gap: var(--space-4);
   background: var(--color-surface-alt);
   border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-border);
   border-radius: var(--radius);
   padding: var(--space-3) var(--space-4);
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+/* Role-based slot coloring: subtle background tint + saturated left accent bar
+   so a player's role reads at a glance. */
+.player-slot[data-role="tank"] {
+  background: var(--role-tank-bg);
+  border-left-color: var(--role-tank);
+}
+.player-slot[data-role="healer"] {
+  background: var(--role-healer-bg);
+  border-left-color: var(--role-healer);
+}
+.player-slot[data-role="dps"] {
+  background: var(--role-dps-bg);
+  border-left-color: var(--role-dps);
+}
+.player-slot[data-role="support_dps"] {
+  background: var(--role-support-bg);
+  border-left-color: var(--role-support);
 }
 .slot-number {
   display: inline-flex;
@@ -578,6 +639,43 @@ a:hover {
   flex-wrap: wrap;
   gap: var(--space-2);
 }
+
+/* Encounter chip selector lives in its own titled box. By default it sits flush
+   beneath the encounters card (the -1px top margin overlaps their borders and
+   the squared top corners make it read as that card's bottom section). Only this
+   panel is sticky: it pins just below the topbar once scrolled past so you can
+   switch encounters while editing the roster below. The .is-stuck state (toggled
+   from app.js once pinned) rounds it off and adds elevation so it visibly
+   "splits off" into a floating bar. */
+.encounters-panel {
+  margin-top: -1px;
+  padding: var(--space-3) var(--space-4) var(--space-4);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+  position: sticky;
+  top: var(--topbar-height, 0);
+  z-index: 100;
+  transition: border-radius 0.15s ease, box-shadow 0.15s ease, margin 0.15s ease;
+}
+.encounters-panel.is-stuck {
+  margin-top: var(--space-4);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5);
+}
+.encounters-panel-title {
+  margin: 0 0 var(--space-3);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--color-text-muted);
+}
+/* Square the bottom corners so the chip panel attaches flush below this card. */
+.encounters-manage-card {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
 .encounter-chip {
   font-family: inherit;
   font-size: var(--font-size-sm);
@@ -617,9 +715,17 @@ a:hover {
   align-items: center;
   justify-content: space-between;
   gap: var(--space-4);
-  flex-wrap: wrap;
   padding-top: var(--space-3);
   border-top: 1px solid var(--color-border);
+}
+/* Title row takes the remaining space and may shrink/wrap, while the actions
+   (save status + Delete) stay pinned to the right even with a long name. */
+.encounter-controls > .encounter-title-row {
+  flex: 1;
+  min-width: 0;
+}
+.encounter-controls > .form-actions {
+  flex-shrink: 0;
 }
 
 /* Per-player loadout block in the roster (below the subclass build). */
@@ -634,6 +740,8 @@ a:hover {
   align-items: center;
   gap: var(--space-4);
   flex-wrap: wrap;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .encounter-title-row .input { max-width: 18rem; }
 
@@ -699,6 +807,55 @@ a:hover {
   padding: 0;
 }
 .chip-remove:hover { color: var(--color-danger); }
+
+/* Floating hover/focus tooltip (see initTooltips in components.js). Appended to
+   <body> and positioned via fixed coordinates so it is never clipped. Used for
+   gear set descriptions on both the picker options and the selected chips. */
+.tooltip {
+  position: fixed;
+  z-index: 2000;
+  max-width: 22rem;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--font-size-sm);
+  line-height: 1.4;
+  color: var(--color-text);
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  white-space: normal;
+  pointer-events: none;
+}
+.tooltip.is-hidden { display: none; }
+
+/* Small circled "i" badge signalling that an element has an explanatory tooltip
+   (data-tip). Focusable so keyboard users can surface the same help. */
+.info-indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.15rem;
+  height: 1.15rem;
+  margin-left: var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: 50%;
+  background: var(--color-surface-alt);
+  color: var(--color-text-muted);
+  font-size: 0.7rem;
+  font-weight: 700;
+  font-style: normal;
+  line-height: 1;
+  vertical-align: middle;
+  cursor: help;
+  user-select: none;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+.info-indicator:hover,
+.info-indicator:focus {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+  outline: none;
+}
 /* Searchable-select component (createSearchableSelect): full search + headers. */
 .ss {
   position: relative;

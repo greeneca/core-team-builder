@@ -40,6 +40,9 @@ Consistent conventions across the codebase. Keep this in sync with reality.
 - A single design system in `frontend/css/styles.css`. **All colors, spacing,
   typography, radius, and shadow come from CSS custom properties (tokens) in
   `:root`.** Do not hardcode hex colors or pixel spacing in components.
+- Roster slots are color-coded by player role via `--role-*` tokens
+  (tank=blue, healer=green, dps=red, support_dps=purple), kept muted so they sit
+  calmly against the slate/gold theme.
 - Class naming follows a light **BEM-ish** convention:
   - Block: `.card`, `.btn`, `.tab`
   - Modifier: `.card--narrow`, `.btn--primary`, `.tab.is-active`
@@ -62,7 +65,9 @@ Consistent conventions across the codebase. Keep this in sync with reality.
     skills grouped by skill line). Keys mirror the backend allow-lists in
     `internal/models` (`eso.go`, `encounter.go`).
   - `components.js` — reusable, framework-free UI components
-    (`createSearchableSelect`).
+    (`createSearchableSelect`, `initTooltips`). Tooltips are shown via a
+    `data-tip` attribute (not native `title`), so they work consistently on any
+    element, including dynamically-added chips.
 - These modules expose plain top-level `const`s/functions (no module system);
   rely on script load order in the HTML rather than `import`/`export`.
 - Network calls go through `api.request(...)`; do not call `fetch` directly in

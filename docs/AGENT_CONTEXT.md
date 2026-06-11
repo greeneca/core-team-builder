@@ -60,18 +60,33 @@ column; the `User` JSON model hides it (`json:"-"`).
   re-sharing changes an existing member's role. Allow-list: `ValidShareRoles`
   in `team.go`; role constants `RoleOwner`/`RoleEditor`/`RoleViewer`. Migration
   `003_share_roles.sql` converts legacy `member` rows to `editor`.
+- **Copy on create**: `POST /api/teams` accepts an optional `copy_from` team id;
+  when set, `TeamStore.Create` seeds the new team from that source — its trial
+  schedule, the full 12-player roster, and every encounter with its per-player
+  loadouts (`copyEncountersTx` in `encounter.go`). Sharing/membership is **never**
+  copied; the new team is owned solely by the creator. The handler validates the
+  caller can access the source (`teams.Access`) and reports a missing/forbidden
+  source as a generic error so other users' teams stay hidden. The new-team form
+  has a **"Copy from team"** picker whose first option, "None (empty team)",
+  creates a blank team.
 - **Players**: each slot has `name`, `discord_handle`, `role`, `class`, plus a
   subclassing build (`006_player_subclass.sql`). Empty fields = unset. Roles and
   classes are validated against allow-lists in
   `backend/internal/models/eso.go` (`ValidRoles`, `ValidClasses`) — the ESO game
   reference data + build validators live in `eso.go`, separate from the team
   persistence layer in `team.go`:
-  - roles: `tank`, `healer`, `dps`, `support_dps` (plus `""`).
+  - roles: `tank`, `healer`, `dps`, `support_dps` (the backend still accepts
+    `""`, but the UI no longer offers an unset role — every slot always has a
+    concrete role).
   - classes: `arcanist`, `dragonknight`, `necromancer`, `nightblade`,
     `sorcerer`, `templar`, `warden` (plus `""`). The frontend mirrors these
     plus display labels in `frontend/js/data.js` (`ROLES`, `CLASSES`).
   - New teams default the 12 roles to 2 tanks, 2 healers, 8 dps
     (`defaultPlayerRole` in `team.go`).
+  - Each roster slot is color-coded by role: the slot carries a `data-role`
+    attribute (set in `renderRoster` and updated on change) and the
+    `.player-slot[data-role="…"]` CSS applies a tinted background + left accent
+    bar using the `--role-*` tokens in `styles.css`.
 - **Subclassing** (`006_player_subclass.sql`): each player has `subclassed`
   (bool) plus two mutually exclusive build sets:
   - `subclassed = true` → `skill_line_1..3`, each one of the **21 class skill
@@ -116,19 +131,44 @@ column; the `User` JSON model hides it (`json:"-"`).
   `TeamStore.Create` creates it for new teams (`createDefaultEncounterTx`), and
   the migration backfills existing teams.
 - **Names**: an encounter's name must be in `models.ValidEncounterNames` —
-  `Default`, `Trash`, or any ESO trial boss. The frontend mirrors this grouped
-  by trial in `frontend/js/data.js` (`ENCOUNTER_NAME_GROUPS`). This is **seed**
-  data meant to grow; keep the Go set and the JS groups in sync.
+  `Default`, `Trash`, or any ESO trial boss, grouped by trial in
+  `models.EncounterNameGroups`. The frontend mirrors this in
+  `frontend/js/data.js` (`ENCOUNTER_NAME_GROUPS`). This is **seed** data meant to
+  grow; keep the Go groups and the JS groups in sync.
+- **Selection rules** (`models.ValidateEncounterSelection`, enforced on
+  create/rename): names are **unique** per team, and all non-`General`
+  encounters must belong to a **single trial** (the `General` group — Default,
+  Trash — is always allowed alongside one trial). A unique index on
+  `encounters(team_id, name)` (`008_…sql`) backstops uniqueness. The frontend
+  filters the add/rename dropdown to only valid choices via `validEncounterGroups`
+  / `encounterTrial` in `data.js` (used by `populateEncounterNameSelect`).
+- **Copy on create**: the create request accepts an optional `copy_from`
+  encounter id; when set, `EncounterStore.Create` copies that encounter's
+  per-player gear/skills slot-for-slot into the new one (the SQL join on
+  `encounters.team_id` guarantees same-team copies only; the handler also
+  validates the source belongs to the team). The add-encounter form has a
+  **"Copy gear & skills from"** picker whose first option, "None (empty
+  encounter)", creates a blank encounter.
 - **Loadout items** (gear sets, skills): stored as keys; the backend does **not**
   validate them against a master list (free-form, defensively sanitized via
   `SanitizeLoadoutItems`: trimmed, non-empty, ≤100 chars, ≤30 items). The
   searchable dropdowns, labels, and gear tooltips live entirely in the frontend
-  master data (`GEAR_SETS`, and `SKILL_GROUPS` — skills grouped by skill line,
-  with a flat `SKILLS` derived from it — in `data.js`); unknown keys fall back to
-  the raw value. Both pickers use the in-house `createSearchableSelect`
-  component (`js/components.js`) — a dropdown with full free-text search **and**
-  group headers. Skills supply one header per skill line; gear is a single
-  headerless group. Expand the seed there.
+  master data (`GEAR_SET_GROUPS` — gear grouped by set type (5pc, monster,
+  arena, mythic) — and `SKILL_GROUPS` — skills grouped by skill line — in
+  `data.js`, each with a flat `GEAR_SETS`/`SKILLS` derived from it for lookups);
+  unknown keys fall back to the raw value. Both pickers use the in-house
+  `createSearchableSelect` component (`js/components.js`) — a dropdown with full
+  free-text search **and** group headers. Skills supply one header per skill
+  line; gear one header per set type. Expand the seed there. Both gear sets and
+  skills carry a `desc`, shown as a floating tooltip (`initTooltips` in
+  `components.js`, driven by a `data-tip` attribute) on both the picker options
+  **and** the selected chips. Tooltips can be turned off via the topbar
+  **Tooltips** checkbox; the choice persists in `localStorage`
+  (`ctb_tooltips_disabled`) via `setTooltipsEnabled`. The **Encounters** heading
+  and the **Active Encounter** panel title each carry a small circled-`i`
+  `.info-indicator` (focusable, with a `data-tip`) that explains how encounters
+  work; these use the same tooltip engine, so they also respect the Tooltips
+  toggle.
 - **Access/permissions**: mirror the roster — any role can read; editors/owner
   can add, rename, delete, and edit loadouts; viewers are read-only. A team
   cannot delete its **last** encounter.
@@ -147,7 +187,24 @@ column; the `User` JSON model hides it (`json:"-"`).
   below its subclass/class-mastery section (`renderRosterLoadouts`). Loadouts
   autosave on chip add/remove (or Ctrl/Cmd+S); `selectEncounter` flushes any
   pending loadout autosave before switching so unsaved edits are never dropped.
-  See **Autosave (UI)** above.
+  The chip selector sits in its own titled box (`#encounters-panel`,
+  `.encounters-panel`, header "Active Encounter") that lives outside the
+  encounters card (a direct child of the detail section) so its containing block
+  spans the roster, letting it stay pinned while scrolling. By default it
+  attaches flush beneath the encounters card — the card's bottom corners are
+  squared (`.encounters-manage-card`) and the panel overlaps the border with a
+  `-1px` top margin and squared top corners, so they read as one box. Only this
+  panel is `position: sticky`; the rest of the encounters card (heading, add
+  form, rename/delete controls) scrolls away normally. It pins just beneath the
+  **sticky topbar** at `top: var(--topbar-height)` (the topbar is also
+  `position: sticky`; `syncTopbarHeight` in `app.js` measures it into that CSS
+  var on load/resize). `setupEncounterStickiness` watches a zero-height
+  `#encounters-sentinel` via `IntersectionObserver` (top `rootMargin` = topbar
+  height) and toggles an `.is-stuck` class once the panel pins, which rounds all
+  corners and adds elevation so it visibly **splits off** into a floating bar.
+  The topbar brand ("Core Team Builder", `#brand-home`) is a link back to the
+  teams list (SPA navigation, with an `index.html` no-JS fallback). See
+  **Autosave (UI)** above.
 
 ## Request flow
 
