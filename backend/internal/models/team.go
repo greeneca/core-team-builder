@@ -58,6 +58,7 @@ type Player struct {
 	DiscordHandle string `json:"discord_handle"`
 	Role          string `json:"role"`
 	Class         string `json:"class"`
+	Race          string `json:"race"`
 	Subclassed    bool   `json:"subclassed"`
 	SkillLine1    string `json:"skill_line_1"`
 	SkillLine2    string `json:"skill_line_2"`
@@ -151,9 +152,9 @@ func (s *TeamStore) Create(ctx context.Context, ownerID int64, name string, copy
 	if copyFromTeamID != 0 {
 		// Copy the roster slot-for-slot, then all encounters + loadouts.
 		const copyPlayers = `
-			INSERT INTO players (team_id, slot, name, discord_handle, role, class,
+			INSERT INTO players (team_id, slot, name, discord_handle, role, class, race,
 			                     subclassed, skill_line_1, skill_line_2, skill_line_3, mastery_1, mastery_2)
-			SELECT $1, slot, name, discord_handle, role, class,
+			SELECT $1, slot, name, discord_handle, role, class, race,
 			       subclassed, skill_line_1, skill_line_2, skill_line_3, mastery_1, mastery_2
 			FROM players WHERE team_id = $2`
 		if _, err := tx.Exec(ctx, copyPlayers, team.ID, copyFromTeamID); err != nil {
@@ -225,7 +226,7 @@ func (s *TeamStore) Get(ctx context.Context, teamID int64) (*Team, error) {
 	}
 
 	const playersQ = `
-		SELECT id, slot, name, discord_handle, role, class,
+		SELECT id, slot, name, discord_handle, role, class, race,
 		       subclassed, skill_line_1, skill_line_2, skill_line_3, mastery_1, mastery_2
 		FROM players WHERE team_id = $1 ORDER BY slot`
 	pRows, err := s.pool.Query(ctx, playersQ, teamID)
@@ -236,7 +237,7 @@ func (s *TeamStore) Get(ctx context.Context, teamID int64) (*Team, error) {
 	for pRows.Next() {
 		var p Player
 		if err := pRows.Scan(
-			&p.ID, &p.Slot, &p.Name, &p.DiscordHandle, &p.Role, &p.Class,
+			&p.ID, &p.Slot, &p.Name, &p.DiscordHandle, &p.Role, &p.Class, &p.Race,
 			&p.Subclassed, &p.SkillLine1, &p.SkillLine2, &p.SkillLine3, &p.Mastery1, &p.Mastery2,
 		); err != nil {
 			return nil, err
@@ -303,13 +304,13 @@ func (s *TeamStore) Save(ctx context.Context, teamID int64, name string, days []
 
 	const updatePlayer = `
 		UPDATE players
-		SET name = $1, discord_handle = $2, role = $3, class = $4,
-		    subclassed = $5, skill_line_1 = $6, skill_line_2 = $7, skill_line_3 = $8,
-		    mastery_1 = $9, mastery_2 = $10
-		WHERE team_id = $11 AND slot = $12`
+		SET name = $1, discord_handle = $2, role = $3, class = $4, race = $5,
+		    subclassed = $6, skill_line_1 = $7, skill_line_2 = $8, skill_line_3 = $9,
+		    mastery_1 = $10, mastery_2 = $11
+		WHERE team_id = $12 AND slot = $13`
 	for _, p := range players {
 		if _, err := tx.Exec(ctx, updatePlayer,
-			p.Name, p.DiscordHandle, p.Role, p.Class,
+			p.Name, p.DiscordHandle, p.Role, p.Class, p.Race,
 			p.Subclassed, p.SkillLine1, p.SkillLine2, p.SkillLine3, p.Mastery1, p.Mastery2,
 			teamID, p.Slot,
 		); err != nil {

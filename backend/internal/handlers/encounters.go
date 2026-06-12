@@ -210,13 +210,33 @@ func (s *Server) handleDeleteEncounter(w http.ResponseWriter, r *http.Request) {
 }
 
 type loadoutPayload struct {
-	Slot   int      `json:"slot"`
-	Gear   []string `json:"gear"`
-	Skills []string `json:"skills"`
+	Slot        int      `json:"slot"`
+	Gear        []string `json:"gear"`
+	Skills      []string `json:"skills"`
+	Potions     []string `json:"potions"`
+	CPBlue      []string `json:"cp_blue"`
+	Weapons     []string `json:"weapons"`
+	Mundus      string   `json:"mundus"`
+	ArmorHeavy  int      `json:"armor_heavy"`
+	ArmorMedium int      `json:"armor_medium"`
+	ArmorLight  int      `json:"armor_light"`
+	PenExtra    []string `json:"pen_extra"`
 }
 
 type saveLoadoutsRequest struct {
 	Loadouts []loadoutPayload `json:"loadouts"`
+}
+
+// clampArmor bounds an armor-piece count to the valid 0..7 range (a character
+// wears 7 armor pieces total). Out-of-range input is defensively clamped.
+func clampArmor(n int) int {
+	if n < 0 {
+		return 0
+	}
+	if n > 7 {
+		return 7
+	}
+	return n
 }
 
 func (s *Server) handleSaveLoadouts(w http.ResponseWriter, r *http.Request) {
@@ -251,7 +271,39 @@ func (s *Server) handleSaveLoadouts(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "invalid skills list")
 			return
 		}
-		loadouts = append(loadouts, models.Loadout{Slot: p.Slot, Gear: gear, Skills: skills})
+		potions, err := models.SanitizeLoadoutItems(p.Potions)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid potions list")
+			return
+		}
+		cpBlue, err := models.SanitizeLoadoutItems(p.CPBlue)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid champion points list")
+			return
+		}
+		weapons, err := models.SanitizeLoadoutItems(p.Weapons)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid weapons list")
+			return
+		}
+		mundus := strings.TrimSpace(p.Mundus)
+		if len(mundus) > 100 {
+			writeError(w, http.StatusBadRequest, "invalid mundus")
+			return
+		}
+		penExtra, err := models.SanitizeLoadoutItems(p.PenExtra)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid penetration sources list")
+			return
+		}
+		loadouts = append(loadouts, models.Loadout{
+			Slot: p.Slot, Gear: gear, Skills: skills, Potions: potions,
+			CPBlue: cpBlue, Weapons: weapons, Mundus: mundus,
+			ArmorHeavy:  clampArmor(p.ArmorHeavy),
+			ArmorMedium: clampArmor(p.ArmorMedium),
+			ArmorLight:  clampArmor(p.ArmorLight),
+			PenExtra:    penExtra,
+		})
 	}
 
 	if err := s.encounters.SaveLoadouts(r.Context(), enc.ID, loadouts); err != nil {

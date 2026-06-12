@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Dashboard — Core Team Builder</title>
-  <link rel="stylesheet" href="css/styles.css?v=42" />
+  <link rel="stylesheet" href="css/styles.css?v=50" />
 </head>
 <body>
   <div id="message" class="toast is-hidden" role="alert" aria-live="assertive"></div>
@@ -136,12 +136,116 @@
         <div id="encounters-bar" class="encounters-bar"></div>
       </div>
 
+      <!-- Buffs coverage: how many of the tracked buffs the roster covers for
+           the active encounter. The Details button opens a per-buff breakdown. -->
+      <div class="card mt-4 buffs-card">
+        <div class="buffs-summary">
+          <div class="buffs-summary-main">
+            <h2 style="margin: 0;">Buffs<span class="info-indicator" tabindex="0" role="img" aria-label="Buff coverage: How many of the team's tracked buffs are covered by the current roster and the active encounter's gear, skills, and potions. A buff counts as covered when at least one player provides one of its sources. Click Details for the full breakdown." data-tip="How many tracked buffs are covered by the current roster and the active encounter's gear, skills, and potions. A buff counts when at least one player provides one of its sources. Click Details for the full breakdown.">i</span></h2>
+            <span id="buffs-count" class="buffs-count">0 / 0</span>
+          </div>
+          <button id="buffs-details-btn" class="btn btn--ghost btn--sm" type="button">Details</button>
+        </div>
+        <div id="buffs-bar" class="buffs-bar" aria-hidden="true"></div>
+      </div>
+
+      <!-- Crit damage coverage for the active encounter: how much the group
+           provides, how much is applied to the target, and how much each player
+           must supply themselves to reach the cap. Per-player crit shows on each
+           roster slot. -->
+      <div class="card mt-4 crit-card">
+        <div class="buffs-summary">
+          <div class="buffs-summary-main">
+            <h2 style="margin: 0;">Crit Damage<span class="info-indicator" tabindex="0" role="img" aria-label="Crit damage coverage: Critical damage caps at 125% total. 'Group' is provided to the whole team (including the 50% base); 'Target' is applied to the boss; 'Solo required' is what each player must supply from their own sources (mundus, CP, armor, weapon line, race, class passive, sets) to reach the cap. Each roster slot shows that player's total crit and whether it meets the cap. Click Details for the full breakdown." data-tip="Critical damage caps at 125% total. Group is provided to the whole team (incl. the 50% base); Target is applied to the boss; Solo required is what each player must supply themselves to reach the cap. Each roster slot shows its crit total. Click Details for the breakdown.">i</span></h2>
+          </div>
+          <button id="crit-details-btn" class="btn btn--ghost btn--sm" type="button">Details</button>
+        </div>
+        <div class="crit-stats">
+          <div class="crit-stat">
+            <span class="crit-stat-label">Group provided</span>
+            <span id="crit-group" class="crit-stat-value">0%</span>
+          </div>
+          <div class="crit-stat">
+            <span class="crit-stat-label">Target applied</span>
+            <span id="crit-target" class="crit-stat-value">0%</span>
+          </div>
+          <div class="crit-stat">
+            <span class="crit-stat-label">Solo required</span>
+            <span id="crit-required" class="crit-stat-value">0%</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Penetration -->
+      <div class="card mt-4 crit-card">
+        <div class="buffs-summary">
+          <div class="buffs-summary-main">
+            <h2 style="margin: 0;">Penetration<span class="info-indicator" tabindex="0" role="img" aria-label="Penetration coverage: players want their Offensive Penetration to reach the target's Resistance (18200 for trial bosses). 'Group' is provided to the whole team (Breaches, Alkosh, Crusher, etc.); 'Self required' is what each player must supply from their own sources (CP, light armor, mundus, race, class passive, sets, weapon trait) to reach the target. Each roster slot shows that player's total penetration and whether it meets the target. Click Details for the full breakdown." data-tip="Players want penetration to reach the target's Resistance (18200). Group is provided to the whole team (Breaches, Alkosh, Crusher…); Self required is what each player must supply themselves. Each roster slot shows its pen total. Click Details for the breakdown.">i</span></h2>
+          </div>
+          <button id="pen-details-btn" class="btn btn--ghost btn--sm" type="button">Details</button>
+        </div>
+        <div class="crit-stats">
+          <div class="crit-stat">
+            <span class="crit-stat-label">Target resistance</span>
+            <span id="pen-target" class="crit-stat-value">0</span>
+          </div>
+          <div class="crit-stat">
+            <span class="crit-stat-label">Group provided</span>
+            <span id="pen-group" class="crit-stat-value">0</span>
+          </div>
+          <div class="crit-stat">
+            <span class="crit-stat-label">Self required</span>
+            <span id="pen-required" class="crit-stat-value">0</span>
+          </div>
+        </div>
+      </div>
+
       <!-- Roster -->
       <div class="card mt-4">
         <h2 style="margin-top: 0;">Roster <span class="text-muted">(12 players)</span></h2>
         <div id="roster" class="roster-grid"></div>
       </div>
     </section>
+
+    <!-- Buffs details modal -->
+    <div id="buffs-modal" class="modal-overlay is-hidden" role="dialog" aria-modal="true" aria-labelledby="buffs-modal-title">
+      <div class="modal">
+        <div class="modal-head">
+          <h2 id="buffs-modal-title" style="margin: 0;">Buff coverage</h2>
+          <button id="buffs-modal-close" class="btn btn--ghost btn--sm" type="button" aria-label="Close">✕</button>
+        </div>
+        <p id="buffs-modal-sub" class="text-muted" style="margin: var(--space-2) 0 0;"></p>
+        <div id="buffs-modal-list" class="buffs-modal-list mt-4"></div>
+      </div>
+    </div>
+
+    <!-- Crit damage details modal -->
+    <div id="crit-modal" class="modal-overlay is-hidden" role="dialog" aria-modal="true" aria-labelledby="crit-modal-title">
+      <div class="modal">
+        <div class="modal-head">
+          <h2 id="crit-modal-title" style="margin: 0;">Crit damage</h2>
+          <button id="crit-modal-close" class="btn btn--ghost btn--sm" type="button" aria-label="Close">✕</button>
+        </div>
+        <p id="crit-modal-sub" class="text-muted" style="margin: var(--space-2) 0 0;"></p>
+        <div id="crit-modal-sources" class="buffs-modal-list mt-4"></div>
+        <h3 style="margin: var(--space-5) 0 var(--space-2);">Per player</h3>
+        <div id="crit-modal-list" class="buffs-modal-list"></div>
+      </div>
+    </div>
+
+    <!-- Penetration details modal -->
+    <div id="pen-modal" class="modal-overlay is-hidden" role="dialog" aria-modal="true" aria-labelledby="pen-modal-title">
+      <div class="modal">
+        <div class="modal-head">
+          <h2 id="pen-modal-title" style="margin: 0;">Penetration</h2>
+          <button id="pen-modal-close" class="btn btn--ghost btn--sm" type="button" aria-label="Close">✕</button>
+        </div>
+        <p id="pen-modal-sub" class="text-muted" style="margin: var(--space-2) 0 0;"></p>
+        <div id="pen-modal-sources" class="buffs-modal-list mt-4"></div>
+        <h3 style="margin: var(--space-5) 0 var(--space-2);">Per player</h3>
+        <div id="pen-modal-list" class="buffs-modal-list"></div>
+      </div>
+    </div>
 
     <!-- Sharing view (own page) -->
     <section id="share-view" class="is-hidden">
@@ -167,9 +271,9 @@
     </section>
   </main>
 
-  <script src="js/api.js?v=42"></script>
-  <script src="js/data.js?v=42"></script>
-  <script src="js/components.js?v=42"></script>
-  <script src="js/app.js?v=42"></script>
+  <script src="js/api.js?v=50"></script>
+  <script src="js/data.js?v=50"></script>
+  <script src="js/components.js?v=50"></script>
+  <script src="js/app.js?v=50"></script>
 </body>
 </html>

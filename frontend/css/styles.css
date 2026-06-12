@@ -762,7 +762,7 @@ a.brand--home:hover {
 .loadout-name { font-weight: 600; }
 .loadout-lists {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   gap: var(--space-4);
   min-width: 0;
 }
@@ -817,7 +817,7 @@ a.brand--home:hover {
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
-  white-space: normal;
+  white-space: pre-line;
   pointer-events: none;
 }
 .tooltip.is-hidden { display: none; }
@@ -920,6 +920,186 @@ a.brand--home:hover {
   .loadout-row { grid-template-columns: 1fr; }
   .loadout-lists { grid-template-columns: 1fr; }
 }
+
+/* Buffs coverage summary card */
+.buffs-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+.buffs-summary-main {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+.buffs-count {
+  font-size: var(--font-size-lg);
+  font-weight: 700;
+  color: var(--color-text-muted);
+}
+.buffs-count.is-full { color: var(--color-success); }
+.buffs-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: var(--space-3);
+}
+.buff-pip {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-alt);
+}
+.buff-pip.is-met {
+  background: var(--color-success);
+  border-color: var(--color-success);
+}
+.buff-pip.is-unmet {
+  background: transparent;
+}
+
+/* Modal (dialog) — dimmed full-screen overlay with a centered card. */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1500;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: var(--space-6) var(--space-4);
+  background: rgba(0, 0, 0, 0.6);
+  overflow-y: auto;
+}
+.modal-overlay.is-hidden { display: none; }
+.modal {
+  width: 100%;
+  max-width: 640px;
+  margin: auto;
+  padding: var(--space-5);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+}
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+/* Per-buff breakdown list inside the modal. */
+.buffs-modal-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.buff-row {
+  padding: var(--space-3);
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-border);
+  border-radius: var(--radius);
+}
+.buff-row.is-met { border-left-color: var(--color-success); }
+.buff-row.is-unmet { border-left-color: var(--color-danger); }
+.buff-row-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.buff-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.2rem;
+  height: 1.2rem;
+  flex-shrink: 0;
+  font-weight: 700;
+}
+.buff-row.is-met .buff-status { color: var(--color-success); }
+.buff-row.is-unmet .buff-status { color: var(--color-danger); }
+.buff-name { font-weight: 600; }
+.buff-providers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  padding-left: calc(1.2rem + var(--space-2));
+}
+.buff-provider {
+  font-size: var(--font-size-sm);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  padding: var(--space-1) var(--space-3);
+}
+
+/* Crit damage summary card */
+.crit-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+.crit-stat {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+.crit-stat-label {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+.crit-stat-value {
+  font-size: var(--font-size-lg);
+  font-weight: 700;
+}
+
+/* Per-player crit-damage inputs (inside each roster slot's loadout area). */
+.crit-setup {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-4);
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-border);
+}
+.crit-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.crit-field > label {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+.armor-steppers {
+  display: flex;
+  gap: var(--space-2);
+}
+.armor-count {
+  width: 3.5rem;
+  text-align: center;
+}
+.crit-result { margin-left: auto; text-align: right; }
+.crit-label {
+  font-size: var(--font-size-lg);
+  font-weight: 700;
+  color: var(--color-text-muted);
+}
+.crit-label.is-met { color: var(--color-success); }
+.crit-label.is-met::before { content: "\2713 "; }
+.crit-label.is-unmet { color: var(--color-danger); }
+.crit-label.is-unmet::before { content: "\2717 "; }
 
 /* Utility text */
 .text-muted { color: var(--color-text-muted); }

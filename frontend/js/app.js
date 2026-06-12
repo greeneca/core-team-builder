@@ -218,8 +218,10 @@
       if (currentEncounters.length) {
         currentEncounter = await api.getEncounter(id, currentEncounters[0].id);
       }
-      renderTeamDetail();
+      // Show the detail view *before* rendering so the buff/crit coverage
+      // refreshes (which bail when the view is hidden) paint on first load.
       showView("detail");
+      renderTeamDetail();
     } catch (err) {
       handleError(err);
     }
@@ -279,6 +281,7 @@
     renderEncountersBar();
     renderEncounterControls();
     renderRoster();
+    refreshBuffCoverage();
   }
 
   // --- Schedule ---
@@ -392,6 +395,7 @@
         discord_handle: val("discord_handle").trim(),
         role: val("role"),
         class: val("class"),
+        race: val("race"),
         subclassed,
         // Only the active build set is sent; the backend clears the rest too.
         skill_line_1: subclassed ? val("skill_line_1") : "",
@@ -545,7 +549,13 @@
     if (e.target.closest("[data-loadout]")) return;
     // The team-timezone picker manages its own state + autosave (via onSelect).
     if (e.target.closest("#team-tz-add")) return;
-    if (e.target.matches("input, select, textarea")) scheduleAutosave("team");
+    if (e.target.matches("input, select, textarea")) {
+      scheduleAutosave("team");
+      // Build/role/class/race changes can change buff + crit coverage; repaint.
+      refreshBuffCoverage();
+      refreshCritCoverage();
+      refreshPenCoverage();
+    }
   });
 
   // Ctrl+S / Cmd+S forces an immediate save of the team page (roster + the
@@ -692,6 +702,10 @@
               <label>Class</label>
               <select class="input" data-field="class">${optionsHtml(CLASSES, player.class)}</select>
             </div>
+            <div class="form-group">
+              <label>Race</label>
+              <select class="input" data-field="race">${optionsHtml(RACES, player.race)}</select>
+            </div>
           </div>
           <div class="player-build">
             <label class="subclass-toggle">
@@ -709,6 +723,44 @@
               <div class="loadout-col" data-type="skills">
                 <label>Skills</label>
                 <div class="chip-list" data-list></div>
+              </div>
+              <div class="loadout-col" data-type="potions">
+                <label>Potions</label>
+                <div class="chip-list" data-list></div>
+              </div>
+              <div class="loadout-col" data-type="cp_blue">
+                <label>Blue CP</label>
+                <div class="chip-list" data-list></div>
+              </div>
+              <div class="loadout-col" data-type="weapons">
+                <label>Weapons</label>
+                <div class="chip-list" data-list></div>
+              </div>
+              <div class="loadout-col" data-type="pen_extra">
+                <label>Pen sources</label>
+                <div class="chip-list" data-list></div>
+              </div>
+            </div>
+            <div class="crit-setup" data-crit>
+              <div class="crit-field">
+                <label>Mundus</label>
+                <select class="input" data-crit-field="mundus">${optionsHtml(MUNDUS_STONES, "")}</select>
+              </div>
+              <div class="crit-field crit-armor">
+                <label>Armor pieces (H / M / L)</label>
+                <div class="armor-steppers">
+                  <input class="input armor-count" type="number" min="0" max="7" data-crit-field="armor_heavy" aria-label="Heavy armor pieces" />
+                  <input class="input armor-count" type="number" min="0" max="7" data-crit-field="armor_medium" aria-label="Medium armor pieces" />
+                  <input class="input armor-count" type="number" min="0" max="7" data-crit-field="armor_light" aria-label="Light armor pieces" />
+                </div>
+              </div>
+              <div class="crit-field crit-result">
+                <label>Crit damage</label>
+                <span class="crit-label" data-crit-label>—</span>
+              </div>
+              <div class="crit-field crit-result">
+                <label>Penetration</label>
+                <span class="crit-label" data-pen-label>—</span>
               </div>
             </div>
           </div>
@@ -742,6 +794,20 @@
         const listEl = col.querySelector("[data-list]");
         if (editable) col.appendChild(buildAddControl(listEl, type));
       });
+
+      // The crit-setup fields (mundus, armor counts) live inside [data-loadout],
+      // so the generic detail-view change listener skips them; wire their own
+      // encounter autosave + crit refresh here.
+      if (editable) {
+        slot.querySelectorAll("[data-crit] [data-crit-field]").forEach((field) => {
+          const evt = field.tagName === "SELECT" ? "change" : "input";
+          field.addEventListener(evt, () => {
+            scheduleAutosave("encounter");
+            refreshCritCoverage();
+            refreshPenCoverage();
+          });
+        });
+      }
 
       // Viewers get a read-only roster; editors/owner autosave on change.
       if (!editable) {
@@ -777,7 +843,21 @@
         listEl.innerHTML = "";
         (lo[type] || []).forEach((key) => addChip(listEl, type, key, editable));
       });
+
+      // Mundus + armor counts are encounter-scoped too; refresh them on switch.
+      const critEl = slot.querySelector("[data-crit]");
+      if (critEl) {
+        const mundusSel = critEl.querySelector('[data-crit-field="mundus"]');
+        if (mundusSel) mundusSel.value = lo.mundus || "";
+        ["armor_heavy", "armor_medium", "armor_light"].forEach((f) => {
+          const input = critEl.querySelector(`[data-crit-field="${f}"]`);
+          if (input) input.value = Number(lo[f]) || 0;
+        });
+      }
     });
+
+    refreshCritCoverage();
+    refreshPenCoverage();
   }
 
   // Render the conditional build controls for one slot based on its current
@@ -899,6 +979,7 @@
       renderEncountersBar();
       renderEncounterControls();
       renderRosterLoadouts();
+      refreshBuffCoverage();
     } catch (err) {
       handleError(err);
     }
@@ -961,6 +1042,7 @@
       renderEncountersBar();
       renderEncounterControls();
       renderRosterLoadouts();
+      refreshBuffCoverage();
       showMessage(`Added encounter “${enc.name}”`, "success");
     } catch (err) {
       handleError(err);
@@ -991,6 +1073,9 @@
       remove.addEventListener("click", () => {
         chip.remove();
         scheduleAutosave("encounter");
+        refreshBuffCoverage();
+        refreshCritCoverage();
+        refreshPenCoverage();
       });
       chip.appendChild(remove);
     }
@@ -1008,6 +1093,9 @@
       onSelect: (value) => {
         addChip(listEl, type, value, true);
         scheduleAutosave("encounter");
+        refreshBuffCoverage();
+        refreshCritCoverage();
+        refreshPenCoverage();
       },
     });
   }
@@ -1021,10 +1109,28 @@
             .querySelector(`[data-loadout] .loadout-col[data-type="${type}"] .chip-list`)
             .querySelectorAll(".chip")
         ).map((c) => c.dataset.value);
+      const critEl = slot.querySelector("[data-crit]");
+      const critVal = (f) => {
+        const e = critEl ? critEl.querySelector(`[data-crit-field="${f}"]`) : null;
+        return e ? e.value : "";
+      };
+      const armor = (f) => {
+        const v = parseInt(critVal(f), 10);
+        if (!Number.isFinite(v)) return 0;
+        return Math.max(0, Math.min(7, v));
+      };
       return {
         slot: Number(slot.dataset.slot),
         gear: read("gear"),
         skills: read("skills"),
+        potions: read("potions"),
+        cp_blue: read("cp_blue"),
+        weapons: read("weapons"),
+        pen_extra: read("pen_extra"),
+        mundus: critVal("mundus"),
+        armor_heavy: armor("armor_heavy"),
+        armor_medium: armor("armor_medium"),
+        armor_light: armor("armor_light"),
       };
     });
   }
@@ -1076,9 +1182,346 @@
       renderEncountersBar();
       renderEncounterControls();
       renderRosterLoadouts();
+      refreshBuffCoverage();
       showMessage("Encounter deleted", "success");
     } catch (err) {
       handleError(err);
+    }
+  });
+
+  // --- Buffs coverage ---
+  // Coverage is computed live from the current DOM state (roster build + the
+  // selected encounter's gear/skills/potions) so it stays correct after
+  // autosaves (which intentionally don't re-render). A buff is "covered" when at
+  // least one player provides one of its sources.
+  let lastBuffCoverage = null;
+
+  function currentLoadoutBySlot() {
+    const map = {};
+    collectLoadouts().forEach((l) => {
+      map[l.slot] = l;
+    });
+    return map;
+  }
+
+  // Recompute and repaint the summary card (count + pip bar). Cheap; safe to
+  // call on every roster/loadout change. Keeps an open modal in sync.
+  function refreshBuffCoverage() {
+    const countEl = el("buffs-count");
+    if (!countEl || !currentTeam || detailView.classList.contains("is-hidden")) return;
+    if (!el("roster").querySelector(".player-slot")) return;
+
+    const coverage = computeBuffCoverage(collectPlayers(), currentLoadoutBySlot());
+    lastBuffCoverage = coverage;
+
+    countEl.textContent = `${coverage.met} / ${coverage.total}`;
+    countEl.classList.toggle("is-full", coverage.total > 0 && coverage.met === coverage.total);
+
+    const bar = el("buffs-bar");
+    if (bar) {
+      bar.innerHTML = "";
+      coverage.items.forEach((item) => {
+        const pip = document.createElement("span");
+        pip.className = `buff-pip ${item.met ? "is-met" : "is-unmet"}`;
+        pip.dataset.tip = `${item.buff.label}: ${item.met ? "covered" : "not covered"}`;
+        bar.appendChild(pip);
+      });
+    }
+
+    if (!el("buffs-modal").classList.contains("is-hidden")) {
+      renderBuffsModal();
+    }
+  }
+
+  // Render the per-buff breakdown into the details modal.
+  function renderBuffsModal() {
+    const coverage =
+      lastBuffCoverage || computeBuffCoverage(collectPlayers(), currentLoadoutBySlot());
+    el("buffs-modal-sub").textContent =
+      `${coverage.met} of ${coverage.total} buffs covered` +
+      (currentEncounter ? ` · ${currentEncounter.name}` : "");
+
+    const list = el("buffs-modal-list");
+    list.innerHTML = "";
+    coverage.items.forEach((item) => {
+      const row = document.createElement("div");
+      row.className = `buff-row ${item.met ? "is-met" : "is-unmet"}`;
+
+      let providersHtml;
+      if (item.met) {
+        const parts = item.providers.map(
+          (p) =>
+            `<span class="buff-provider">P${p.slot} · ${escapeAttr(
+              BUFF_CATEGORY_LABELS[p.category] || p.category
+            )}: ${escapeAttr(buffSourceLabel(p.category, p.key))}</span>`
+        );
+        providersHtml = `<div class="buff-providers">${parts.join("")}</div>`;
+      } else {
+        providersHtml = `<div class="buff-providers text-muted">Not covered</div>`;
+      }
+
+      const known = buffKnownSources(item.buff);
+      const tipText = [
+        item.buff.desc || "",
+        known.length ? `Known sources: ${known.join("; ")}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n");
+      const tip = tipText ? ` data-tip="${escapeAttr(tipText)}"` : "";
+      row.innerHTML = `
+        <div class="buff-row-head">
+          <span class="buff-status" aria-hidden="true">${item.met ? "✓" : "✗"}</span>
+          <span class="buff-name"${tip}>${escapeAttr(item.buff.label)}</span>
+        </div>
+        ${providersHtml}`;
+      list.appendChild(row);
+    });
+  }
+
+  function openBuffsModal() {
+    renderBuffsModal();
+    el("buffs-modal").classList.remove("is-hidden");
+  }
+
+  function closeBuffsModal() {
+    el("buffs-modal").classList.add("is-hidden");
+  }
+
+  el("buffs-details-btn").addEventListener("click", openBuffsModal);
+  el("buffs-modal-close").addEventListener("click", closeBuffsModal);
+  el("buffs-modal").addEventListener("click", (e) => {
+    // Click on the dimmed backdrop (outside the dialog) closes it.
+    if (e.target === el("buffs-modal")) closeBuffsModal();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !el("buffs-modal").classList.contains("is-hidden")) {
+      closeBuffsModal();
+    }
+  });
+
+  // --- Crit damage coverage ---
+  // Like buffs, crit is computed live from the current DOM (roster build + the
+  // selected encounter's gear/skills/CP/weapons/mundus/armor) so it survives
+  // autosaves. The card shows group/target/solo-required; each roster slot gets a
+  // crit-damage label + met/unmet indicator against the cap.
+  let lastCritCoverage = null;
+
+  function refreshCritCoverage() {
+    const groupEl = el("crit-group");
+    if (!groupEl || !currentTeam || detailView.classList.contains("is-hidden")) return;
+    if (!el("roster").querySelector(".player-slot")) return;
+
+    const cov = computeCritCoverage(collectPlayers(), currentLoadoutBySlot());
+    lastCritCoverage = cov;
+
+    el("crit-group").textContent = `${cov.group}%`;
+    el("crit-target").textContent = `${cov.target}%`;
+    el("crit-required").textContent = `${cov.soloRequired}%`;
+
+    const bySlot = {};
+    cov.players.forEach((p) => {
+      bySlot[p.slot] = p;
+    });
+    el("roster").querySelectorAll(".player-slot").forEach((slot) => {
+      const label = slot.querySelector("[data-crit-label]");
+      if (!label) return;
+      const r = bySlot[Number(slot.dataset.slot)];
+      if (!r) {
+        label.textContent = "—";
+        return;
+      }
+      label.textContent = `${r.total}%`;
+      label.classList.toggle("is-met", r.met);
+      label.classList.toggle("is-unmet", !r.met);
+      const breakdown = `self ${r.self}% + group ${cov.group}% + target ${cov.target}%`;
+      label.dataset.tip = r.met
+        ? `Meets the ${cov.cap}% cap (${breakdown}).`
+        : `${r.deficit}% under the ${cov.cap}% cap (${breakdown}).`;
+    });
+
+    if (!el("crit-modal").classList.contains("is-hidden")) renderCritModal();
+  }
+
+  // Render the group/target source breakdown + per-player breakdown into the
+  // crit details modal.
+  function renderCritModal() {
+    const cov =
+      lastCritCoverage || computeCritCoverage(collectPlayers(), currentLoadoutBySlot());
+    el("crit-modal-sub").textContent =
+      `Cap ${cov.cap}% · Group ${cov.group}% · Target ${cov.target}% · Each player needs ${cov.soloRequired}% of their own` +
+      (currentEncounter ? ` · ${currentEncounter.name}` : "");
+
+    const provs = (sources) =>
+      sources.length
+        ? sources
+            .map(
+              (s) =>
+                `<span class="buff-provider">${escapeAttr(s.label)} +${s.pct}% (P${s.providers
+                  .map((pr) => pr.slot)
+                  .join(", P")})</span>`
+            )
+            .join("")
+        : `<span class="text-muted">none detected</span>`;
+
+    el("crit-modal-sources").innerHTML = `
+      <div class="buff-row is-met">
+        <div class="buff-row-head"><span class="buff-name">Group provided (${cov.group}%)</span></div>
+        <div class="buff-providers"><span class="buff-provider">Base +${cov.base}%</span>${provs(cov.groupSources)}</div>
+      </div>
+      <div class="buff-row is-met">
+        <div class="buff-row-head"><span class="buff-name">Target applied (${cov.target}%)</span></div>
+        <div class="buff-providers">${provs(cov.targetSources)}</div>
+      </div>`;
+
+    const list = el("crit-modal-list");
+    list.innerHTML = "";
+    cov.players.forEach((p) => {
+      const row = document.createElement("div");
+      row.className = `buff-row ${p.met ? "is-met" : "is-unmet"}`;
+      const selfParts = p.sources.length
+        ? p.sources
+            .map((s) => `<span class="buff-provider">${escapeAttr(s.label)} +${s.pct}%</span>`)
+            .join("")
+        : `<span class="text-muted">No self sources</span>`;
+      row.innerHTML = `
+        <div class="buff-row-head">
+          <span class="buff-status" aria-hidden="true">${p.met ? "✓" : "✗"}</span>
+          <span class="buff-name">P${p.slot} — ${p.total}%${p.met ? "" : ` (−${p.deficit}%)`}</span>
+        </div>
+        <div class="buff-providers">${selfParts}</div>`;
+      list.appendChild(row);
+    });
+  }
+
+  function openCritModal() {
+    renderCritModal();
+    el("crit-modal").classList.remove("is-hidden");
+  }
+
+  function closeCritModal() {
+    el("crit-modal").classList.add("is-hidden");
+  }
+
+  el("crit-details-btn").addEventListener("click", openCritModal);
+  el("crit-modal-close").addEventListener("click", closeCritModal);
+  el("crit-modal").addEventListener("click", (e) => {
+    if (e.target === el("crit-modal")) closeCritModal();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !el("crit-modal").classList.contains("is-hidden")) {
+      closeCritModal();
+    }
+  });
+
+  // --- Penetration coverage (mirrors crit) ---
+  // Evaluates the roster against the selected encounter. The card shows the
+  // group total + per-player self requirement; each roster slot gets a pen label
+  // with a met/unmet indicator against the target resistance.
+  let lastPenCoverage = null;
+
+  function refreshPenCoverage() {
+    const groupEl = el("pen-group");
+    if (!groupEl || !currentTeam || detailView.classList.contains("is-hidden")) return;
+    if (!el("roster").querySelector(".player-slot")) return;
+
+    const cov = computePenCoverage(collectPlayers(), currentLoadoutBySlot());
+    lastPenCoverage = cov;
+
+    el("pen-target").textContent = cov.target.toLocaleString();
+    el("pen-group").textContent = cov.group.toLocaleString();
+    el("pen-required").textContent = cov.selfRequired.toLocaleString();
+
+    const bySlot = {};
+    cov.players.forEach((p) => {
+      bySlot[p.slot] = p;
+    });
+    el("roster").querySelectorAll(".player-slot").forEach((slot) => {
+      const label = slot.querySelector("[data-pen-label]");
+      if (!label) return;
+      const r = bySlot[Number(slot.dataset.slot)];
+      if (!r) {
+        label.textContent = "—";
+        return;
+      }
+      label.textContent = r.total.toLocaleString();
+      label.classList.toggle("is-met", r.met);
+      label.classList.toggle("is-unmet", !r.met);
+      const breakdown = `self ${r.self.toLocaleString()} + group ${cov.group.toLocaleString()}`;
+      label.dataset.tip = r.met
+        ? `Reaches the ${cov.target.toLocaleString()} target (${breakdown}).`
+        : `${r.deficit.toLocaleString()} under the ${cov.target.toLocaleString()} target (${breakdown}).`;
+    });
+
+    if (!el("pen-modal").classList.contains("is-hidden")) renderPenModal();
+  }
+
+  // Render the group source breakdown + per-player breakdown into the pen modal.
+  function renderPenModal() {
+    const cov =
+      lastPenCoverage || computePenCoverage(collectPlayers(), currentLoadoutBySlot());
+    el("pen-modal-sub").textContent =
+      `Target ${cov.target.toLocaleString()} · Group ${cov.group.toLocaleString()} · Each player needs ${cov.selfRequired.toLocaleString()} of their own` +
+      (currentEncounter ? ` · ${currentEncounter.name}` : "");
+
+    const provs = (sources) =>
+      sources.length
+        ? sources
+            .map(
+              (s) =>
+                `<span class="buff-provider">${escapeAttr(s.label)} +${s.pen.toLocaleString()} (P${s.providers
+                  .map((pr) => pr.slot)
+                  .join(", P")})</span>`
+            )
+            .join("")
+        : `<span class="text-muted">none detected</span>`;
+
+    el("pen-modal-sources").innerHTML = `
+      <div class="buff-row is-met">
+        <div class="buff-row-head"><span class="buff-name">Group provided (${cov.group.toLocaleString()})</span></div>
+        <div class="buff-providers">${provs(cov.groupSources)}</div>
+      </div>`;
+
+    const list = el("pen-modal-list");
+    list.innerHTML = "";
+    cov.players.forEach((p) => {
+      const row = document.createElement("div");
+      row.className = `buff-row ${p.met ? "is-met" : "is-unmet"}`;
+      const selfParts = p.sources.length
+        ? p.sources
+            .map(
+              (s) => `<span class="buff-provider">${escapeAttr(s.label)} +${s.pen.toLocaleString()}</span>`
+            )
+            .join("")
+        : `<span class="text-muted">No self sources</span>`;
+      row.innerHTML = `
+        <div class="buff-row-head">
+          <span class="buff-status" aria-hidden="true">${p.met ? "✓" : "✗"}</span>
+          <span class="buff-name">P${p.slot} — ${p.total.toLocaleString()}${
+        p.met ? "" : ` (−${p.deficit.toLocaleString()})`
+      }</span>
+        </div>
+        <div class="buff-providers">${selfParts}</div>`;
+      list.appendChild(row);
+    });
+  }
+
+  function openPenModal() {
+    renderPenModal();
+    el("pen-modal").classList.remove("is-hidden");
+  }
+
+  function closePenModal() {
+    el("pen-modal").classList.add("is-hidden");
+  }
+
+  el("pen-details-btn").addEventListener("click", openPenModal);
+  el("pen-modal-close").addEventListener("click", closePenModal);
+  el("pen-modal").addEventListener("click", (e) => {
+    if (e.target === el("pen-modal")) closePenModal();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !el("pen-modal").classList.contains("is-hidden")) {
+      closePenModal();
     }
   });
 

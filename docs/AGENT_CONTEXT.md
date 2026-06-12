@@ -161,7 +161,28 @@ column; the `User` JSON model hides it (`json:"-"`).
   validates the source belongs to the team). The add-encounter form has a
   **"Copy gear & skills from"** picker whose first option, "None (empty
   encounter)", creates a blank encounter.
-- **Loadout items** (gear sets, skills): stored as keys; the backend does **not**
+- **Loadouts hold three lists**: each `(encounter, slot)` loadout has `gear`,
+  `skills`, **and `potions`** (`011_loadout_potions.sql` adds the `potions TEXT[]`
+  column). All three are free-form, ordered key lists treated identically by the
+  store/handler (`Loadout.Potions`, sanitized via `SanitizeLoadoutItems`) and the
+  copy-on-create logic. The frontend renders a third searchable picker/chip
+  column per slot driven by `LOADOUT_TYPES.potions` (master data `POTION_GROUPS`/
+  `POTIONS` in `data.js`).
+- **Crit inputs on the loadout** (`012_loadout_crit.sql`): each `(encounter,
+  slot)` loadout also carries `cp_blue TEXT[]` (slotted blue/Warfare CP),
+  `weapons TEXT[]` (weapon lines), `mundus TEXT`, and `armor_heavy/medium/light
+  SMALLINT` (0–7). `cp_blue`/`weapons` reuse the chip machinery
+  (`LOADOUT_TYPES.cp_blue`/`.weapons`); mundus is a `<select>` and armor are
+  number steppers. These feed the crit calculator (see "Crit damage model").
+  `players.race` (`013_player_race.sql`, validated by `models.ValidRace`) is the
+  roster-level crit input.
+- **Penetration input on the loadout** (`014_loadout_pen_extra.sql`): each
+  `(encounter, slot)` loadout also carries `pen_extra TEXT[]` — a chip column
+  (`LOADOUT_TYPES.pen_extra`, master data `PEN_EXTRA_SOURCES` in `data.js`) for
+  flat penetration sources that aren't otherwise derivable (Crusher enchant,
+  Sharpened trait, Mace/Maul, generic set-piece bonuses). These plus reused
+  inputs feed the penetration calculator (see "Penetration model").
+- **Loadout items** (gear sets, skills, potions, cp_blue, weapons, pen_extra): stored as keys; the backend does **not**
   validate them against a master list (free-form, defensively sanitized via
   `SanitizeLoadoutItems`: trimmed, non-empty, ≤100 chars, ≤30 items). The
   searchable dropdowns, labels, and gear tooltips live entirely in the frontend
@@ -217,6 +238,98 @@ column; the `User` JSON model hides it (`json:"-"`).
   The topbar brand ("Core Team Builder", `#brand-home`) is a link back to the
   teams list (SPA navigation, with an `index.html` no-JS fallback). See
   **Autosave (UI)** above.
+
+## Buffs model (current)
+
+- **What it is**: a team wants to cover a fixed list of ESO buffs. The app shows
+  how many are covered **for the selected encounter** plus a per-buff breakdown.
+- **No backend/DB**: buffs are pure **frontend reference data + a computed view**.
+  The only persisted change buffs required is the per-encounter `potions` loadout
+  (above). Coverage is recomputed client-side from data already in memory.
+- **Data** (`frontend/js/data.js`): `BUFFS` is an array of
+  `{ value, label, desc, sources }` where `sources` maps a category to providing
+  keys: `gear`, `skills`, `potions` (per-encounter loadout) and `masteries`,
+  `classes`, `skillLines` (roster build). The seeded source keys are **sensible
+  placeholders** — adjust them to the exact ESO sources without changing the
+  shape. Keys reference the existing master data (gear sets, skills, potions,
+  class masteries/classes/skill lines).
+- **Coverage rule** (`computeBuffCoverage(players, loadoutBySlot)` in `data.js`):
+  a buff is **met** if at least one player provides at least one of its sources.
+  Build sources honor subclassing — a `subclassed` player contributes their
+  `skill_line_*`; a non-subclassed player contributes their `class` + `mastery_*`.
+  Loadout sources (gear/skills/potions) always count. Returns `{ total, met,
+  items: [{ buff, met, providers:[{slot, category, key}] }] }`.
+- **UI** (`app.js` / `index.html`): a **Buffs** card on the team detail page
+  shows `met / total` plus a pip bar; a **Details** button opens `#buffs-modal`
+  listing each buff (met/unmet + which players/sources provide it).
+  `refreshBuffCoverage()` reads the live DOM (`collectPlayers()` +
+  `collectLoadouts()`) and repaints without a full re-render, so it stays correct
+  after autosaves; it is called on detail render, encounter switch, roster/build
+  changes, and loadout chip add/remove.
+
+## Crit damage model (current)
+
+- **What it is**: a per-encounter critical-damage calculator shown below the
+  Buffs card. Critical damage caps at **125% total** (`CRIT_CAP`); the **50%**
+  base (`CRIT_BASE`) is modelled as a group source.
+- **Three buckets**: `group` (whole team — any one player providing it counts),
+  `target` (a debuff on the boss — any one player applies it), and `self` (only
+  that player). Per player, effective crit = `group + target + self`; they meet
+  the cap when that reaches 125. **Solo required** = `125 - group - target`.
+- **No backend math**: like buffs, this is frontend reference data + a computed
+  view. The only persisted inputs are the per-encounter crit columns on
+  `encounter_loadouts` (cp_blue/weapons/mundus/armor) and `players.race`.
+- **Data** (`frontend/js/data.js`): `CRIT_GROUP_SOURCES`, `CRIT_TARGET_SOURCES`
+  (each `{value,label,pct,detect}` where `detect` maps a category to keys), and
+  `CRIT_SELF_SOURCES` (each `{label,pct,type,...}`; `type` ∈
+  `mundus|cp|gear|race|classPassive`). Medium-armor Dexterity is
+  `CRIT_MEDIUM_PER_PIECE` (2%) × medium pieces; weapon-line crit takes the MAX of
+  selected lines (one active bar). Several source keys (Minor Force, Minor
+  Brittle) are **placeholders** — one-line edits.
+- **Rule** (`computeCritCoverage(players, loadoutBySlot)`): class-passive
+  detection honors subclassing (non-subclassed → `class`; subclassed → the linked
+  `skill_line_*`). Returns `{ cap, base, group, target, soloRequired,
+  groupSources, targetSources, players:[{slot, self, total, met, deficit,
+  sources}] }`.
+- **UI** (`app.js`/`index.html`): a **Crit Damage** card shows group/target/solo
+  stats with a `Details` button (`#crit-modal` lists detected group/target
+  sources + each player's breakdown). Each roster slot has crit inputs (Blue CP +
+  Weapons chip columns, Mundus select, H/M/L armor steppers) and a `.crit-label`
+  showing that player's total with a met/unmet indicator. `refreshCritCoverage()`
+  repaints live (same trigger points as `refreshBuffCoverage()`, plus mundus/
+  armor/race changes).
+
+## Penetration model (current)
+
+- **What it is**: a per-encounter penetration calculator shown below the Crit
+  card, built on the same pattern. A player wants their Offensive Penetration to
+  reach the target's Resistance (`PEN_TARGET = 18200`, the standard trial value).
+- **Two buckets**: `group` (team-wide debuffs/buffs — Breaches, Alkosh, Crimson
+  Oath, Tremorscale, Crusher, etc.; any one player providing it counts for all)
+  and `self` (only that player — CP Piercing, light armor, The Lover mundus,
+  Velothi, Arcanist Splintered Secrets, Wood Elf, arena 1pc, plus `pen_extra`).
+  Per player, total = `group + self`; they meet it when total ≥ 18200. **Self
+  required** = `18200 - group`.
+- **No backend math**: frontend reference data + a computed view. Reuses existing
+  per-encounter inputs (cp_blue, armor_light, mundus, gear) and `players.race`;
+  the only new persisted input is `pen_extra` on `encounter_loadouts`.
+- **Data** (`frontend/js/data.js`): `PEN_GROUP_SOURCES` (each
+  `{value,label,pen,detect}`), `PEN_SELF_SOURCES` (each `{label,pen,type,...}`;
+  `type` ∈ `cp|gear|mundus|race|classPassive`), `PEN_EXTRA_SOURCES` (the
+  `pen_extra` chip options, each `{value,label,pen,bucket}` where `bucket` ∈
+  `self|group`). Light armor is `PEN_LIGHT_PER_PIECE` (939) × light pieces; arena
+  1pc is detected from any equipped gear in the `Arena Weapons` group. Several
+  group keys (Major/Minor Breach, Runic Sunder, Dismember) are **placeholders** —
+  one-line edits.
+- **Rule** (`computePenCoverage(players, loadoutBySlot)`): class-passive detection
+  honors subclassing like crit; group detection reuses `critSourceProviders`.
+  Returns `{ target, group, selfRequired, groupSources, players:[{slot, self,
+  total, met, deficit, sources}] }`.
+- **UI** (`app.js`/`index.html`): a **Penetration** card shows target/group/self
+  stats with a `Details` button (`#pen-modal`). Each roster slot has a `pen_extra`
+  chip column and a penetration label with a met/unmet indicator.
+  `refreshPenCoverage()` repaints live (same trigger points as
+  `refreshCritCoverage()`).
 
 ## Request flow
 

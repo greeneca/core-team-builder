@@ -45,9 +45,16 @@ hit CORS). The JS is split into:
 - `js/api.js` — fetch wrapper, token storage, and endpoint helpers (the `api`
   client object only — no domain data).
 - `js/data.js` — all shared reference data + display helpers: roles, classes,
-  share roles, days, timezone/schedule helpers, subclassing skill lines and
-  class masteries, and the ESO encounter master/seed data (boss names grouped by
-  trial, gear sets with tooltips, skills) with lookup helpers.
+  races, share roles, days, timezone/schedule helpers, subclassing skill lines
+  and class masteries, and the ESO encounter master/seed data (boss names grouped
+  by trial, gear sets with tooltips, skills, potions, mundus stones, weapon lines,
+  blue CP) with lookup helpers. Also holds the `BUFFS` list +
+  `computeBuffCoverage()`, the crit model (`CRIT_*` source tables +
+  `computeCritCoverage()`), and the penetration model (`PEN_*` source tables +
+  `computePenCoverage()`). Buffs, crit, and penetration are frontend-only
+  reference data; coverage is computed from the roster build + the selected
+  encounter's loadout — see `docs/AGENT_CONTEXT.md` "Buffs model", "Crit damage
+  model", and "Penetration model".
 - `js/components.js` — reusable, framework-free UI components
   (`createSearchableSelect`: a search box with optional group headers, used by
   the loadout gear/skills pickers) plus `initTooltips`: an app-wide floating
@@ -137,6 +144,7 @@ single membership lookup.
 | discord_handle | varchar(100) | default `''`                             |
 | role           | varchar(20)  | `''`/`tank`/`healer`/`dps`/`support_dps` |
 | class          | varchar(30)  | `''` or current ESO class                |
+| race           | text         | `''` or playable race; `013_player_race.sql` |
 | subclassed     | boolean      | default `false`                          |
 | skill_line_1..3| varchar(40)  | `''` or one of 21 class skill lines      |
 | mastery_1..2   | varchar(40)  | `''` or one of the class's 5 masteries   |
@@ -173,15 +181,26 @@ apply (drawn from the player's class) and the skill lines are blanked.
 | slot         | smallint | 1–12; PK part                               |
 | gear         | text[]   | ordered list of gear-set keys (default `{}`)|
 | skills       | text[]   | ordered list of skill keys (default `{}`)   |
+| potions      | text[]   | ordered list of potion keys (default `{}`); `011_loadout_potions.sql` |
+| cp_blue      | text[]   | slotted blue (Warfare) CP star keys (default `{}`); `012_loadout_crit.sql` |
+| weapons      | text[]   | equipped weapon-line keys (default `{}`); `012_loadout_crit.sql` |
+| mundus       | text     | mundus stone key (default `''`); `012_loadout_crit.sql` |
+| armor_heavy/medium/light | smallint | armor-piece counts 0–7 (default `0`); `012_loadout_crit.sql` |
+| pen_extra    | text[]   | flat penetration source keys (default `{}`); `014_loadout_pen_extra.sql` |
 
 Every team has at least one encounter (`Default`), created with the team and
 backfilled for existing teams. Encounter names are validated against
 `ValidEncounterNames` and must be **unique per team** and all from a **single
 trial** (plus the always-allowed `General` group) — see
 `ValidateEncounterSelection`, with a unique index on `encounters(team_id, name)`
-as a DB backstop. gear/skill items are free-form (sanitized, not
-allow-listed) — the searchable options + gear tooltips live in the frontend
-master data (`frontend/js/data.js`).
+as a DB backstop. gear/skill/potion/cp_blue/weapons/pen_extra items are free-form
+(sanitized, not allow-listed); mundus is a trimmed string and the armor counts
+are clamped to 0–7 — the searchable options + tooltips live in the frontend
+master data (`frontend/js/data.js`). The crit-input columns
+(`cp_blue`/`weapons`/`mundus`/armor) feed the client-side crit-damage calculator
+(see `docs/AGENT_CONTEXT.md` "Crit damage model"); `pen_extra` plus those reused
+inputs feed the penetration calculator (see "Penetration model"); `players.race`
+(`013_player_race.sql`) is the roster-level input both also read.
 
 ## Authentication & security
 

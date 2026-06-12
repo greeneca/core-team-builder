@@ -120,11 +120,21 @@ func ValidateEncounterSelection(existing []string, candidate string) error {
 	return nil
 }
 
-// Loadout is a single player's gear + skills for one encounter.
+// Loadout is a single player's gear, skills, potions, and crit-damage inputs
+// for one encounter. CPBlue/Weapons/Mundus and the armor counts feed the
+// client-side crit-damage calculator; they are stored per encounter per slot.
 type Loadout struct {
-	Slot   int      `json:"slot"`
-	Gear   []string `json:"gear"`
-	Skills []string `json:"skills"`
+	Slot        int      `json:"slot"`
+	Gear        []string `json:"gear"`
+	Skills      []string `json:"skills"`
+	Potions     []string `json:"potions"`
+	CPBlue      []string `json:"cp_blue"`
+	Weapons     []string `json:"weapons"`
+	Mundus      string   `json:"mundus"`
+	ArmorHeavy  int      `json:"armor_heavy"`
+	ArmorMedium int      `json:"armor_medium"`
+	ArmorLight  int      `json:"armor_light"`
+	PenExtra    []string `json:"pen_extra"`
 }
 
 // Encounter is a named fight within a team, with a per-player loadout list.
@@ -208,10 +218,10 @@ func copyEncountersTx(ctx context.Context, tx pgx.Tx, srcTeamID, dstTeamID int64
 		).Scan(&newID); err != nil {
 			return err
 		}
-		// Copy the 12 loadout rows (gear + skills) slot-for-slot.
+		// Copy the 12 loadout rows (gear + skills + potions + crit inputs) slot-for-slot.
 		if _, err := tx.Exec(ctx,
-			`INSERT INTO encounter_loadouts (encounter_id, slot, gear, skills)
-			 SELECT $1, slot, gear, skills FROM encounter_loadouts WHERE encounter_id = $2`,
+			`INSERT INTO encounter_loadouts (encounter_id, slot, gear, skills, potions, cp_blue, weapons, mundus, armor_heavy, armor_medium, armor_light, pen_extra)
+			 SELECT $1, slot, gear, skills, potions, cp_blue, weapons, mundus, armor_heavy, armor_medium, armor_light, pen_extra FROM encounter_loadouts WHERE encounter_id = $2`,
 			newID, src.id,
 		); err != nil {
 			return err
@@ -280,11 +290,14 @@ func (s *EncounterStore) Create(ctx context.Context, teamID int64, name string, 
 	}
 
 	if copyFromID != 0 {
-		// Copy gear/skills slot-for-slot from the source. The join on
-		// encounters(team_id) ensures we only ever copy within the same team.
+		// Copy gear/skills/potions/crit inputs slot-for-slot from the source. The
+		// join on encounters(team_id) ensures we only ever copy within the same team.
 		if _, err := tx.Exec(ctx,
 			`UPDATE encounter_loadouts dst
-			 SET gear = src.gear, skills = src.skills
+			 SET gear = src.gear, skills = src.skills, potions = src.potions,
+			     cp_blue = src.cp_blue, weapons = src.weapons, mundus = src.mundus,
+			     armor_heavy = src.armor_heavy, armor_medium = src.armor_medium, armor_light = src.armor_light,
+			     pen_extra = src.pen_extra
 			 FROM encounter_loadouts src
 			 JOIN encounters e ON e.id = src.encounter_id
 			 WHERE dst.encounter_id = $1
@@ -320,7 +333,7 @@ func (s *EncounterStore) Get(ctx context.Context, encounterID int64) (*Encounter
 	}
 
 	const lq = `
-		SELECT slot, gear, skills
+		SELECT slot, gear, skills, potions, cp_blue, weapons, mundus, armor_heavy, armor_medium, armor_light, pen_extra
 		FROM encounter_loadouts WHERE encounter_id = $1 ORDER BY slot`
 	rows, err := s.pool.Query(ctx, lq, encounterID)
 	if err != nil {
@@ -329,7 +342,10 @@ func (s *EncounterStore) Get(ctx context.Context, encounterID int64) (*Encounter
 	defer rows.Close()
 	for rows.Next() {
 		var l Loadout
-		if err := rows.Scan(&l.Slot, &l.Gear, &l.Skills); err != nil {
+		if err := rows.Scan(
+			&l.Slot, &l.Gear, &l.Skills, &l.Potions,
+			&l.CPBlue, &l.Weapons, &l.Mundus, &l.ArmorHeavy, &l.ArmorMedium, &l.ArmorLight, &l.PenExtra,
+		); err != nil {
 			return nil, err
 		}
 		e.Loadouts = append(e.Loadouts, l)
@@ -362,7 +378,8 @@ func (s *EncounterStore) Delete(ctx context.Context, encounterID int64) error {
 	return err
 }
 
-// SaveLoadouts updates the gear/skills for the given slots in one transaction.
+// SaveLoadouts updates the gear/skills/potions and crit inputs for the given
+// slots in one transaction.
 func (s *EncounterStore) SaveLoadouts(ctx context.Context, encounterID int64, loadouts []Loadout) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -371,10 +388,16 @@ func (s *EncounterStore) SaveLoadouts(ctx context.Context, encounterID int64, lo
 	defer tx.Rollback(ctx)
 
 	const q = `
-		UPDATE encounter_loadouts SET gear = $1, skills = $2
-		WHERE encounter_id = $3 AND slot = $4`
+		UPDATE encounter_loadouts
+		SET gear = $1, skills = $2, potions = $3, cp_blue = $4, weapons = $5,
+		    mundus = $6, armor_heavy = $7, armor_medium = $8, armor_light = $9, pen_extra = $10
+		WHERE encounter_id = $11 AND slot = $12`
 	for _, l := range loadouts {
-		if _, err := tx.Exec(ctx, q, l.Gear, l.Skills, encounterID, l.Slot); err != nil {
+		if _, err := tx.Exec(ctx, q,
+			l.Gear, l.Skills, l.Potions, l.CPBlue, l.Weapons,
+			l.Mundus, l.ArmorHeavy, l.ArmorMedium, l.ArmorLight, l.PenExtra,
+			encounterID, l.Slot,
+		); err != nil {
 			return err
 		}
 	}

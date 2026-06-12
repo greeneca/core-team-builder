@@ -154,6 +154,7 @@ type playerPayload struct {
 	DiscordHandle string `json:"discord_handle"`
 	Role          string `json:"role"`
 	Class         string `json:"class"`
+	Race          string `json:"race"`
 	Subclassed    bool   `json:"subclassed"`
 	SkillLine1    string `json:"skill_line_1"`
 	SkillLine2    string `json:"skill_line_2"`
@@ -210,12 +211,17 @@ func (s *Server) handleUpdateTeam(w http.ResponseWriter, r *http.Request) {
 		}
 		role := strings.TrimSpace(p.Role)
 		class := strings.TrimSpace(p.Class)
+		race := strings.TrimSpace(p.Race)
 		if !models.ValidRoles[role] {
 			writeError(w, http.StatusBadRequest, "invalid role")
 			return
 		}
 		if !models.ValidClasses[class] {
 			writeError(w, http.StatusBadRequest, "invalid class")
+			return
+		}
+		if !models.ValidRace(race) {
+			writeError(w, http.StatusBadRequest, "invalid race")
 			return
 		}
 
@@ -225,6 +231,7 @@ func (s *Server) handleUpdateTeam(w http.ResponseWriter, r *http.Request) {
 			DiscordHandle: strings.TrimSpace(p.DiscordHandle),
 			Role:          role,
 			Class:         class,
+			Race:          race,
 			Subclassed:    p.Subclassed,
 		}
 

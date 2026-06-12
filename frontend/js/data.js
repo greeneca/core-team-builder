@@ -48,6 +48,22 @@ const CLASSES = [
   { value: "warden", label: "Warden" },
 ];
 
+// Playable ESO races. Keys mirror the backend allow-list (eso.go). Race feeds
+// the crit calculator (only Khajiit's "Feline Ambush" gives crit damage today).
+const RACES = [
+  { value: "", label: "—" },
+  { value: "altmer", label: "Altmer (High Elf)" },
+  { value: "argonian", label: "Argonian" },
+  { value: "bosmer", label: "Bosmer (Wood Elf)" },
+  { value: "breton", label: "Breton" },
+  { value: "dunmer", label: "Dunmer (Dark Elf)" },
+  { value: "imperial", label: "Imperial" },
+  { value: "khajiit", label: "Khajiit" },
+  { value: "nord", label: "Nord" },
+  { value: "orc", label: "Orc (Orsimer)" },
+  { value: "redguard", label: "Redguard" },
+];
+
 function labelFor(list, value) {
   const match = list.find((item) => item.value === value);
   return match ? match.label : "—";
@@ -488,6 +504,10 @@ const GEAR_SET_GROUPS = [
     { value: "z_ens_redress", label: "Z'en's Redress", desc: "5pc: Increases your damage to an enemy by 1% per damage-over-time effect you have on them, up to 5%. (Vvardenfell)" },
     { value: "crimson_oaths_rive", label: "Crimson Oath's Rive", desc: "5pc: Dealing damage releases a cleave that deals Physical Damage and reduces enemy damage done. (Markarth)" },
     { value: "plaguebreak", label: "Plaguebreak", desc: "5pc: Damaging a cursed enemy builds up an explosion that bursts for AoE damage. (Cyrodiil)" },
+    { value: "roar_of_alkosh", label: "Roar of Alkosh", desc: "5pc: Using a synergy deals damage and applies Major Vulnerability to nearby enemies. (Maw of Lorkhaj)" },
+    { value: "touch_of_zen", label: "Touch of Z'en", desc: "5pc: Increases your damage to an enemy by 5% for every damage-over-time effect you have on them, up to 25%. (Halls of Fabrication)" },
+    { value: "way_of_martial_knowledge", label: "Way of Martial Knowledge", desc: "5pc: Damaging an enemy increases their damage taken from your next direct attack. (Maelstrom Arena)" },
+    { value: "elemental_catalyst", label: "Elemental Catalyst", desc: "5pc: Applying Flame, Frost, and Shock status effects grants the target stacks of increased Critical Damage taken. (Vateshran Hollows)" },
   ] },
   { group: "Monster Sets", sets: [
     { value: "slimecraw", label: "Slimecraw", desc: "1pc: Grants Minor Berserk, increasing your damage done by 5%. (Monster set)" },
@@ -496,6 +516,10 @@ const GEAR_SET_GROUPS = [
     { value: "selene", label: "Selene", desc: "2pc: Dealing melee damage summons a primal beast that mauls your enemy for Physical Damage. (Monster set)" },
     { value: "encratiss_behemoth", label: "Encratis's Behemoth", desc: "2pc: Damaging a Flame-debuffed enemy reduces their Flame Damage and increases yours. (Monster set)" },
     { value: "baron_zaudrus", label: "Baron Zaudrus", desc: "2pc: Dealing damage builds stacks; at 3 stacks deal Magic Damage and grant Minor Brittle. (Monster set)" },
+    { value: "nunatak", label: "Nunatak", desc: "2pc: Damaging an enemy with a Frost ability applies Major Brittle, increasing their Critical Damage taken. (Monster set)" },
+    { value: "symphony_of_blades", label: "Symphony of Blades", desc: "2pc: Healing a low-resource ally grants them Magicka and Stamina restoration over time. (Monster set)" },
+    { value: "ozezan_the_inferno", label: "Ozezan the Inferno", desc: "2pc: Taking or healing critical damage grants you and your healer Minor Courage and damage mitigation. (Monster set)" },
+    { value: "tremorscale", label: "Tremorscale", desc: "2pc: Taunting an enemy with a taunt ability deals Physical Damage and reduces the target's Physical and Spell Resistance (penetration debuff). (Monster set)" },
   ] },
   { group: "Arena Weapons", sets: [
     { value: "merciless_charge", label: "Maelstrom (Merciless Charge)", desc: "2pc: Each Heavy Weapon ability that hits enemies grants stacks; at 5 stacks your next Whirlwind deals extra Bleed Damage. (Maelstrom Arena)" },
@@ -510,6 +534,7 @@ const GEAR_SET_GROUPS = [
     { value: "sea_serpents_coil", label: "Sea-Serpent's Coil", desc: "1pc: Grants Weapon and Spell Damage; taking heavy damage triggers a powerful heal on a cooldown. (Mythic)" },
     { value: "spaulder_of_ruin", label: "Spaulder of Ruin", desc: "1pc: Creates an aura granting nearby allies Minor Heroism and Minor Courage. (Mythic)" },
     { value: "death_dealers_fete", label: "Death Dealer's Fete", desc: "1pc: Grants stacking Max Stamina/Magicka/Health that builds while in combat. (Mythic)" },
+    { value: "harpooners_wading_kilt", label: "Harpooner's Wading Kilt", desc: "1pc: Dealing direct damage grants a stack of Hunter's Focus (up to 5), each increasing your Critical Damage; stacks reset when you take damage. (Mythic)" },
   ] },
 ];
 
@@ -532,6 +557,7 @@ const SKILL_GROUPS = [
   ] },
   { group: "Arcanist · Soldier of Apocrypha", skills: [
     { value: "the_languid_eye", label: "The Languid Eye", desc: "Soldier of Apocrypha (defensive) skill-line ability. (Effect unverified — confirm against current patch.)" },
+    { value: "rune_of_the_colorless_pool", label: "Rune of the Colorless Pool", desc: "Paralyzes and stuns the enemy, applying Minor Vulnerability (+5% damage taken) and Minor Brittle (+10% Critical Damage taken) for 20 seconds." },
   ] },
   { group: "Dragonknight · Ardent Flame", skills: [
     { value: "molten_whip", label: "Molten Whip", desc: "Melee Flame Damage attack, empowered by Seething Fury stacks from other Ardent Flame abilities. DK spammable." },
@@ -600,7 +626,7 @@ const SKILL_GROUPS = [
     { value: "healing_springs", label: "Healing Springs", desc: "Channeled area heal that also restores Magicka for each ally healed." },
   ] },
   { group: "One Hand and Shield", skills: [
-    { value: "pierce_armor", label: "Pierce Armor", desc: "Taunt that reduces the enemy's Physical and Spell Resistance (Major Breach and Fracture)." },
+    { value: "pierce_armor", label: "Pierce Armor", desc: "Taunt that reduces the enemy's Physical and Spell Resistance (Major Breach, Minor Breach, and Major Fracture)." },
     { value: "heroic_slash", label: "Heroic Slash", desc: "Strike applying Minor Maim to the enemy and granting you Minor Heroism (Ultimate generation)." },
   ] },
   { group: "Mages Guild", skills: [
@@ -618,6 +644,7 @@ const SKILL_GROUPS = [
   ] },
   { group: "Assault", skills: [
     { value: "resolving_vigor", label: "Resolving Vigor", desc: "Strong burst-then-over-time self heal. A survivability staple." },
+    { value: "aggressive_horn", label: "Aggressive Horn", desc: "Warhorn ultimate that grants you and nearby allies Major Force, increasing Critical Damage. (\"Horn\")" },
   ] },
 ];
 
@@ -627,11 +654,113 @@ const SKILLS = SKILL_GROUPS.flatMap((g) =>
   g.skills.map((s) => ({ ...s, group: g.group }))
 );
 
+// Potions (seed), grouped by purpose. A third per-encounter loadout type
+// alongside gear/skills; potions are tracked as a buff source. `desc` is shown
+// as a tooltip on the picker options and selected chips.
+const POTION_GROUPS = [
+  { group: "Trial Potions", potions: [
+    { value: "spell_power_potion", label: "Essence of Spell Power", desc: "Grants Major Sorcery and Major Prophecy (increased Spell Damage and Spell Critical) and restores Magicka. The standard magicka-DPS \"spell power\" potion (Lady's Smock, Corn Flower, Water Hyacinth)." },
+    { value: "weapon_power_potion", label: "Essence of Weapon Power", desc: "Grants Major Brutality and Major Savagery (increased Weapon Damage and Weapon Critical) and restores Stamina. The standard stamina-DPS \"weapon power\" potion (Blessed Thistle, Dragonthorn, Water Hyacinth)." },
+    { value: "tri_restoration_potion", label: "Tri-Restoration Potion", desc: "Restores Health, Magicka, and Stamina and grants Minor Fortitude, Minor Intellect, and Minor Endurance (increased recoveries). The \"tri-stat\" potion (Bugloss, Columbine, Mountain Flower)." },
+  ] },
+];
+
+// Flat potion list (derived) for label/value lookups.
+const POTIONS = POTION_GROUPS.flatMap((g) =>
+  g.potions.map((p) => ({ ...p, group: g.group }))
+);
+
+// --- Crit-damage inputs: weapon lines, mundus, blue (Warfare) CP ---
+//
+// These are the per-encounter, per-player inputs the crit calculator needs that
+// aren't otherwise tracked. `critPct` (when present) is the Critical Damage the
+// source contributes; the crit model below reads it.
+
+// Weapon lines a player can run (one per bar). Only Dual Wield and Two-Handed
+// carry a Critical Damage passive; the rest are listed so the picker is useful.
+const WEAPON_LINES = [
+  { value: "dual_wield", label: "Dual Wield", critPct: 12, desc: "Twin Blade and Blunt passive: increases Critical Damage by 12% while a Dual Wield weapon is equipped." },
+  { value: "two_handed", label: "Two-Handed", critPct: 16, desc: "Heavy Weapons passive: increases Critical Damage by 16% while a Two-Handed weapon is equipped." },
+  { value: "one_hand_and_shield", label: "One Hand and Shield", critPct: 0, desc: "Defensive weapon line. No Critical Damage passive." },
+  { value: "bow", label: "Bow", critPct: 0, desc: "Ranged weapon line. No Critical Damage passive." },
+  { value: "destruction_staff", label: "Destruction Staff", critPct: 0, desc: "Magicka damage weapon line. No Critical Damage passive." },
+  { value: "restoration_staff", label: "Restoration Staff", critPct: 0, desc: "Healing weapon line. No Critical Damage passive." },
+];
+
+// Mundus stones (single-select per player per encounter). Only The Shadow
+// grants Critical Damage.
+const MUNDUS_STONES = [
+  { value: "", label: "—", critPct: 0, desc: "No mundus selected." },
+  { value: "the_shadow", label: "The Shadow", critPct: 18, desc: "Increases Critical Damage by 18% (the standard DPS mundus)." },
+  { value: "the_thief", label: "The Thief", critPct: 0, desc: "Increases Critical Chance." },
+  { value: "the_warrior", label: "The Warrior", critPct: 0, desc: "Increases Weapon Damage." },
+  { value: "the_mage", label: "The Mage", critPct: 0, desc: "Increases Maximum Magicka." },
+  { value: "the_apprentice", label: "The Apprentice", critPct: 0, desc: "Increases Spell Damage." },
+  { value: "the_atronach", label: "The Atronach", critPct: 0, desc: "Increases Magicka Recovery." },
+  { value: "the_ritual", label: "The Ritual", critPct: 0, desc: "Increases Healing Done." },
+  { value: "the_lover", label: "The Lover", critPct: 0, desc: "Increases Physical and Spell Penetration." },
+  { value: "the_lord", label: "The Lord", critPct: 0, desc: "Increases Maximum Health." },
+  { value: "the_steed", label: "The Steed", critPct: 0, desc: "Increases Health Recovery and movement speed." },
+  { value: "the_lady", label: "The Lady", critPct: 0, desc: "Increases Physical and Spell Resistance." },
+  { value: "the_tower", label: "The Tower", critPct: 0, desc: "Increases Maximum Stamina." },
+  { value: "the_serpent", label: "The Serpent", critPct: 0, desc: "Increases Stamina Recovery." },
+];
+
+// Slottable blue (Warfare) champion-point stars. Only the two crit stars carry
+// `critPct`; the others are listed so the picker reflects a real CP bar (slot
+// up to 4). Stored free-form per encounter per slot.
+const BLUE_CP = [
+  { value: "backstabber", label: "Backstabber", critPct: 15, desc: "Increases your Critical Damage by 15% against enemies you flank (attack from behind)." },
+  { value: "fighting_finesse", label: "Fighting Finesse", critPct: 10, desc: "Increases your Critical Damage by 10%." },
+  { value: "master_at_arms", label: "Master-at-Arms", desc: "Increases your direct damage." },
+  { value: "deadly_aim", label: "Deadly Aim", desc: "Increases your damage with single-target damage-over-time abilities." },
+  { value: "biting_aura", label: "Biting Aura", desc: "Increases your damage with area-of-effect abilities." },
+  { value: "thaumaturge", label: "Thaumaturge", desc: "Increases your damage-over-time damage." },
+  { value: "wrathful_strikes", label: "Wrathful Strikes", desc: "Increases your Weapon and Spell Damage with direct-damage attacks." },
+  { value: "piercing", label: "Piercing", desc: "Increases your Offensive Penetration." },
+];
+
+// Flat lists / lookups for the new inputs.
+const WEAPON_BY_KEY = Object.fromEntries(WEAPON_LINES.map((w) => [w.value, w]));
+const MUNDUS_BY_KEY = Object.fromEntries(MUNDUS_STONES.map((m) => [m.value, m]));
+const BLUE_CP_BY_KEY = Object.fromEntries(BLUE_CP.map((c) => [c.value, c]));
+const WEAPON_BY_LABEL = Object.fromEntries(WEAPON_LINES.map((w) => [w.label.toLowerCase(), w]));
+const BLUE_CP_BY_LABEL = Object.fromEntries(BLUE_CP.map((c) => [c.label.toLowerCase(), c]));
+
+function weaponLabel(key) { const w = WEAPON_BY_KEY[key]; return w ? w.label : key; }
+function weaponDesc(key) { const w = WEAPON_BY_KEY[key]; return w && w.desc ? w.desc : ""; }
+function weaponByLabel(label) { return WEAPON_BY_LABEL[String(label || "").trim().toLowerCase()] || null; }
+function cpBlueLabel(key) { const c = BLUE_CP_BY_KEY[key]; return c ? c.label : key; }
+function cpBlueDesc(key) { const c = BLUE_CP_BY_KEY[key]; return c && c.desc ? c.desc : ""; }
+function cpBlueByLabel(label) { return BLUE_CP_BY_LABEL[String(label || "").trim().toLowerCase()] || null; }
+function mundusLabel(key) { const m = MUNDUS_BY_KEY[key]; return m ? m.label : key; }
+function mundusDesc(key) { const m = MUNDUS_BY_KEY[key]; return m && m.desc ? m.desc : ""; }
+
+// Extra penetration sources that aren't derivable from otherwise-tracked data
+// (weapon trait/type, enchants, generic set-piece bonuses). `pen` is the flat
+// Offensive Penetration; `bucket` is "self" (only that player) or "group" (a
+// target debuff that benefits the whole team when any one player runs it). Used
+// by the penetration calculator and stored per encounter per slot (`pen_extra`).
+const PEN_EXTRA_SOURCES = [
+  { value: "crusher", label: "Crusher (enchant)", pen: 2108, bucket: "group", desc: "Crusher weapon enchant: applies a stacking Physical & Spell Resistance debuff to the target. Benefits the whole group." },
+  { value: "sharpened", label: "Sharpened (weapon trait)", pen: 1638, bucket: "self", desc: "Sharpened weapon trait: increases your Offensive Penetration (both weapons, gold quality)." },
+  { value: "mace_maul", label: "Mace / Maul", pen: 1487, bucket: "self", desc: "Mace (1H) or Maul (2H) weapon: ignores a portion of the target's Resistance." },
+  { value: "set_piece_bonuses", label: "Set-piece bonuses", pen: 1487, bucket: "self", desc: "Flat Offensive Penetration from set 2–4 piece bonuses not otherwise modeled." },
+];
+
+const PEN_EXTRA_BY_KEY = Object.fromEntries(PEN_EXTRA_SOURCES.map((p) => [p.value, p]));
+const PEN_EXTRA_BY_LABEL = Object.fromEntries(PEN_EXTRA_SOURCES.map((p) => [p.label.toLowerCase(), p]));
+function penExtraLabel(key) { const p = PEN_EXTRA_BY_KEY[key]; return p ? p.label : key; }
+function penExtraDesc(key) { const p = PEN_EXTRA_BY_KEY[key]; return p && p.desc ? p.desc : ""; }
+function penExtraByLabel(label) { return PEN_EXTRA_BY_LABEL[String(label || "").trim().toLowerCase()] || null; }
+
 // --- Lookup helpers ---
 const GEAR_BY_KEY = Object.fromEntries(GEAR_SETS.map((g) => [g.value, g]));
 const GEAR_BY_LABEL = Object.fromEntries(GEAR_SETS.map((g) => [g.label.toLowerCase(), g]));
 const SKILL_BY_KEY = Object.fromEntries(SKILLS.map((s) => [s.value, s]));
 const SKILL_BY_LABEL = Object.fromEntries(SKILLS.map((s) => [s.label.toLowerCase(), s]));
+const POTION_BY_KEY = Object.fromEntries(POTIONS.map((p) => [p.value, p]));
+const POTION_BY_LABEL = Object.fromEntries(POTIONS.map((p) => [p.label.toLowerCase(), p]));
 
 function gearLabel(key) {
   const g = GEAR_BY_KEY[key];
@@ -655,15 +784,569 @@ function skillDesc(key) {
 function skillByLabel(label) {
   return SKILL_BY_LABEL[String(label || "").trim().toLowerCase()] || null;
 }
+function potionLabel(key) {
+  const p = POTION_BY_KEY[key];
+  return p ? p.label : key;
+}
+function potionDesc(key) {
+  const p = POTION_BY_KEY[key];
+  return p && p.desc ? p.desc : "";
+}
+function potionByLabel(label) {
+  return POTION_BY_LABEL[String(label || "").trim().toLowerCase()] || null;
+}
 
 // Grouped option data for the searchable-select component:
 //   [{ group: string|null, items: [{ value, label, desc? }] }]
 // Gear is grouped by set type (5pc, monster, arena, mythic); skills by skill line.
 const GEAR_GROUPS = GEAR_SET_GROUPS.map((g) => ({ group: g.group, items: g.sets }));
 const SKILL_SELECT_GROUPS = SKILL_GROUPS.map((g) => ({ group: g.group, items: g.skills }));
+const POTION_SELECT_GROUPS = POTION_GROUPS.map((g) => ({ group: g.group, items: g.potions }));
+const WEAPON_SELECT_GROUPS = [{ group: null, items: WEAPON_LINES }];
+const BLUE_CP_SELECT_GROUPS = [{ group: null, items: BLUE_CP }];
+const PEN_EXTRA_SELECT_GROUPS = [{ group: null, items: PEN_EXTRA_SOURCES }];
 
-// Master tables keyed by loadout type, so UI code can stay generic.
+// Master tables keyed by loadout type, so UI code can stay generic. cp_blue and
+// weapons reuse the same chip/searchable-select machinery as gear/skills.
 const LOADOUT_TYPES = {
   gear: { items: GEAR_SETS, groups: GEAR_GROUPS, byLabel: gearByLabel, label: gearLabel, desc: gearDesc, addPlaceholder: "Search gear set…" },
   skills: { items: SKILLS, groups: SKILL_SELECT_GROUPS, byLabel: skillByLabel, label: skillLabel, desc: skillDesc, addPlaceholder: "Search skill…" },
+  potions: { items: POTIONS, groups: POTION_SELECT_GROUPS, byLabel: potionByLabel, label: potionLabel, desc: potionDesc, addPlaceholder: "Search potion…" },
+  cp_blue: { items: BLUE_CP, groups: BLUE_CP_SELECT_GROUPS, byLabel: cpBlueByLabel, label: cpBlueLabel, desc: cpBlueDesc, addPlaceholder: "Search blue CP star…" },
+  weapons: { items: WEAPON_LINES, groups: WEAPON_SELECT_GROUPS, byLabel: weaponByLabel, label: weaponLabel, desc: weaponDesc, addPlaceholder: "Add weapon line…" },
+  pen_extra: { items: PEN_EXTRA_SOURCES, groups: PEN_EXTRA_SELECT_GROUPS, byLabel: penExtraByLabel, label: penExtraLabel, desc: penExtraDesc, addPlaceholder: "Add penetration source…" },
 };
+
+// --- Buffs: coverage tracking ---
+//
+// A team wants to cover a list of buffs. Each buff can be provided by any of
+// several SOURCES across categories that already exist in this app:
+//   - gear        : equipped gear-set keys (per-encounter loadout)
+//   - skills      : slotted skill keys (per-encounter loadout)
+//   - potions     : potion keys (per-encounter loadout)
+//   - masteries   : a non-subclassed player's class-mastery keys (roster build)
+//   - classes     : a non-subclassed player's class (roster build)
+//   - skillLines  : a subclassed player's skill-line keys (roster build)
+//
+// A buff is "met" for an encounter if at least one player provides at least one
+// of its sources. The source keys below are SENSIBLE PLACEHOLDERS — adjust them
+// to match the exact ESO sources as needed (the structure stays the same).
+const BUFFS = [
+  { value: "major_resolve", label: "Major Resolve", desc: "Increases Physical and Spell Resistance.",
+    sources: { skills: ["boundless_storm"] } },
+  { value: "minor_toughness", label: "Minor Toughness", desc: "Increases Max Health (Undaunted abilities slotted).",
+    sources: { skills: ["inner_rage", "energy_orb"] } },
+  { value: "major_brutality_sorcery", label: "Major Brutality and Sorcery", desc: "Increases Weapon and Spell Damage.",
+    sources: { skills: ["hurricane", "degeneration"], potions: ["weapon_power_potion", "spell_power_potion"] } },
+  { value: "minor_brutality_sorcery", label: "Minor Brutality or Minor Sorcery", desc: "Increases Weapon or Spell Damage.",
+    sources: { potions: ["weapon_power_potion", "spell_power_potion"] } },
+  { value: "minor_savagery_prophecy", label: "Minor Savagery or Prophecy", desc: "Increases Weapon or Spell Critical.",
+    sources: { skills: ["camouflaged_hunter", "inner_light", "barbed_trap"], potions: ["weapon_power_potion", "spell_power_potion"] } },
+  { value: "major_berserk", label: "Major Berserk", desc: "Increases damage done by 10%.",
+    sources: { masteries: ["lead_from_the_front"] } },
+  { value: "major_slayer", label: "Major Slayer", desc: "Increases damage to Dungeon/Trial monsters.",
+    sources: { gear: ["master_architect", "roaring_opportunist"] } },
+  { value: "major_courage", label: "Major Courage", desc: "Increases Weapon and Spell Damage.",
+    sources: { gear: ["perfected_olorime", "spell_power_cure"], masteries: ["bright_harbinger"] } },
+  { value: "minor_courage", label: "Minor Courage", desc: "Increases Weapon and Spell Damage.",
+    sources: { gear: ["spaulder_of_ruin", "ozezan_the_inferno"] } },
+  { value: "major_force", label: "Major Force (Saxhleel)", desc: "Increases Critical Damage by 20%.",
+    sources: { gear: ["saxhleel_champion"], skills: ["aggressive_horn"] } },
+  { value: "major_vulnerability", label: "Major Vulnerability", desc: "Increases the damage enemies take.",
+    sources: { gear: ["roar_of_alkosh"] } },
+  { value: "stagger", label: "Stagger", desc: "Off-balance/stagger effect increasing damage taken.",
+    sources: { skills: ["stampede"], gear: ["pillar_of_nirn"] } },
+  { value: "horn", label: "Horn", desc: "Aggressive Warhorn ultimate (Major Force to the group).",
+    sources: { skills: ["aggressive_horn"] } },
+  { value: "minor_fei", label: "Minor Fortitude, Endurance, Intellect", desc: "Increases Health, Stamina, and Magicka Recovery.",
+    sources: { potions: ["tri_restoration_potion"] } },
+  { value: "minor_evasion", label: "Minor Evasion", desc: "Reduces damage taken from area attacks.",
+    sources: { skills: ["elude"] } },
+  { value: "powerful_assault", label: "Powerful Assault", desc: "Set: grants Weapon and Spell Damage to nearby allies.",
+    sources: { gear: ["powerful_assault"] } },
+  { value: "pillagers_profit", label: "Pillager's Profit", desc: "Set: grants resource recovery when an ally uses an Ultimate.",
+    sources: { gear: ["pillagers_profit"] } },
+  { value: "crit_damage_bonus", label: "Crit Damage Bonus (LE or EC)", desc: "Group Critical Damage from Lucent Echoes or Elemental Catalyst.",
+    sources: { gear: ["lucent_echoes", "elemental_catalyst"] } },
+  { value: "pearlescent_ward", label: "Pearlescent Ward", desc: "Set: scaling Weapon and Spell Damage from worn Trial sets.",
+    sources: { gear: ["pearlescent_ward"] } },
+  { value: "roar_of_alkosh", label: "Roar of Alkosh", desc: "Set: synergy damage + Major Vulnerability to enemies.",
+    sources: { gear: ["roar_of_alkosh"] } },
+  { value: "touch_of_zen", label: "Touch of Z'en", desc: "Set: increases damage per damage-over-time effect on the target.",
+    sources: { gear: ["touch_of_zen"] } },
+  { value: "way_of_martial_knowledge", label: "Way of Martial Knowledge", desc: "Set: increases the target's damage taken from your next direct attack.",
+    sources: { gear: ["way_of_martial_knowledge"] } },
+  { value: "spaulder_of_ruin", label: "Spaulder of Ruin", desc: "Mythic: aura granting nearby allies Minor Heroism and Minor Courage.",
+    sources: { gear: ["spaulder_of_ruin"] } },
+  { value: "nazaray", label: "Nazaray", desc: "Monster set: Ultimate damage + Weapon and Spell Damage.",
+    sources: { gear: ["nazaray"] } },
+  { value: "encratiss_behemoth", label: "Encratis's Behemoth", desc: "Monster set: Flame Damage debuff/buff swing.",
+    sources: { gear: ["encratiss_behemoth"] } },
+  { value: "major_brittle", label: "Major Brittle (Nunatak)", desc: "Increases the target's Critical Damage taken.",
+    sources: { gear: ["nunatak"], masteries: ["tundras_maw"] } },
+  { value: "symphony_of_blades", label: "Symphony of Blades", desc: "Monster set: resource sustain for low-resource allies.",
+    sources: { gear: ["symphony_of_blades"] } },
+  { value: "ozezan_the_inferno", label: "Ozezan the Inferno", desc: "Monster set: Minor Courage + mitigation for you and your healer.",
+    sources: { gear: ["ozezan_the_inferno"] } },
+];
+
+// Human labels for buff source categories (shown in the details modal).
+const BUFF_CATEGORY_LABELS = {
+  gear: "Gear",
+  skills: "Skill",
+  potions: "Potion",
+  masteries: "Mastery",
+  classes: "Class",
+  skillLines: "Skill line",
+};
+
+// buffSourceLabel(category, key): the display label for one source key.
+function buffSourceLabel(category, key) {
+  switch (category) {
+    case "gear": return gearLabel(key);
+    case "skills": return skillLabel(key);
+    case "potions": return potionLabel(key);
+    case "masteries": return labelFor(MASTERIES, key);
+    case "classes": return labelFor(CLASSES, key);
+    case "skillLines": return labelFor(SKILL_LINES, key);
+    default: return key;
+  }
+}
+
+// buffKnownSources(buff): the full list of a buff's possible providers as
+// "Category: Label" strings (every key across every source category), regardless
+// of whether the current roster provides them. Used for the details tooltip.
+function buffKnownSources(buff) {
+  const parts = [];
+  for (const [category, keys] of Object.entries((buff && buff.sources) || {})) {
+    (keys || []).forEach((key) => {
+      parts.push(`${BUFF_CATEGORY_LABELS[category] || category}: ${buffSourceLabel(category, key)}`);
+    });
+  }
+  return parts;
+}
+
+// playerBuffContributions(player, loadout): the set of values one player
+// contributes per category. Build sources honor the subclassing rule — a
+// subclassed player contributes skill lines; a non-subclassed player
+// contributes their class and class masteries. Loadout sources (gear/skills/
+// potions) always count.
+function playerBuffContributions(player, loadout) {
+  const lo = loadout || {};
+  const sets = {
+    gear: new Set(lo.gear || []),
+    skills: new Set(lo.skills || []),
+    potions: new Set(lo.potions || []),
+    masteries: new Set(),
+    classes: new Set(),
+    skillLines: new Set(),
+  };
+  if (player.subclassed) {
+    [player.skill_line_1, player.skill_line_2, player.skill_line_3].forEach((v) => {
+      if (v) sets.skillLines.add(v);
+    });
+  } else {
+    if (player.class) sets.classes.add(player.class);
+    [player.mastery_1, player.mastery_2].forEach((v) => {
+      if (v) sets.masteries.add(v);
+    });
+  }
+  return sets;
+}
+
+// computeBuffCoverage(players, loadoutBySlot): evaluate every buff against the
+// roster + the selected encounter's loadouts. Returns:
+//   { total, met, items: [{ buff, met, providers: [{slot, category, key}] }] }
+function computeBuffCoverage(players, loadoutBySlot) {
+  const contribs = (players || []).map((p) => ({
+    player: p,
+    sets: playerBuffContributions(p, (loadoutBySlot && loadoutBySlot[p.slot]) || {}),
+  }));
+
+  const items = BUFFS.map((buff) => {
+    const providers = [];
+    for (const { player, sets } of contribs) {
+      for (const [category, keys] of Object.entries(buff.sources || {})) {
+        const have = sets[category];
+        if (!have) continue;
+        for (const key of keys) {
+          if (have.has(key)) providers.push({ slot: player.slot, category, key });
+        }
+      }
+    }
+    return { buff, met: providers.length > 0, providers };
+  });
+
+  const met = items.filter((i) => i.met).length;
+  return { total: items.length, met, items };
+}
+
+// --- Crit damage: coverage calculator ---
+//
+// ESO critical damage caps at CRIT_CAP% total. Base is CRIT_BASE% (everyone),
+// modelled as a group source. Crit comes from three buckets:
+//   - group  : a buff that benefits the whole group (any one player provides it)
+//   - target : a debuff on the boss (any one player applies it → all benefit)
+//   - self   : only that player (gear, mundus, CP, armor, weapon line, race,
+//              class passive)
+// Per player: effective crit = group + target + self; they "meet" the cap when
+// that reaches CRIT_CAP. "Solo required" = CRIT_CAP - group - target (what each
+// player must supply from their own sources). Source keys map to the existing
+// master data; a few (Minor Force, Minor Brittle) are best-guess placeholders
+// and are one-line edits here.
+const CRIT_CAP = 125;
+const CRIT_BASE = 50;
+
+// Group sources (detected anywhere on the team).
+const CRIT_GROUP_SOURCES = [
+  { value: "major_force", label: "Major Force", pct: 20, detect: { gear: ["saxhleel_champion"], skills: ["aggressive_horn"] } },
+  { value: "lucent_echoes", label: "Lucent Echoes", pct: 11, detect: { gear: ["lucent_echoes"] } },
+];
+
+// Target sources (debuffs on the boss; detected anywhere on the team).
+const CRIT_TARGET_SOURCES = [
+  { value: "minor_brittle", label: "Minor Brittle", pct: 10, detect: { gear: ["baron_zaudrus"], skills: ["rune_of_the_colorless_pool"] } },
+  { value: "major_brittle", label: "Major Brittle", pct: 20, detect: { gear: ["nunatak"], masteries: ["tundras_maw"] } },
+  { value: "elemental_catalyst", label: "Elemental Catalyst", pct: 15, detect: { gear: ["elemental_catalyst"] } },
+];
+
+// Self sources (per player). `type` selects the detection rule:
+//   mundus | cp | gear | race | classPassive (class for non-subclassed; the
+//   linked skill line for subclassed). Medium-armor Dexterity and the weapon-
+//   line passive are handled specially in playerSelfCrit (per-piece / MAX).
+const CRIT_SELF_SOURCES = [
+  { value: "minor_force", label: "Minor Force (Velothi)", pct: 10, type: "gear", key: "velothi_ur_mages_amulet" },
+  { value: "the_shadow", label: "The Shadow Mundus", pct: 18, type: "mundus", key: "the_shadow" },
+  { value: "backstabber", label: "Backstabber", pct: 15, type: "cp", key: "backstabber" },
+  { value: "fighting_finesse", label: "Fighting Finesse", pct: 10, type: "cp", key: "fighting_finesse" },
+  { value: "harpooners_wading_kilt", label: "Harpooner's Wading Kilt", pct: 10, type: "gear", key: "harpooners_wading_kilt" },
+  { value: "sul_xans_torment", label: "Sul-Xan's Torment", pct: 12, type: "gear", key: "sul_xans_torment" },
+  { value: "feline_ambush", label: "Feline Ambush (Khajiit)", pct: 12, type: "race", key: "khajiit" },
+  { value: "hemorrhage", label: "Hemorrhage (Nightblade)", pct: 10, type: "classPassive", class: "nightblade", line: "assassination" },
+  { value: "piercing_spear", label: "Piercing Spear (Templar)", pct: 10, type: "classPassive", class: "templar", line: "aedric_spear" },
+  { value: "glacial_presence", label: "Glacial Presence (Warden)", pct: 10, type: "classPassive", class: "warden", line: "winters_embrace" },
+  { value: "fated_fortune", label: "Fated Fortune (Arcanist)", pct: 12, type: "classPassive", class: "arcanist", line: "herald_of_the_tome" },
+];
+
+// CRIT_MEDIUM_PER_PIECE: Critical Damage from the Medium Armor Dexterity passive
+// per equipped medium piece (6 pieces = 12%, matching the reference table).
+const CRIT_MEDIUM_PER_PIECE = 2;
+
+// playerCritContext(player, loadout): the per-player inputs the calc reads.
+// Build keys honor subclassing (subclassed → skill lines; otherwise masteries).
+function playerCritContext(player, loadout) {
+  const lo = loadout || {};
+  const ctx = {
+    slot: player.slot,
+    gear: new Set(lo.gear || []),
+    skills: new Set(lo.skills || []),
+    cpBlue: new Set(lo.cp_blue || []),
+    weapons: new Set(lo.weapons || []),
+    mundus: lo.mundus || "",
+    armorMedium: Number(lo.armor_medium) || 0,
+    race: player.race || "",
+    isSubclassed: !!player.subclassed,
+    class: player.class || "",
+    masteries: new Set(),
+    skillLines: new Set(),
+  };
+  if (player.subclassed) {
+    [player.skill_line_1, player.skill_line_2, player.skill_line_3].forEach((v) => {
+      if (v) ctx.skillLines.add(v);
+    });
+  } else {
+    [player.mastery_1, player.mastery_2].forEach((v) => {
+      if (v) ctx.masteries.add(v);
+    });
+  }
+  return ctx;
+}
+
+// critSourceProviders(contexts, detect): which players satisfy a group/target
+// source. `detect` maps a category (gear/skills/masteries/skillLines/classes)
+// to candidate keys.
+function critSourceProviders(contexts, detect) {
+  const providers = [];
+  contexts.forEach((c) => {
+    for (const [cat, keys] of Object.entries(detect)) {
+      let have;
+      if (cat === "gear") have = c.gear;
+      else if (cat === "skills") have = c.skills;
+      else if (cat === "masteries") have = c.masteries;
+      else if (cat === "skillLines") have = c.skillLines;
+      else if (cat === "classes") have = new Set(c.class ? [c.class] : []);
+      else continue;
+      const hit = keys.find((k) => have.has(k));
+      if (hit) {
+        providers.push({ slot: c.slot, category: cat, key: hit });
+        break;
+      }
+    }
+  });
+  return providers;
+}
+
+// playerSelfCrit(ctx): the Critical Damage a single player supplies, with a
+// labelled breakdown. Weapon line uses MAX (only the active bar applies).
+function playerSelfCrit(ctx) {
+  const sources = [];
+  let total = 0;
+  CRIT_SELF_SOURCES.forEach((s) => {
+    let present = false;
+    if (s.type === "mundus") present = ctx.mundus === s.key;
+    else if (s.type === "cp") present = ctx.cpBlue.has(s.key);
+    else if (s.type === "gear") present = ctx.gear.has(s.key);
+    else if (s.type === "race") present = ctx.race === s.key;
+    else if (s.type === "classPassive") {
+      present = ctx.isSubclassed ? ctx.skillLines.has(s.line) : ctx.class === s.class;
+    }
+    if (present) {
+      sources.push({ label: s.label, pct: s.pct });
+      total += s.pct;
+    }
+  });
+
+  if (ctx.armorMedium > 0) {
+    const pct = ctx.armorMedium * CRIT_MEDIUM_PER_PIECE;
+    sources.push({ label: `Dexterity (${ctx.armorMedium}x medium)`, pct });
+    total += pct;
+  }
+
+  let weaponMax = 0;
+  let weaponName = "";
+  ctx.weapons.forEach((w) => {
+    const cfg = WEAPON_BY_KEY[w];
+    if (cfg && (cfg.critPct || 0) > weaponMax) {
+      weaponMax = cfg.critPct;
+      weaponName = cfg.label;
+    }
+  });
+  if (weaponMax > 0) {
+    sources.push({ label: `${weaponName} passive`, pct: weaponMax });
+    total += weaponMax;
+  }
+
+  return { total, sources };
+}
+
+// computeCritCoverage(players, loadoutBySlot): evaluate the roster + the
+// selected encounter. Returns the group/target totals, the solo requirement,
+// the detected group/target sources (with providers), and per-player results
+// ({ slot, self, total, met, deficit, sources }).
+function computeCritCoverage(players, loadoutBySlot) {
+  const contexts = (players || []).map((p) =>
+    playerCritContext(p, (loadoutBySlot && loadoutBySlot[p.slot]) || {})
+  );
+
+  let group = CRIT_BASE;
+  const groupSources = [];
+  CRIT_GROUP_SOURCES.forEach((s) => {
+    const providers = critSourceProviders(contexts, s.detect);
+    if (providers.length) {
+      group += s.pct;
+      groupSources.push({ value: s.value, label: s.label, pct: s.pct, providers });
+    }
+  });
+
+  let target = 0;
+  const targetSources = [];
+  CRIT_TARGET_SOURCES.forEach((s) => {
+    const providers = critSourceProviders(contexts, s.detect);
+    if (providers.length) {
+      target += s.pct;
+      targetSources.push({ value: s.value, label: s.label, pct: s.pct, providers });
+    }
+  });
+
+  const soloRequired = Math.max(0, CRIT_CAP - group - target);
+
+  const playerResults = contexts.map((ctx) => {
+    const self = playerSelfCrit(ctx);
+    const total = group + target + self.total;
+    const met = total >= CRIT_CAP;
+    return {
+      slot: ctx.slot,
+      self: self.total,
+      sources: self.sources,
+      total,
+      met,
+      deficit: met ? 0 : CRIT_CAP - total,
+    };
+  });
+
+  return {
+    cap: CRIT_CAP,
+    base: CRIT_BASE,
+    group,
+    target,
+    soloRequired,
+    groupSources,
+    targetSources,
+    players: playerResults,
+  };
+}
+
+// --- Penetration: coverage calculator ---
+//
+// Mirrors the crit model. A player wants their Offensive Penetration to reach
+// the target's Resistance (`PEN_TARGET`, the standard trial value). Penetration
+// comes from two buckets:
+//   - group : team-wide debuffs/buffs (Breaches, Alkosh, Crusher, …) — any one
+//             player providing it benefits everyone
+//   - self  : only that player (CP, light armor, mundus, race, class passive,
+//             sets, and the free-form `pen_extra` flat sources)
+// Per player: total = group + self; they "meet" it when total >= PEN_TARGET.
+// "Self required" = PEN_TARGET - group. Several group keys (Breaches, Runic
+// Sunder, Dismember) are best-guess placeholders — one-line edits here.
+const PEN_TARGET = 18200;
+const PEN_LIGHT_PER_PIECE = 939; // Light Armor (Concentration) penetration per light piece.
+const PEN_ARENA_ONE_PIECE = 1190; // 1pc bonus from an arena weapon.
+
+// Group/target sources (detected anywhere on the team). `detect` maps a category
+// (gear/skills/masteries/skillLines/classes) to candidate keys.
+const PEN_GROUP_SOURCES = [
+  { value: "major_breach", label: "Major Breach", pen: 5948, detect: { skills: ["pierce_armor"] } },
+  { value: "minor_breach", label: "Minor Breach", pen: 2974, detect: { skills: ["elemental_drain", "pierce_armor"] } },
+  { value: "alkosh", label: "Roar of Alkosh", pen: 6000, detect: { gear: ["roar_of_alkosh"] } },
+  { value: "crimson_oath", label: "Crimson Oath's Rive", pen: 3541, detect: { gear: ["crimson_oaths_rive"] } },
+  { value: "tremorscale", label: "Tremorscale", pen: 2640, detect: { gear: ["tremorscale"] } },
+  { value: "runic_sunder", label: "Runic Sunder", pen: 2200, detect: { skills: ["runic_sunder"] } },
+  { value: "crystal_weapon", label: "Crystal Weapon", pen: 1000, detect: { skills: ["crystal_weapon"] } },
+  { value: "dismember", label: "Dismember", pen: 3271, detect: { skills: ["dismember"] } },
+];
+
+// Self sources (per player). `type` ∈ cp | gear | mundus | race | classPassive
+// (class for non-subclassed; the linked skill line for subclassed). Light armor,
+// arena 1pc, and self-bucket `pen_extra` are handled specially in playerSelfPen.
+const PEN_SELF_SOURCES = [
+  { value: "piercing", label: "Piercing (CP)", pen: 700, type: "cp", key: "piercing" },
+  { value: "velothi", label: "Velothi Ur-Mage's Amulet", pen: 1650, type: "gear", key: "velothi_ur_mages_amulet" },
+  { value: "the_lover", label: "The Lover Mundus", pen: 2744, type: "mundus", key: "the_lover" },
+  { value: "splintered_secrets", label: "Splintered Secrets (Arcanist)", pen: 2480, type: "classPassive", class: "arcanist", line: "herald_of_the_tome" },
+  { value: "wood_elf", label: "Hunter's Eye (Wood Elf)", pen: 950, type: "race", key: "bosmer" },
+];
+
+// playerPenContext(player, loadout): the per-player inputs the pen calc reads.
+function playerPenContext(player, loadout) {
+  const lo = loadout || {};
+  const ctx = {
+    slot: player.slot,
+    gear: new Set(lo.gear || []),
+    skills: new Set(lo.skills || []),
+    cpBlue: new Set(lo.cp_blue || []),
+    penExtra: new Set(lo.pen_extra || []),
+    mundus: lo.mundus || "",
+    armorLight: Number(lo.armor_light) || 0,
+    race: player.race || "",
+    isSubclassed: !!player.subclassed,
+    class: player.class || "",
+    masteries: new Set(),
+    skillLines: new Set(),
+  };
+  if (player.subclassed) {
+    [player.skill_line_1, player.skill_line_2, player.skill_line_3].forEach((v) => {
+      if (v) ctx.skillLines.add(v);
+    });
+  } else {
+    [player.mastery_1, player.mastery_2].forEach((v) => {
+      if (v) ctx.masteries.add(v);
+    });
+  }
+  return ctx;
+}
+
+// playerSelfPen(ctx): the penetration a single player supplies, with a labelled
+// breakdown.
+function playerSelfPen(ctx) {
+  const sources = [];
+  let total = 0;
+  PEN_SELF_SOURCES.forEach((s) => {
+    let present = false;
+    if (s.type === "cp") present = ctx.cpBlue.has(s.key);
+    else if (s.type === "gear") present = ctx.gear.has(s.key);
+    else if (s.type === "mundus") present = ctx.mundus === s.key;
+    else if (s.type === "race") present = ctx.race === s.key;
+    else if (s.type === "classPassive") {
+      present = ctx.isSubclassed ? ctx.skillLines.has(s.line) : ctx.class === s.class;
+    }
+    if (present) {
+      sources.push({ label: s.label, pen: s.pen });
+      total += s.pen;
+    }
+  });
+
+  if (ctx.armorLight > 0) {
+    const pen = ctx.armorLight * PEN_LIGHT_PER_PIECE;
+    sources.push({ label: `Light Armor (${ctx.armorLight}x light)`, pen });
+    total += pen;
+  }
+
+  const hasArena = [...ctx.gear].some((k) => (GEAR_BY_KEY[k] || {}).group === "Arena Weapons");
+  if (hasArena) {
+    sources.push({ label: "Arena weapon (1pc)", pen: PEN_ARENA_ONE_PIECE });
+    total += PEN_ARENA_ONE_PIECE;
+  }
+
+  PEN_EXTRA_SOURCES.forEach((s) => {
+    if (s.bucket === "self" && ctx.penExtra.has(s.value)) {
+      sources.push({ label: s.label, pen: s.pen });
+      total += s.pen;
+    }
+  });
+
+  return { total, sources };
+}
+
+// computePenCoverage(players, loadoutBySlot): evaluate the roster + the selected
+// encounter. Returns the group total, the self requirement, the detected group
+// sources (with providers), and per-player results
+// ({ slot, self, total, met, deficit, sources }).
+function computePenCoverage(players, loadoutBySlot) {
+  const contexts = (players || []).map((p) =>
+    playerPenContext(p, (loadoutBySlot && loadoutBySlot[p.slot]) || {})
+  );
+
+  let group = 0;
+  const groupSources = [];
+  PEN_GROUP_SOURCES.forEach((s) => {
+    const providers = critSourceProviders(contexts, s.detect);
+    if (providers.length) {
+      group += s.pen;
+      groupSources.push({ value: s.value, label: s.label, pen: s.pen, providers });
+    }
+  });
+  // Group-bucket pen_extra (e.g. Crusher): counts once if any player runs it.
+  PEN_EXTRA_SOURCES.filter((s) => s.bucket === "group").forEach((s) => {
+    const providers = contexts
+      .filter((c) => c.penExtra.has(s.value))
+      .map((c) => ({ slot: c.slot, category: "pen_extra", key: s.value }));
+    if (providers.length) {
+      group += s.pen;
+      groupSources.push({ value: s.value, label: s.label, pen: s.pen, providers });
+    }
+  });
+
+  const selfRequired = Math.max(0, PEN_TARGET - group);
+
+  const playerResults = contexts.map((ctx) => {
+    const self = playerSelfPen(ctx);
+    const total = group + self.total;
+    const met = total >= PEN_TARGET;
+    return {
+      slot: ctx.slot,
+      self: self.total,
+      sources: self.sources,
+      total,
+      met,
+      deficit: met ? 0 : PEN_TARGET - total,
+    };
+  });
+
+  return {
+    target: PEN_TARGET,
+    group,
+    selfRequired,
+    groupSources,
+    players: playerResults,
+  };
+}

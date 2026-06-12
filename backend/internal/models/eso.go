@@ -35,6 +35,23 @@ var (
 		"warden":       true,
 	}
 
+	// ValidRaces are the playable ESO races. Race is a per-player attribute that
+	// feeds the crit-damage calculator (e.g. the Khajiit "Feline Ambush"
+	// passive). "" means "unset".
+	ValidRaces = map[string]bool{
+		"":         true,
+		"altmer":   true,
+		"argonian": true,
+		"bosmer":   true,
+		"breton":   true,
+		"dunmer":   true,
+		"imperial": true,
+		"khajiit":  true,
+		"nord":     true,
+		"orc":      true,
+		"redguard": true,
+	}
+
 	// ValidDays are the allowed schedule_days values (lowercase weekday keys).
 	ValidDays = map[string]bool{
 		"mon": true,
@@ -165,6 +182,11 @@ var SkillLineClass = map[string]string{
 // ValidSkillLine reports whether v is a known skill line value ("" allowed).
 func ValidSkillLine(v string) bool {
 	return ValidSkillLines[v]
+}
+
+// ValidRace reports whether r is a known race value ("" allowed).
+func ValidRace(r string) bool {
+	return ValidRaces[r]
 }
 
 // ValidateSkillLines enforces the subclassing build rules for a player's chosen
