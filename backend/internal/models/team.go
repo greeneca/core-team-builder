@@ -84,9 +84,12 @@ type Team struct {
 	// unset). The client converts it to/from each viewer's current timezone.
 	ScheduleTime string `json:"schedule_time"`
 	// TeamTimezones are extra IANA zones the team wants the trial time shown in.
-	TeamTimezones []string     `json:"team_timezones"`
-	CreatedAt     time.Time    `json:"created_at"`
-	UpdatedAt     time.Time    `json:"updated_at"`
+	TeamTimezones []string `json:"team_timezones"`
+	// EncountersEnabled controls whether the team uses multiple encounters. When
+	// false the UI hides the encounters section and shows only the first one.
+	EncountersEnabled bool         `json:"encounters_enabled"`
+	CreatedAt         time.Time    `json:"created_at"`
+	UpdatedAt         time.Time    `json:"updated_at"`
 	Players       []Player     `json:"players,omitempty"`
 	Members       []TeamMember `json:"members,omitempty"`
 }
@@ -121,12 +124,12 @@ func (s *TeamStore) Create(ctx context.Context, ownerID int64, name string, copy
 	if copyFromTeamID != 0 {
 		// Copy the source team's schedule onto the new team.
 		const insertTeamCopy = `
-			INSERT INTO teams (name, owner_id, schedule_days, schedule_time, team_timezones)
-			SELECT $1, $2, schedule_days, schedule_time, team_timezones
+			INSERT INTO teams (name, owner_id, schedule_days, schedule_time, team_timezones, encounters_enabled)
+			SELECT $1, $2, schedule_days, schedule_time, team_timezones, encounters_enabled
 			FROM teams WHERE id = $3
-			RETURNING id, name, owner_id, schedule_days, schedule_time, team_timezones, created_at, updated_at`
+			RETURNING id, name, owner_id, schedule_days, schedule_time, team_timezones, encounters_enabled, created_at, updated_at`
 		if err := tx.QueryRow(ctx, insertTeamCopy, name, ownerID, copyFromTeamID).Scan(
-			&team.ID, &team.Name, &team.OwnerID, &team.ScheduleDays, &team.ScheduleTime, &team.TeamTimezones, &team.CreatedAt, &team.UpdatedAt,
+			&team.ID, &team.Name, &team.OwnerID, &team.ScheduleDays, &team.ScheduleTime, &team.TeamTimezones, &team.EncountersEnabled, &team.CreatedAt, &team.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -134,9 +137,9 @@ func (s *TeamStore) Create(ctx context.Context, ownerID int64, name string, copy
 		const insertTeam = `
 			INSERT INTO teams (name, owner_id)
 			VALUES ($1, $2)
-			RETURNING id, name, owner_id, schedule_days, schedule_time, team_timezones, created_at, updated_at`
+			RETURNING id, name, owner_id, schedule_days, schedule_time, team_timezones, encounters_enabled, created_at, updated_at`
 		if err := tx.QueryRow(ctx, insertTeam, name, ownerID).Scan(
-			&team.ID, &team.Name, &team.OwnerID, &team.ScheduleDays, &team.ScheduleTime, &team.TeamTimezones, &team.CreatedAt, &team.UpdatedAt,
+			&team.ID, &team.Name, &team.OwnerID, &team.ScheduleDays, &team.ScheduleTime, &team.TeamTimezones, &team.EncountersEnabled, &team.CreatedAt, &team.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -196,7 +199,7 @@ func (s *TeamStore) CountOwned(ctx context.Context, ownerID int64) (int, error) 
 // most recently updated first. Players and members are not populated here.
 func (s *TeamStore) ListForUser(ctx context.Context, userID int64) ([]Team, error) {
 	const q = `
-		SELECT t.id, t.name, t.owner_id, t.schedule_days, t.schedule_time, t.team_timezones, t.created_at, t.updated_at
+		SELECT t.id, t.name, t.owner_id, t.schedule_days, t.schedule_time, t.team_timezones, t.encounters_enabled, t.created_at, t.updated_at
 		FROM teams t
 		JOIN team_members m ON m.team_id = t.id
 		WHERE m.user_id = $1
@@ -211,7 +214,7 @@ func (s *TeamStore) ListForUser(ctx context.Context, userID int64) ([]Team, erro
 	teams := []Team{}
 	for rows.Next() {
 		var t Team
-		if err := rows.Scan(&t.ID, &t.Name, &t.OwnerID, &t.ScheduleDays, &t.ScheduleTime, &t.TeamTimezones, &t.CreatedAt, &t.UpdatedAt); err != nil {
+		if err := rows.Scan(&t.ID, &t.Name, &t.OwnerID, &t.ScheduleDays, &t.ScheduleTime, &t.TeamTimezones, &t.EncountersEnabled, &t.CreatedAt, &t.UpdatedAt); err != nil {
 			return nil, err
 		}
 		teams = append(teams, t)
@@ -223,10 +226,10 @@ func (s *TeamStore) ListForUser(ctx context.Context, userID int64) ([]Team, erro
 func (s *TeamStore) Get(ctx context.Context, teamID int64) (*Team, error) {
 	team := &Team{}
 	const teamQ = `
-		SELECT id, name, owner_id, schedule_days, schedule_time, team_timezones, created_at, updated_at
+		SELECT id, name, owner_id, schedule_days, schedule_time, team_timezones, encounters_enabled, created_at, updated_at
 		FROM teams WHERE id = $1`
 	err := s.pool.QueryRow(ctx, teamQ, teamID).Scan(
-		&team.ID, &team.Name, &team.OwnerID, &team.ScheduleDays, &team.ScheduleTime, &team.TeamTimezones, &team.CreatedAt, &team.UpdatedAt,
+		&team.ID, &team.Name, &team.OwnerID, &team.ScheduleDays, &team.ScheduleTime, &team.TeamTimezones, &team.EncountersEnabled, &team.CreatedAt, &team.UpdatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrTeamNotFound
@@ -293,11 +296,12 @@ func (s *TeamStore) Access(ctx context.Context, teamID, userID int64) (found boo
 	return true, role, nil
 }
 
-// Save updates a team's name and trial schedule (days, the UTC time, and the
-// team's extra display timezones), and (when players is non-nil) the roster,
-// all within a single transaction. Each player in players must have a valid
-// Slot (1..TeamSize); slots not present are left unchanged.
-func (s *TeamStore) Save(ctx context.Context, teamID int64, name string, days []string, scheduleTime string, teamTimezones []string, players []Player) error {
+// Save updates a team's name, trial schedule (days, the UTC time, and the
+// team's extra display timezones), the encounters-enabled flag, and (when
+// players is non-nil) the roster, all within a single transaction. Each player
+// in players must have a valid Slot (1..TeamSize); slots not present are left
+// unchanged.
+func (s *TeamStore) Save(ctx context.Context, teamID int64, name string, days []string, scheduleTime string, teamTimezones []string, encountersEnabled bool, players []Player) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -306,9 +310,9 @@ func (s *TeamStore) Save(ctx context.Context, teamID int64, name string, days []
 
 	const updateTeam = `
 		UPDATE teams
-		SET name = $1, schedule_days = $2, schedule_time = $3, team_timezones = $4
-		WHERE id = $5`
-	if _, err := tx.Exec(ctx, updateTeam, name, days, scheduleTime, teamTimezones, teamID); err != nil {
+		SET name = $1, schedule_days = $2, schedule_time = $3, team_timezones = $4, encounters_enabled = $5
+		WHERE id = $6`
+	if _, err := tx.Exec(ctx, updateTeam, name, days, scheduleTime, teamTimezones, encountersEnabled, teamID); err != nil {
 		return err
 	}
 

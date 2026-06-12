@@ -157,8 +157,10 @@ type updateTeamRequest struct {
 	// converts from the editor's current timezone before sending.
 	ScheduleTime string `json:"schedule_time"`
 	// TeamTimezones are extra IANA zones the team wants the time shown in.
-	TeamTimezones []string        `json:"team_timezones"`
-	Players       []playerPayload `json:"players"`
+	TeamTimezones []string `json:"team_timezones"`
+	// EncountersEnabled toggles whether the team uses multiple encounters.
+	EncountersEnabled bool            `json:"encounters_enabled"`
+	Players           []playerPayload `json:"players"`
 }
 
 type playerPayload struct {
@@ -283,7 +285,7 @@ func (s *Server) handleUpdateTeam(w http.ResponseWriter, r *http.Request) {
 		players = append(players, player)
 	}
 
-	if err := s.teams.Save(r.Context(), teamID, req.Name, days, scheduleTime, teamTimezones, players); err != nil {
+	if err := s.teams.Save(r.Context(), teamID, req.Name, days, scheduleTime, teamTimezones, req.EncountersEnabled, players); err != nil {
 		log.Printf("update team: %v", err)
 		writeError(w, http.StatusInternalServerError, "could not update team")
 		return

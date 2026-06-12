@@ -280,6 +280,7 @@
     renderSchedule(editable);
     renderEncountersBar();
     renderEncounterControls();
+    applyEncountersMode();
     renderRoster();
     refreshBuffCoverage();
   }
@@ -525,6 +526,7 @@
       // viewer can convert it back to their own zone.
       schedule_time: convertWallTime(el("schedule-time").value, localTimezone(), "UTC"),
       team_timezones: teamTimezones,
+      encounters_enabled: encountersEnabled(),
       players,
     };
     setSaveStatus("team", "saving");
@@ -1072,6 +1074,33 @@
   }
 
   // --- Encounters bar (team detail) ---
+
+  // Whether the open team has the encounters feature enabled. Disabled by
+  // default: only an explicit true enables the encounters section.
+  function encountersEnabled() {
+    return !!currentTeam && currentTeam.encounters_enabled === true;
+  }
+
+  // Show or hide the entire encounters section based on the team's toggle. When
+  // disabled, the encounters management card and the encounter chip switcher are
+  // hidden and the roster shows only the first encounter. The toggle lives in the
+  // main team info panel, which stays visible so an editor can re-enable it. Run
+  // after the bar and controls render so it has the final say on visibility.
+  function applyEncountersMode() {
+    const enabled = encountersEnabled();
+    const editable = canEdit();
+
+    const toggle = el("encounters-enabled-toggle");
+    if (toggle) {
+      toggle.checked = enabled;
+      toggle.disabled = !editable;
+    }
+
+    el("encounters-manage-card").classList.toggle("is-hidden", !enabled);
+    el("encounters-panel").classList.toggle("is-hidden", !enabled);
+    el("encounters-sentinel").classList.toggle("is-hidden", !enabled);
+  }
+
   // The encounters bar lets you pick the *current* encounter (whose per-player
   // loadouts are shown inline in the roster) and add new ones. There is no
   // separate encounter page anymore.
@@ -1186,6 +1215,31 @@
   });
   el("add-encounter-cancel").addEventListener("click", () => {
     addEncounterForm.classList.add("is-hidden");
+  });
+
+  // Toggle whether the team uses multiple encounters. Turning it off hides the
+  // encounters section and snaps the roster back to the first encounter; turning
+  // it on restores the switcher/management controls. The generic detail-view
+  // change handler persists the new flag via the team autosave.
+  el("encounters-enabled-toggle").addEventListener("change", async (e) => {
+    if (!canEdit()) {
+      e.target.checked = encountersEnabled();
+      return;
+    }
+    const enabled = e.target.checked;
+    currentTeam.encounters_enabled = enabled;
+    // When disabling, ensure the single shown encounter is the first one.
+    if (
+      !enabled &&
+      currentEncounters.length &&
+      currentEncounter &&
+      currentEncounter.id !== currentEncounters[0].id
+    ) {
+      await selectEncounter(currentEncounters[0].id);
+    }
+    renderEncountersBar();
+    renderEncounterControls();
+    applyEncountersMode();
   });
   addEncounterForm.addEventListener("submit", async (e) => {
     e.preventDefault();

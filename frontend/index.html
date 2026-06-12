@@ -73,6 +73,9 @@
             <p class="text-muted" id="team-meta" style="margin: var(--space-2) 0 0;"></p>
           </div>
           <div class="form-actions">
+            <label class="toggle" id="encounters-enabled-label" title="When off, the encounters section is hidden and only the first encounter is shown.">
+              <input type="checkbox" id="encounters-enabled-toggle" /> Encounters enabled
+            </label>
             <span id="team-save-status" class="save-status" aria-live="polite"></span>
             <button id="delete-team-btn" class="btn btn--danger is-hidden" type="button">Delete Team</button>
           </div>
@@ -101,7 +104,7 @@
       <!-- Encounters: manage the team's encounters (add / rename / delete).
            The chip selector below attaches flush as this card's bottom section
            (squared bottom corners) and splits off into a sticky strip on scroll. -->
-      <div class="card mt-4 encounters-manage-card">
+      <div id="encounters-manage-card" class="card mt-4 encounters-manage-card">
         <div class="section-head">
           <h2 style="margin: 0;">Encounters<span class="info-indicator" tabindex="0" role="img" aria-label="How encounters work: Encounters are per-fight loadout setups for your team. Add the Default/Trash encounters or bosses from a single trial, then give each player their gear and skills for that fight. Use the chips below to switch the active encounter you are editing. When adding an encounter you can copy gear and skills from an existing one." data-tip="Encounters are per-fight loadout setups for your team. Add the Default/Trash encounters or bosses from a single trial, then give each player their gear and skills for that fight. Use the chips below to switch the active encounter you are editing. When adding an encounter you can copy gear & skills from an existing one.">i</span></h2>
           <button id="add-encounter-btn" class="btn btn--ghost btn--sm is-hidden" type="button">+ Add Encounter</button>
@@ -307,9 +310,9 @@
     </section>
   </main>
 
-  <script src="js/api.js?v=59"></script>
-  <script src="js/data.js?v=59"></script>
-  <script src="js/components.js?v=59"></script>
-  <script src="js/app.js?v=59"></script>
+  <script src="js/api.js?v=62"></script>
+  <script src="js/data.js?v=62"></script>
+  <script src="js/components.js?v=62"></script>
+  <script src="js/app.js?v=62"></script>
 </body>
 </html>
