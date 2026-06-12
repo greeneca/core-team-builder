@@ -112,8 +112,8 @@ services:
     build: ./frontend
     image: ctb-frontend
     # The container now listens on 8080 (unprivileged nginx); host port unchanged.
-    ports:
-      - "${FRONTEND_PORT}:8080"
+    # ports:
+      #- "${FRONTEND_PORT}:8080"
     # Run nginx directly, bypassing the image's docker-entrypoint.d scripts which
     # rewrite config files at startup (incompatible with a read-only rootfs).
     entrypoint: ["nginx", "-g", "daemon off;"]

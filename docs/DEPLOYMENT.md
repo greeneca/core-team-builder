@@ -21,21 +21,21 @@ reachable on the `ctb-net` bridge only. See `docs/ARCHITECTURE.md`.
 
 ## 1. Secrets & environment (`.env`)
 
-- [ ] `cp .env.example .env` on the target host (the file is git-ignored).
-- [ ] Generate a strong **`JWT_SECRET`** (≥ 32 bytes or the backend refuses to
+- [x] `cp .env.example .env` on the target host (the file is git-ignored).
+- [x] Generate a strong **`JWT_SECRET`** (≥ 32 bytes or the backend refuses to
       start): `openssl rand -base64 48`.
-- [ ] Set a strong **`POSTGRES_PASSWORD`** (not `change-me-in-prod`):
+- [x] Set a strong **`POSTGRES_PASSWORD`** (not `change-me-in-prod`):
       `openssl rand -base64 24`.
-- [ ] Set a strong, unique **`SEED_PASSWORD`** (≥ 12 chars — the password policy
+- [x] Set a strong, unique **`SEED_PASSWORD`** (≥ 12 chars — the password policy
       rejects shorter). This account is created as an **admin**; treat it as a
       bootstrap credential to be rotated/removed (see §5).
-- [ ] Set **`CORS_ORIGIN`** to the real public origin, e.g.
+- [x] Set **`CORS_ORIGIN`** to the real public origin, e.g.
       `https://teams.example.com` (scheme + host, no trailing slash).
-- [ ] Set **`FRONTEND_PORT`** to the host port the upstream nginx will proxy to
+- [x] Set **`FRONTEND_PORT`** to the host port the upstream nginx will proxy to
       (e.g. `8081`). This maps to the container's `8080`.
-- [ ] Review token lifetimes: `JWT_TTL` (access token, default `15m`) and
+- [x] Review token lifetimes: `JWT_TTL` (access token, default `15m`) and
       `REFRESH_TTL` (refresh token, default `720h` = 30 days).
-- [ ] Confirm `.env` is **not** world-readable: `chmod 600 .env`.
+- [x] Confirm `.env` is **not** world-readable: `chmod 600 .env`.
 
 Full variable reference:
 
@@ -61,7 +61,7 @@ The `frontend` container's rate limiting and logging key on the client IP. Behin
 a proxy that IP arrives in `X-Forwarded-For`, so `frontend/nginx.conf` must trust
 the upstream and **only** the upstream.
 
-- [ ] Edit `set_real_ip_from` in `frontend/nginx.conf` to the upstream proxy's
+- [x] Edit `set_real_ip_from` in `frontend/nginx.conf` to the upstream proxy's
       real address/CIDR (replace the broad RFC1918 defaults). Example:
 
 ```nginx
@@ -83,8 +83,8 @@ already emits CSP / `X-Frame-Options` / `X-Content-Type-Options` /
 `Referrer-Policy` / `Permissions-Policy`; make sure the upstream **forwards**
 them (don't strip or override).
 
-- [ ] Obtain/manage a TLS certificate for the public hostname.
-- [ ] Configure the redirect + TLS server blocks and forward the real client IP
+- [x] Obtain/manage a TLS certificate for the public hostname.
+- [x] Configure the redirect + TLS server blocks and forward the real client IP
       and scheme. Example:
 
 ```nginx
@@ -123,10 +123,10 @@ server {
 }
 ```
 
-- [ ] Verify the upstream does **not** add a duplicate/looser CSP (it would
+- [x] Verify the upstream does **not** add a duplicate/looser CSP (it would
       override the app's). Optionally add `Permissions-Policy`/`Referrer-Policy`
       here too if you prefer them centralized — but avoid conflicting CSPs.
-- [ ] If the upstream→frontend hop crosses an untrusted network, use TLS (or
+- [x] If the upstream→frontend hop crosses an untrusted network, use TLS (or
       mTLS) on that hop as well.
 
 ---
