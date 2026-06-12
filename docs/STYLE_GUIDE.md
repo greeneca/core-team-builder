@@ -59,10 +59,12 @@ Consistent conventions across the codebase. Keep this in sync with reality.
   - `api.js` — **only** the `api` client object (token storage + endpoint
     helpers). No domain data lives here.
   - `data.js` — all shared reference data + display helpers: roles, classes,
-    share roles, days, timezone/schedule helpers, the subclassing skill lines
-    and class masteries (+ option/lookup helpers), and the ESO encounter
+    races, share roles, days, timezone/schedule helpers, the subclassing skill
+    lines and class masteries (+ option/lookup helpers), and the ESO encounter
     master/seed data (boss names grouped by trial, gear sets with tooltips,
-    skills grouped by skill line). Keys mirror the backend allow-lists in
+    skills grouped by skill line, potions, mundus stones, weapon lines, blue CP,
+    extra penetration sources). Also the `BUFFS`/`CRIT_*`/`PEN_*` source tables
+    and their coverage calculators. Keys mirror the backend allow-lists in
     `internal/models` (`eso.go`, `encounter.go`).
   - `components.js` — reusable, framework-free UI components
     (`createSearchableSelect`, `initTooltips`). Tooltips are shown via a

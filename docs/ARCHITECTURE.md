@@ -20,17 +20,18 @@ Core Team Builder is a three-tier application:
                             ▼
             ┌─────────────────────────────────────────────┐
             │  backend (Go, net/http)                      │
-            │   • /api/register, /api/login (public)       │
-            │   • /api/me, /api/teams, .../encounters       │
-            │     (JWT-protected)                          │
+            │   • /api/register, /api/login,               │
+            │     /api/registration-status (public)        │
+            │   • /api/me, /api/teams, .../encounters,      │
+            │     /api/admin/* (JWT-protected)             │
             │   • bcrypt password hashing, JWT issuance     │
             └───────────────┬─────────────────────────────┘
                             │ pgx connection pool
                             ▼
             ┌─────────────────────────────────────────────┐
             │  db (PostgreSQL 16)                           │
-            │   • users, teams, team_members, players,      │
-            │     encounters, encounter_loadouts            │
+            │   • users, app_settings, teams, team_members, │
+            │     players, encounters, encounter_loadouts   │
             └─────────────────────────────────────────────┘
 ```
 
@@ -75,10 +76,12 @@ method-aware patterns, Go 1.22+). Layout:
 - `internal/config` — environment configuration (12-factor).
 - `internal/db` — pgx pool with startup retry.
 - `internal/models` — domain types + data access (`UserStore`, `TeamStore`,
-  `EncounterStore`). ESO game reference data and the player-build validators live
-  in `eso.go`, kept separate from the persistence stores.
+  `EncounterStore`, `SettingsStore` for the `app_settings` key/value store). ESO
+  game reference data and the player-build validators live in `eso.go`, kept
+  separate from the persistence stores.
 - `internal/auth` — bcrypt hashing, JWT issuing/parsing, auth middleware.
-- `internal/handlers` — HTTP handlers, JSON helpers, CORS.
+- `internal/handlers` — HTTP handlers, JSON helpers, CORS. Admin-only user and
+  settings handlers (with a `requireAdmin` gate) live in `admin.go`.
 
 ### Database (`database/`)
 
@@ -100,8 +103,25 @@ PostgreSQL. The schema in `migrations/*.sql` (e.g. `001_init.sql`,
 | username       | varchar(50)   | unique, not null                   |
 | email          | varchar(255)  | unique, not null                   |
 | password_hash  | text          | bcrypt hash, not null              |
+| is_admin       | boolean       | default `false`; `015_admin_and_settings.sql` |
 | created_at     | timestamptz   | default `now()`                    |
 | updated_at     | timestamptz   | auto-updated via trigger           |
+
+Admins manage users and toggle registration. The first account ever registered
+becomes an admin (and is always allowed); the seeded test user is always an
+admin. See `docs/AGENT_CONTEXT.md` "Admin & user management".
+
+### `app_settings`
+
+A simple key/value store for global configuration (`015_admin_and_settings.sql`).
+
+| column | type | notes                                            |
+|--------|------|--------------------------------------------------|
+| key    | text | primary key                                      |
+| value  | text | not null                                         |
+
+Currently holds `registration_enabled` (`'true'`/`'false'`, default `'true'`),
+which gates public self-registration. Read/written via `SettingsStore`.
 
 ### `teams`
 
@@ -212,6 +232,10 @@ inputs feed the penetration calculator (see "Penetration model"); `players.race`
 - **Login hardening**: a constant-time bcrypt comparison runs even when the
   username does not exist, and all failures return the same generic message, to
   reduce user enumeration and timing side channels.
+- **Authorization**: team access is role-based (owner/editor/viewer) via
+  `team_members`; the admin-only `/api/admin/*` routes re-check `users.is_admin`
+  server-side (`requireAdmin`) — the frontend gating is convenience only.
+  Self-registration can be disabled by an admin (`app_settings`).
 - **Transport**: terminate TLS at a proxy/load balancer in production. Tokens in
   `localStorage` are acceptable for this tool; revisit if XSS surface grows.
 

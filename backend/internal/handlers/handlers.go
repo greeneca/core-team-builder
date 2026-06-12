@@ -17,13 +17,14 @@ type Server struct {
 	users      *models.UserStore
 	teams      *models.TeamStore
 	encounters *models.EncounterStore
+	settings   *models.SettingsStore
 	tokens     *auth.TokenManager
 	corsOrigin string
 }
 
 // New constructs a Server.
-func New(users *models.UserStore, teams *models.TeamStore, encounters *models.EncounterStore, tokens *auth.TokenManager, corsOrigin string) *Server {
-	return &Server{users: users, teams: teams, encounters: encounters, tokens: tokens, corsOrigin: corsOrigin}
+func New(users *models.UserStore, teams *models.TeamStore, encounters *models.EncounterStore, settings *models.SettingsStore, tokens *auth.TokenManager, corsOrigin string) *Server {
+	return &Server{users: users, teams: teams, encounters: encounters, settings: settings, tokens: tokens, corsOrigin: corsOrigin}
 }
 
 // Routes returns the fully configured HTTP handler, including CORS handling.
@@ -31,6 +32,7 @@ func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /api/health", s.handleHealth)
+	mux.HandleFunc("GET /api/registration-status", s.handleRegistrationStatus)
 	mux.HandleFunc("POST /api/register", s.handleRegister)
 	mux.HandleFunc("POST /api/login", s.handleLogin)
 
@@ -39,6 +41,14 @@ func (s *Server) Routes() http.Handler {
 		return s.tokens.Middleware(h)
 	}
 	mux.Handle("GET /api/me", protected(s.handleMe))
+
+	// Admin-only user/settings management.
+	mux.Handle("GET /api/admin/users", protected(s.handleListUsers))
+	mux.Handle("POST /api/admin/users", protected(s.handleCreateUser))
+	mux.Handle("DELETE /api/admin/users/{id}", protected(s.handleDeleteUser))
+	mux.Handle("PUT /api/admin/users/{id}/admin", protected(s.handleSetUserAdmin))
+	mux.Handle("GET /api/admin/settings", protected(s.handleGetSettings))
+	mux.Handle("PUT /api/admin/settings", protected(s.handleUpdateSettings))
 
 	// Teams.
 	mux.Handle("GET /api/teams", protected(s.handleListTeams))
@@ -92,6 +102,18 @@ type authResponse struct {
 	User  *models.User `json:"user"`
 }
 
+// handleRegistrationStatus reports whether public self-registration is open. It
+// is unauthenticated so the login page can hide the Register tab accordingly.
+func (s *Server) handleRegistrationStatus(w http.ResponseWriter, r *http.Request) {
+	enabled, err := s.settings.RegistrationEnabled(r.Context())
+	if err != nil {
+		log.Printf("registration status: %v", err)
+		writeError(w, http.StatusInternalServerError, "could not read settings")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"enabled": enabled})
+}
+
 func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	var creds credentials
 	if err := json.NewDecoder(r.Body).Decode(&creds); err != nil {
@@ -101,6 +123,28 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	if creds.Username == "" || creds.Email == "" || creds.Password == "" {
 		writeError(w, http.StatusBadRequest, "username, email, and password are required")
 		return
+	}
+
+	// The very first account bootstraps the system and is always allowed (and
+	// becomes an admin). Once users exist, honor the registration toggle.
+	count, err := s.users.Count(r.Context())
+	if err != nil {
+		log.Printf("count users: %v", err)
+		writeError(w, http.StatusInternalServerError, "could not process registration")
+		return
+	}
+	firstUser := count == 0
+	if !firstUser {
+		enabled, err := s.settings.RegistrationEnabled(r.Context())
+		if err != nil {
+			log.Printf("registration enabled: %v", err)
+			writeError(w, http.StatusInternalServerError, "could not process registration")
+			return
+		}
+		if !enabled {
+			writeError(w, http.StatusForbidden, "registration is currently disabled")
+			return
+		}
 	}
 
 	hash, err := auth.HashPassword(creds.Password)
@@ -114,7 +158,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := s.users.Create(r.Context(), creds.Username, creds.Email, hash)
+	user, err := s.users.Create(r.Context(), creds.Username, creds.Email, hash, firstUser)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {

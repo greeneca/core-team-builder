@@ -82,6 +82,46 @@ const api = {
     return this.request("/api/me");
   },
 
+  // Public: whether self-registration is currently open (login page reads this).
+  registrationStatus() {
+    return this.request("/api/registration-status");
+  },
+
+  // --- Admin: user management ---
+
+  listUsers() {
+    return this.request("/api/admin/users");
+  },
+
+  createUser(username, email, password, isAdmin) {
+    return this.request("/api/admin/users", {
+      method: "POST",
+      body: { username, email, password, is_admin: Boolean(isAdmin) },
+    });
+  },
+
+  deleteUser(id) {
+    return this.request(`/api/admin/users/${id}`, { method: "DELETE" });
+  },
+
+  setUserAdmin(id, isAdmin) {
+    return this.request(`/api/admin/users/${id}/admin`, {
+      method: "PUT",
+      body: { is_admin: Boolean(isAdmin) },
+    });
+  },
+
+  getAdminSettings() {
+    return this.request("/api/admin/settings");
+  },
+
+  setRegistrationEnabled(enabled) {
+    return this.request("/api/admin/settings", {
+      method: "PUT",
+      body: { registration_enabled: Boolean(enabled) },
+    });
+  },
+
   // --- Teams ---
 
   listTeams() {

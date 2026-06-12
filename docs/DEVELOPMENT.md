@@ -89,6 +89,11 @@ Base path: `/api`. All bodies are JSON.
 
 Returns `{ "status": "ok" }`.
 
+### `GET /api/registration-status`
+
+Public. Returns `{ "enabled": true|false }` so the login page can hide the
+Register tab when an admin has disabled self-registration.
+
 ### `POST /api/register`
 
 Request:
@@ -100,10 +105,16 @@ Request:
 Response `200`:
 
 ```json
-{ "token": "<jwt>", "user": { "id": 1, "username": "alice", "email": "alice@example.com", "created_at": "...", "updated_at": "..." } }
+{ "token": "<jwt>", "user": { "id": 1, "username": "alice", "email": "alice@example.com", "is_admin": true, "created_at": "...", "updated_at": "..." } }
 ```
 
-Errors: `400` (validation / password too short), `409` (username or email taken).
+The **first account ever registered** bootstraps the system: it is always
+allowed and becomes an admin (`is_admin: true`). After that, registration is
+gated by the `registration_enabled` setting — when an admin has disabled it,
+this returns `403`.
+
+Errors: `400` (validation / password too short), `403` (registration disabled),
+`409` (username or email taken).
 
 ### `POST /api/login`
 
@@ -117,7 +128,22 @@ Response `200`: same shape as register. Errors: `401` (invalid credentials).
 
 ### `GET /api/me` (protected)
 
-Header: `Authorization: Bearer <jwt>`. Returns the current `user`. Errors: `401`.
+Header: `Authorization: Bearer <jwt>`. Returns the current `user` (including
+`is_admin`). Errors: `401`.
+
+### Admin (all protected, admin-only)
+
+Require `Authorization: Bearer <jwt>` **and** `is_admin = true` on the caller;
+non-admins get `403`. Used by the topbar "Manage Users" modal.
+
+| Method & path                        | Description                                            |
+|--------------------------------------|--------------------------------------------------------|
+| `GET /api/admin/users`               | List all users (`{ "users": [...] }`).                 |
+| `POST /api/admin/users`              | Create a user `{ username, email, password, is_admin }` → `201` (bypasses the registration toggle). Errors `400`/`409`. |
+| `DELETE /api/admin/users/{id}`       | Remove a user (cascades to their owned teams). Cannot delete yourself or the last admin (`400`). |
+| `PUT /api/admin/users/{id}/admin`    | Set/clear the admin flag `{ "is_admin": true|false }`. Cannot demote the last admin (`400`). |
+| `GET /api/admin/settings`            | Read `{ "registration_enabled": true|false }`.         |
+| `PUT /api/admin/settings`            | Update `{ "registration_enabled": true|false }`.       |
 
 ### Teams (all protected)
 
@@ -226,14 +252,30 @@ alongside one trial). Violations return `400`.
 ```json
 {
   "loadouts": [
-    { "slot": 1, "gear": ["perfected_relequen", "slimecraw"], "skills": ["pragmatic_fatecarver"] }
+    {
+      "slot": 1,
+      "gear": ["perfected_relequen", "slimecraw"],
+      "skills": ["pragmatic_fatecarver"],
+      "potions": ["spell_power_potion"],
+      "cp_blue": ["fighting_finesse", "backstabber"],
+      "weapons": ["dual_wield"],
+      "mundus": "the_shadow",
+      "armor_heavy": 0, "armor_medium": 5, "armor_light": 2,
+      "pen_extra": ["sharpened"]
+    }
   ]
 }
 ```
 
-- `gear`/`skills` are ordered, free-form key lists (the UI constrains choices to
-  the master data in `frontend/js/data.js`). The backend sanitizes them (trim,
-  drop empties, ≤100 chars each, ≤30 items) but does not allow-list the keys.
+- `gear`/`skills`/`potions`/`cp_blue`/`weapons`/`pen_extra` are ordered,
+  free-form key lists (the UI constrains choices to the master data in
+  `frontend/js/data.js`). The backend sanitizes them (trim, drop empties, ≤100
+  chars each, ≤30 items) but does not allow-list the keys.
+- `mundus` is a trimmed string (≤100 chars); `armor_heavy/medium/light` are
+  integers clamped to `0–7`.
+- The crit/penetration inputs (`cp_blue`, `weapons`, `mundus`, armor counts,
+  `pen_extra`) feed the client-side crit and penetration calculators — see
+  `docs/AGENT_CONTEXT.md` "Crit damage model" / "Penetration model".
 - `slot` must be 1–12; an invalid slot or item returns `400`.
 
 ### Quick curl test

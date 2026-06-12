@@ -33,10 +33,14 @@ Then open the app:
 - Frontend: <http://localhost:8081> (or `FRONTEND_PORT` from `.env`)
 - API health check: <http://localhost:8081/api/health>
 
-**Default test user** (from `.env`):
+**Default test user** (from `.env`) — seeded as an **admin**:
 
 - username: `testuser`
 - password: `changeme123`
+
+The first account ever registered also becomes an admin. Admins get a **Manage
+Users** button in the topbar to add/remove users, grant admin, and enable or
+disable self-registration.
 
 ---
 
@@ -52,8 +56,8 @@ core-team-builder/
 │   │   ├── auth/         password hashing (bcrypt) + JWT + middleware
 │   │   ├── config/       env-based configuration
 │   │   ├── db/           connection pool
-│   │   ├── handlers/     HTTP routes (auth, teams, encounters)
-│   │   └── models/       data access (users, teams, encounters)
+│   │   ├── handlers/     HTTP routes (auth, admin, teams, encounters)
+│   │   └── models/       data access (users, settings, teams, encounters)
 │   └── Dockerfile
 ├── frontend/             Static site (nginx)
 │   ├── css/styles.css    design system / tokens
@@ -86,6 +90,8 @@ core-team-builder/
 - Auth uses signed **JWT** bearer tokens; set a strong `JWT_SECRET`.
 - Login returns a generic error and runs a constant-time comparison whether or
   not the user exists, to limit user enumeration and timing attacks.
+- Team access is role-based (owner/editor/viewer); user-management routes
+  (`/api/admin/*`) are admin-only and re-checked server-side.
 
 ## License
 

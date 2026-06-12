@@ -16,6 +16,22 @@
   const loginForm = document.getElementById("login-form");
   const registerForm = document.getElementById("register-form");
   const message = document.getElementById("message");
+  const registerTab = document.querySelector('.tab[data-tab="register"]');
+
+  // Hide the Register tab when an admin has disabled self-registration. The
+  // backend still enforces this; this is just to avoid a dead-end form.
+  api
+    .registrationStatus()
+    .then((status) => {
+      if (status && status.enabled === false && registerTab) {
+        registerTab.classList.add("is-hidden");
+        registerForm.classList.add("is-hidden");
+        activateTab("login");
+      }
+    })
+    .catch(() => {
+      /* Non-fatal: leave the tab visible; the backend still gates registration. */
+    });
 
   function showMessage(text, kind = "error") {
     message.textContent = text;

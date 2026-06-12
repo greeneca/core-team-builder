@@ -103,11 +103,12 @@ func ensureTestUser(ctx context.Context, pool *pgxpool.Pool) error {
 		return err
 	}
 
-	// ON CONFLICT keeps the operation idempotent across repeated runs.
+	// The seed/test user is always an admin. ON CONFLICT keeps the operation
+	// idempotent and promotes an existing test user to admin on re-run.
 	const q = `
-		INSERT INTO users (username, email, password_hash)
-		VALUES ($1, $2, $3)
-		ON CONFLICT (username) DO NOTHING`
+		INSERT INTO users (username, email, password_hash, is_admin)
+		VALUES ($1, $2, $3, true)
+		ON CONFLICT (username) DO UPDATE SET is_admin = true`
 
 	tag, err := pool.Exec(ctx, q, username, email, hash)
 	if err != nil {
@@ -117,7 +118,7 @@ func ensureTestUser(ctx context.Context, pool *pgxpool.Pool) error {
 		log.Printf("test user %q already exists, skipping", username)
 	} else {
 		// Never log the plaintext password; it is configured via the environment.
-		log.Printf("created test user %q", username)
+		log.Printf("ensured admin test user %q", username)
 	}
 	return nil
 }

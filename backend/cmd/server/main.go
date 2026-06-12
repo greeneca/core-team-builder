@@ -45,8 +45,9 @@ func run() error {
 	users := models.NewUserStore(pool)
 	teams := models.NewTeamStore(pool)
 	encounters := models.NewEncounterStore(pool)
+	settings := models.NewSettingsStore(pool)
 	tokens := auth.NewTokenManager(cfg.JWTSecret, cfg.JWTTTL)
-	srv := handlers.New(users, teams, encounters, tokens, cfg.CORSOrigin)
+	srv := handlers.New(users, teams, encounters, settings, tokens, cfg.CORSOrigin)
 
 	httpServer := &http.Server{
 		Addr:              cfg.HTTPAddr,

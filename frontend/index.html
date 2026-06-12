@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Dashboard — Core Team Builder</title>
-  <link rel="stylesheet" href="css/styles.css?v=57" />
+  <link rel="stylesheet" href="css/styles.css?v=58" />
 </head>
 <body>
   <div id="message" class="toast is-hidden" role="alert" aria-live="assertive"></div>
@@ -19,6 +19,7 @@
       <label class="toggle" title="Show set/skill descriptions on hover">
         <input type="checkbox" id="tooltips-toggle" /> Tooltips
       </label>
+      <button id="manage-users-btn" class="btn btn--ghost is-hidden" type="button">Manage Users</button>
       <button id="logout-btn" class="btn btn--ghost" type="button">Sign Out</button>
     </div>
   </header>
@@ -256,6 +257,32 @@
       </div>
     </div>
 
+    <!-- Admin: user management modal (admins only) -->
+    <div id="admin-modal" class="modal-overlay is-hidden" role="dialog" aria-modal="true" aria-labelledby="admin-modal-title">
+      <div class="modal">
+        <div class="modal-head">
+          <h2 id="admin-modal-title" style="margin: 0;">Manage Users</h2>
+          <button id="admin-modal-close" class="btn btn--ghost btn--sm" type="button" aria-label="Close">✕</button>
+        </div>
+
+        <label class="toggle admin-reg-toggle mt-4" title="Allow new people to self-register from the login page">
+          <input type="checkbox" id="admin-registration-toggle" /> Allow self-registration
+        </label>
+
+        <h3 style="margin: var(--space-5) 0 var(--space-2);">Add a user</h3>
+        <form id="admin-add-user-form" class="admin-add-user">
+          <input class="input" id="admin-new-username" placeholder="Username" autocomplete="off" required />
+          <input class="input" id="admin-new-email" type="email" placeholder="Email" autocomplete="off" required />
+          <input class="input" id="admin-new-password" type="password" placeholder="Password (min 8)" autocomplete="new-password" minlength="8" required />
+          <label class="toggle"><input type="checkbox" id="admin-new-admin" /> Admin</label>
+          <button class="btn btn--primary btn--sm" type="submit">Add</button>
+        </form>
+
+        <h3 style="margin: var(--space-5) 0 var(--space-2);">All users</h3>
+        <div id="admin-users-list" class="admin-users-list"></div>
+      </div>
+    </div>
+
     <!-- Sharing view (own page) -->
     <section id="share-view" class="is-hidden">
       <button id="share-back-btn" class="btn btn--ghost" type="button">← Back to teams</button>
@@ -280,9 +307,9 @@
     </section>
   </main>
 
-  <script src="js/api.js?v=57"></script>
-  <script src="js/data.js?v=57"></script>
-  <script src="js/components.js?v=57"></script>
-  <script src="js/app.js?v=57"></script>
+  <script src="js/api.js?v=58"></script>
+  <script src="js/data.js?v=58"></script>
+  <script src="js/components.js?v=58"></script>
+  <script src="js/app.js?v=58"></script>
 </body>
 </html>

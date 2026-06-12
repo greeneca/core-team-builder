@@ -31,7 +31,8 @@ autosaves changes (no Save buttons).
 ## How auth works (current)
 
 1. `POST /api/register` or `POST /api/login` → backend verifies/creates user,
-   returns a signed JWT (`{ token, user }`).
+   returns a signed JWT (`{ token, user }`). The `user` includes an `is_admin`
+   flag.
 2. Frontend stores the token in `localStorage` (`ctb_token`) and sends it as
    `Authorization: Bearer <token>` on protected calls.
 3. `auth.Middleware` validates the token and injects the user ID into the
@@ -39,6 +40,39 @@ autosaves changes (no Save buttons).
 
 Passwords: bcrypt cost 12, min length 8. Hashes only ever leave via `password_hash`
 column; the `User` JSON model hides it (`json:"-"`).
+
+## Admin & user management (current)
+
+- **Admin flag** (`015_admin_and_settings.sql`): `users.is_admin BOOLEAN`. Admins
+  can manage other users and toggle public self-registration. The `User` model
+  exposes it as `is_admin`; `GET /api/me` returns it so the UI can gate features.
+- **Becoming an admin**: the **first account ever registered** bootstraps the
+  system and is always allowed *and* made admin (regardless of the registration
+  toggle). The **seed/test user is always admin** — the seeder upserts it with
+  `is_admin = true` (promoting an existing test user on re-run). Otherwise admins
+  grant/revoke the flag via the UI.
+- **Registration toggle**: a key/value `app_settings` table holds global config;
+  the `registration_enabled` key (default `'true'`) controls public
+  self-registration. `SettingsStore` (`backend/internal/models/settings.go`)
+  reads/writes it. `POST /api/register` honors the toggle for every account after
+  the first (returns `403` when disabled). The unauthenticated
+  `GET /api/registration-status` lets the login page hide the Register tab when
+  it's off (the backend still enforces it).
+- **Admin endpoints** (JWT-protected; `requireAdmin` in
+  `backend/internal/handlers/admin.go` returns `403` for non-admins):
+  - `GET /api/admin/users` — list all users.
+  - `POST /api/admin/users` — create a user `{ username, email, password,
+    is_admin }` (bypasses the registration toggle).
+  - `DELETE /api/admin/users/{id}` — remove a user (cascades to their teams).
+  - `PUT /api/admin/users/{id}/admin` — set/clear a user's admin flag.
+  - `GET/PUT /api/admin/settings` — read/update `{ registration_enabled }`.
+  - **Guards**: you cannot delete your own account, and you cannot delete or
+    demote the **last remaining admin**.
+- **UI** (`app.js` / `index.html`): admins see a **Manage Users** button in the
+  topbar that opens `#admin-modal` — a self-registration toggle, an add-user
+  form (with an Admin checkbox), and a user list with per-row admin toggle +
+  Remove. The login page (`auth.js`) hides the Register tab when registration is
+  disabled.
 
 ## Teams model (current)
 
@@ -99,6 +133,17 @@ column; the `User` JSON model hides it (`json:"-"`).
     attribute (set in `renderRoster` and updated on change) and the
     `.player-slot[data-role="…"]` CSS applies a tinted background + left accent
     bar using the `--role-*` tokens in `styles.css`.
+  - **Copy from slot**: each slot (editors only) has a **"Copy from…"** dropdown
+    that pulls another slot's build + per-encounter loadout **into** this slot —
+    everything **except** name and discord handle (role/class/race/subclass +
+    active build + gear/skills/potions/CP/weapons/pen sources/mundus/armor). It
+    reads the live DOM (so unsaved edits copy too) and saves the team + the
+    current encounter (`copyPlayerToSlot` in `app.js`). Loadout copies only the
+    selected encounter.
+- **Floating jump nav** (desktop only, `≥1280px`): `#player-nav` is fixed to the
+  left edge with quick links to the top, the Group Buffs card, and each player
+  slot (name + role, role-colored). Built by `renderPlayerNav()` from the live
+  roster and refreshed on name/role edits; clicking scrolls the target into view.
 - **Subclassing** (`006_player_subclass.sql`): each player has `subclassed`
   (bool) plus two mutually exclusive build sets:
   - `subclassed = true` → `skill_line_1..3`, each one of the **21 class skill
@@ -259,9 +304,10 @@ column; the `User` JSON model hides it (`json:"-"`).
   `skill_line_*`; a non-subclassed player contributes their `class` + `mastery_*`.
   Loadout sources (gear/skills/potions) always count. Returns `{ total, met,
   items: [{ buff, met, providers:[{slot, category, key}] }] }`.
-- **UI** (`app.js` / `index.html`): a **Buffs** card on the team detail page
-  shows `met / total` plus a pip bar; a **Details** button opens `#buffs-modal`
-  listing each buff (met/unmet + which players/sources provide it).
+- **UI** (`app.js` / `index.html`): a **Group Buffs** card on the team detail
+  page shows `met / total` plus a pip bar; a **Details** button opens
+  `#buffs-modal` listing each buff (met/unmet + which players/sources provide it,
+  with a tooltip on each buff name listing its known sources).
   `refreshBuffCoverage()` reads the live DOM (`collectPlayers()` +
   `collectLoadouts()`) and repaints without a full re-render, so it stays correct
   after autosaves; it is called on detail render, encounter switch, roster/build
@@ -357,7 +403,8 @@ generally not triggered (the backend still sets CORS headers as defense).
 - Migrations are **idempotent** (`IF NOT EXISTS`, `ON CONFLICT`) so both the
   Postgres init dir and the `seed` command can apply them safely.
 - The `seed` binary applies all `*.sql` in `MIGRATIONS_DIR` (sorted) then
-  upserts the test user. It is safe to run repeatedly. The test-user
+  upserts the test user (always as an **admin** — `is_admin = true`, promoting an
+  existing test user on re-run). It is safe to run repeatedly. The test-user
   credentials (`SEED_USERNAME`, `SEED_EMAIL`, `SEED_PASSWORD`) are **required
   from the environment** — there are no hardcoded defaults — and the plaintext
   password is never logged.
@@ -378,6 +425,7 @@ cd backend && go vet ./...         # static checks
 - [ ] Token refresh / logout server-side invalidation (currently stateless JWT).
 - [x] Teams: ownership, sharing, and a 12-player roster (name/discord/role/class).
 - [x] Encounters: per-team named fights with per-player gear/skill loadouts.
+- [x] Admin users + user management (list/add/remove/promote) + registration toggle.
 - [ ] Expand the gear-set/skill/boss seed data to full ESO coverage.
 - [ ] Tests (handlers, auth, models).
 - [ ] Rate limiting on auth endpoints.

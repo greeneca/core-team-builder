@@ -1685,6 +1685,142 @@
     }
   });
 
+  // --- Admin: user management (admins only) ---
+  // The topbar "Manage Users" button (shown only to admins) opens a modal to
+  // list/add/remove users, toggle admin, and enable/disable self-registration.
+  function showAdminButton() {
+    el("manage-users-btn").classList.toggle(
+      "is-hidden",
+      !(currentUser && currentUser.is_admin)
+    );
+  }
+
+  async function openAdminModal() {
+    el("admin-modal").classList.remove("is-hidden");
+    try {
+      const s = await api.getAdminSettings();
+      el("admin-registration-toggle").checked = !!s.registration_enabled;
+    } catch (err) {
+      handleError(err);
+    }
+    renderAdminUsers();
+  }
+
+  function closeAdminModal() {
+    el("admin-modal").classList.add("is-hidden");
+  }
+
+  async function renderAdminUsers() {
+    const list = el("admin-users-list");
+    list.innerHTML = '<p class="text-muted">Loading…</p>';
+    let users = [];
+    try {
+      const data = await api.listUsers();
+      users = data.users || [];
+    } catch (err) {
+      list.innerHTML = "";
+      handleError(err);
+      return;
+    }
+    list.innerHTML = "";
+    users.forEach((u) => {
+      const isSelf = currentUser && u.id === currentUser.id;
+      const row = document.createElement("div");
+      row.className = "admin-user-row";
+      row.innerHTML = `
+        <div class="admin-user-main">
+          <span class="admin-user-name">${escapeAttr(u.username)}${
+        isSelf ? " (you)" : ""
+      }</span>
+          <span class="admin-user-email text-muted">${escapeAttr(u.email)}</span>
+        </div>
+        <label class="toggle admin-user-admin">
+          <input type="checkbox" data-admin-toggle ${u.is_admin ? "checked" : ""} /> Admin
+        </label>
+        <button class="btn btn--danger btn--sm" type="button" data-admin-delete ${
+          isSelf ? "disabled" : ""
+        }>Remove</button>`;
+
+      const adminCb = row.querySelector("[data-admin-toggle]");
+      adminCb.addEventListener("change", async () => {
+        try {
+          await api.setUserAdmin(u.id, adminCb.checked);
+          showMessage(`Updated ${u.username}`, "success");
+          if (isSelf) {
+            currentUser.is_admin = adminCb.checked;
+            showAdminButton();
+          }
+          renderAdminUsers();
+        } catch (err) {
+          adminCb.checked = !adminCb.checked;
+          handleError(err);
+        }
+      });
+
+      const delBtn = row.querySelector("[data-admin-delete]");
+      if (delBtn && !isSelf) {
+        delBtn.addEventListener("click", async () => {
+          if (
+            !confirm(
+              `Remove user “${u.username}”? This deletes their account and any teams they own.`
+            )
+          ) {
+            return;
+          }
+          try {
+            await api.deleteUser(u.id);
+            showMessage(`Removed ${u.username}`, "success");
+            renderAdminUsers();
+          } catch (err) {
+            handleError(err);
+          }
+        });
+      }
+      list.appendChild(row);
+    });
+  }
+
+  el("manage-users-btn").addEventListener("click", openAdminModal);
+  el("admin-modal-close").addEventListener("click", closeAdminModal);
+  el("admin-modal").addEventListener("click", (e) => {
+    if (e.target === el("admin-modal")) closeAdminModal();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !el("admin-modal").classList.contains("is-hidden")) {
+      closeAdminModal();
+    }
+  });
+
+  el("admin-registration-toggle").addEventListener("change", async (e) => {
+    try {
+      await api.setRegistrationEnabled(e.target.checked);
+      showMessage(
+        `Self-registration ${e.target.checked ? "enabled" : "disabled"}`,
+        "success"
+      );
+    } catch (err) {
+      e.target.checked = !e.target.checked;
+      handleError(err);
+    }
+  });
+
+  el("admin-add-user-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const username = el("admin-new-username").value.trim();
+    const email = el("admin-new-email").value.trim();
+    const password = el("admin-new-password").value;
+    const isAdmin = el("admin-new-admin").checked;
+    if (!username || !email || !password) return;
+    try {
+      await api.createUser(username, email, password, isAdmin);
+      el("admin-add-user-form").reset();
+      showMessage(`Created ${username}`, "success");
+      renderAdminUsers();
+    } catch (err) {
+      handleError(err);
+    }
+  });
+
   // --- Encounter chip panel stickiness ---
   // Only the chip panel (#encounters-panel) is `position: sticky`; it pins just
   // below the topbar while scrolling the roster. A zero-height sentinel placed
@@ -1716,6 +1852,7 @@
     try {
       currentUser = await api.me();
       el("username").textContent = currentUser.username;
+      showAdminButton();
       await loadTeams();
     } catch (err) {
       handleError(err);
