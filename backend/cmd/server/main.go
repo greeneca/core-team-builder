@@ -46,8 +46,10 @@ func run() error {
 	teams := models.NewTeamStore(pool)
 	encounters := models.NewEncounterStore(pool)
 	settings := models.NewSettingsStore(pool)
-	tokens := auth.NewTokenManager(cfg.JWTSecret, cfg.JWTTTL)
-	srv := handlers.New(users, teams, encounters, settings, tokens, cfg.CORSOrigin)
+	refreshTokens := models.NewRefreshTokenStore(pool)
+	startRefreshTokenCleanup(ctx, refreshTokens, time.Hour)
+	tokens := auth.NewTokenManager(cfg.JWTSecret, cfg.JWTTTL, cfg.RefreshTTL)
+	srv := handlers.New(users, teams, encounters, settings, refreshTokens, tokens, cfg.CORSOrigin)
 
 	httpServer := &http.Server{
 		Addr:              cfg.HTTPAddr,
@@ -72,4 +74,33 @@ func run() error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	return httpServer.Shutdown(shutdownCtx)
+}
+
+// startRefreshTokenCleanup runs a periodic sweep that deletes expired/revoked
+// refresh tokens until ctx is cancelled. It runs an initial sweep on startup so
+// a long-down deployment doesn't wait a full interval to catch up. The deletes
+// are idempotent, so running it on multiple replicas is harmless.
+func startRefreshTokenCleanup(ctx context.Context, store *models.RefreshTokenStore, every time.Duration) {
+	sweep := func() {
+		// Bound each sweep so a slow query can't hang on shutdown.
+		sweepCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		if err := store.DeleteExpired(sweepCtx); err != nil {
+			log.Printf("refresh token cleanup: %v", err)
+		}
+	}
+
+	go func() {
+		ticker := time.NewTicker(every)
+		defer ticker.Stop()
+		sweep()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				sweep()
+			}
+		}
+	}()
 }

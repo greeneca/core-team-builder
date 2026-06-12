@@ -61,7 +61,7 @@
     const password = document.getElementById("login-password").value;
     try {
       const data = await api.login(username, password);
-      api.setToken(data.token);
+      api.setSession(data);
       window.location.replace("index.html");
     } catch (err) {
       showMessage(err.message);
@@ -76,7 +76,7 @@
     const password = document.getElementById("register-password").value;
     try {
       const data = await api.register(username, email, password);
-      api.setToken(data.token);
+      api.setSession(data);
       window.location.replace("index.html");
     } catch (err) {
       showMessage(err.message);

@@ -4,48 +4,67 @@
  * Requests are made to same-origin "/api/*" paths; nginx proxies these to the
  * Go backend, so no cross-origin configuration is needed in the browser.
  *
- * The auth token is persisted in localStorage and attached automatically.
+ * Auth uses a short-lived access token plus a long-lived refresh token, both
+ * persisted in localStorage. The access token is attached automatically; when it
+ * expires (401), the client transparently exchanges the refresh token for a new
+ * pair and retries the request once.
  */
 
 const TOKEN_KEY = "ctb_token";
+const REFRESH_KEY = "ctb_refresh_token";
 
 const api = {
+  // In-flight refresh shared across concurrent 401s so the single-use refresh
+  // token is only rotated once.
+  _refreshPromise: null,
+
   getToken() {
     return localStorage.getItem(TOKEN_KEY);
+  },
+
+  getRefreshToken() {
+    return localStorage.getItem(REFRESH_KEY);
   },
 
   setToken(token) {
     localStorage.setItem(TOKEN_KEY, token);
   },
 
+  // Persist a full auth response ({ token, refresh_token }).
+  setSession(data) {
+    if (data && data.token) {
+      localStorage.setItem(TOKEN_KEY, data.token);
+    }
+    if (data && data.refresh_token) {
+      localStorage.setItem(REFRESH_KEY, data.refresh_token);
+    }
+  },
+
   clearToken() {
     localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(REFRESH_KEY);
   },
 
   isAuthenticated() {
     return Boolean(this.getToken());
   },
 
-  /**
-   * Perform a JSON request against the API.
-   * @param {string} path   API path beginning with "/api".
-   * @param {object} [opts] fetch-style options: { method, body }.
-   * @returns {Promise<object>} parsed JSON body.
-   * @throws {Error} with `.status` and `.message` on non-2xx responses.
-   */
-  async request(path, opts = {}) {
+  // Issue a single fetch with the current access token attached.
+  _send(path, opts) {
     const headers = { "Content-Type": "application/json" };
     const token = this.getToken();
     if (token) {
       headers["Authorization"] = `Bearer ${token}`;
     }
-
-    const res = await fetch(path, {
+    return fetch(path, {
       method: opts.method || "GET",
       headers,
       body: opts.body ? JSON.stringify(opts.body) : undefined,
     });
+  },
 
+  // Parse a Response, throwing an Error (with .status) on non-2xx.
+  async _parse(res) {
     let data = null;
     const text = await res.text();
     if (text) {
@@ -55,13 +74,67 @@ const api = {
         data = { error: text };
       }
     }
-
     if (!res.ok) {
       const err = new Error((data && data.error) || `Request failed (${res.status})`);
       err.status = res.status;
       throw err;
     }
     return data;
+  },
+
+  // Exchange the refresh token for a fresh token pair. Concurrent callers share
+  // one in-flight request. Resolves true on success, false otherwise.
+  async tryRefresh() {
+    if (!this._refreshPromise) {
+      const refreshToken = this.getRefreshToken();
+      if (!refreshToken) {
+        return false;
+      }
+      this._refreshPromise = (async () => {
+        try {
+          const res = await fetch("/api/refresh", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ refresh_token: refreshToken }),
+          });
+          if (!res.ok) {
+            this.clearToken();
+            return false;
+          }
+          this.setSession(await res.json());
+          return true;
+        } catch {
+          return false;
+        }
+      })();
+      this._refreshPromise.finally(() => {
+        this._refreshPromise = null;
+      });
+    }
+    return this._refreshPromise;
+  },
+
+  /**
+   * Perform a JSON request against the API. On a 401 from an expired access
+   * token, it refreshes once and retries transparently.
+   * @param {string} path   API path beginning with "/api".
+   * @param {object} [opts] fetch-style options: { method, body }.
+   * @returns {Promise<object>} parsed JSON body.
+   * @throws {Error} with `.status` and `.message` on non-2xx responses.
+   */
+  async request(path, opts = {}) {
+    let res = await this._send(path, opts);
+
+    // Don't try to refresh the auth endpoints themselves.
+    const isAuthPath =
+      path === "/api/refresh" || path === "/api/login" || path === "/api/register";
+    if (res.status === 401 && !isAuthPath && this.getRefreshToken()) {
+      if (await this.tryRefresh()) {
+        res = await this._send(path, opts);
+      }
+    }
+
+    return this._parse(res);
   },
 
   login(username, password) {
@@ -76,6 +149,23 @@ const api = {
       method: "POST",
       body: { username, email, password },
     });
+  },
+
+  // Revoke the refresh token server-side, then clear local credentials.
+  async logout() {
+    const refreshToken = this.getRefreshToken();
+    if (refreshToken) {
+      try {
+        await fetch("/api/logout", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ refresh_token: refreshToken }),
+        });
+      } catch {
+        /* Best-effort: clear locally even if the network call fails. */
+      }
+    }
+    this.clearToken();
   },
 
   me() {

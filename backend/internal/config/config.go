@@ -22,12 +22,28 @@ type Config struct {
 	// long, random value in any non-local environment.
 	JWTSecret []byte
 
-	// JWTTTL is how long an issued auth token remains valid.
+	// JWTTTL is how long an issued access token remains valid. Access tokens are
+	// deliberately short-lived; clients refresh them with a refresh token.
 	JWTTTL time.Duration
+
+	// RefreshTTL is how long an issued refresh token remains valid.
+	RefreshTTL time.Duration
 
 	// CORSOrigin is the allowed origin for browser requests (the frontend URL).
 	CORSOrigin string
 }
+
+// MinJWTSecretLen is the minimum acceptable length (in bytes) for JWT_SECRET. A
+// short secret makes HS256 tokens forgeable by brute force, so we refuse to boot
+// with anything weaker than 32 bytes (256 bits).
+const MinJWTSecretLen = 32
+
+// defaultAccessTTL is the access-token lifetime when JWT_TTL is unset. Kept
+// short so a leaked access token has a small window of validity.
+const defaultAccessTTL = 15 * time.Minute
+
+// defaultRefreshTTL is the refresh-token lifetime when REFRESH_TTL is unset.
+const defaultRefreshTTL = 30 * 24 * time.Hour
 
 // Load reads configuration from the environment, applying sane defaults for
 // local development. It returns an error when a required production value is
@@ -37,7 +53,8 @@ func Load() (*Config, error) {
 		HTTPAddr:    getEnv("HTTP_ADDR", ":8080"),
 		DatabaseURL: getEnv("DATABASE_URL", ""),
 		JWTSecret:   []byte(getEnv("JWT_SECRET", "")),
-		JWTTTL:      24 * time.Hour,
+		JWTTTL:      defaultAccessTTL,
+		RefreshTTL:  defaultRefreshTTL,
 		CORSOrigin:  getEnv("CORS_ORIGIN", "http://localhost:8081"),
 	}
 
@@ -47,6 +64,9 @@ func Load() (*Config, error) {
 	if len(cfg.JWTSecret) == 0 {
 		return nil, fmt.Errorf("JWT_SECRET is required")
 	}
+	if len(cfg.JWTSecret) < MinJWTSecretLen {
+		return nil, fmt.Errorf("JWT_SECRET must be at least %d bytes; generate one with: openssl rand -base64 48", MinJWTSecretLen)
+	}
 
 	if ttl := os.Getenv("JWT_TTL"); ttl != "" {
 		d, err := time.ParseDuration(ttl)
@@ -54,6 +74,14 @@ func Load() (*Config, error) {
 			return nil, fmt.Errorf("invalid JWT_TTL: %w", err)
 		}
 		cfg.JWTTTL = d
+	}
+
+	if ttl := os.Getenv("REFRESH_TTL"); ttl != "" {
+		d, err := time.ParseDuration(ttl)
+		if err != nil {
+			return nil, fmt.Errorf("invalid REFRESH_TTL: %w", err)
+		}
+		cfg.RefreshTTL = d
 	}
 
 	return cfg, nil

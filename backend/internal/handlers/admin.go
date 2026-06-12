@@ -67,7 +67,7 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	hash, err := auth.HashPassword(req.Password)
-	if errors.Is(err, auth.ErrPasswordTooShort) {
+	if auth.IsPasswordPolicyError(err) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}

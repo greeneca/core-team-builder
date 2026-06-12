@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -88,6 +89,18 @@ func (s *Server) handleCreateTeam(w http.ResponseWriter, r *http.Request) {
 	req.Name = strings.TrimSpace(req.Name)
 	if req.Name == "" {
 		writeError(w, http.StatusBadRequest, "team name is required")
+		return
+	}
+
+	// Enforce the per-owner team cap so one account can't create unbounded teams.
+	owned, err := s.teams.CountOwned(r.Context(), userID)
+	if err != nil {
+		log.Printf("count owned teams: %v", err)
+		writeError(w, http.StatusInternalServerError, "could not create team")
+		return
+	}
+	if owned >= maxTeamsPerOwner {
+		writeError(w, http.StatusConflict, fmt.Sprintf("team limit reached (max %d)", maxTeamsPerOwner))
 		return
 	}
 
@@ -203,6 +216,13 @@ func (s *Server) handleUpdateTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A team has exactly TeamSize slots, so a payload with more player entries
+	// than that is malformed (or abusive) — reject before doing per-row work.
+	if len(req.Players) > models.TeamSize {
+		writeError(w, http.StatusBadRequest, "too many players")
+		return
+	}
+
 	players := make([]models.Player, 0, len(req.Players))
 	for _, p := range req.Players {
 		if p.Slot < 1 || p.Slot > models.TeamSize {
@@ -314,7 +334,9 @@ func validTimeOfDay(t string) bool {
 
 // normalizeTimezones validates, de-duplicates, and orders a team's timezone
 // list. Each must be a non-empty, loadable IANA name; empties are dropped.
-// Order is preserved (first occurrence wins).
+// Order is preserved (first occurrence wins). The number of distinct zones is
+// capped so a single team can't accumulate an unbounded list (each entry runs a
+// time.LoadLocation on every save).
 func normalizeTimezones(in []string) ([]string, error) {
 	seen := map[string]bool{}
 	out := make([]string, 0, len(in))
@@ -328,6 +350,9 @@ func normalizeTimezones(in []string) ([]string, error) {
 		}
 		if seen[tz] {
 			continue
+		}
+		if len(out) >= maxTeamTimezones {
+			return nil, fmt.Errorf("too many timezones (max %d)", maxTeamTimezones)
 		}
 		seen[tz] = true
 		out = append(out, tz)
@@ -389,6 +414,10 @@ func (s *Server) handleShareTeam(w http.ResponseWriter, r *http.Request) {
 
 	target, err := s.users.GetByUsername(r.Context(), req.Username)
 	if errors.Is(err, models.ErrUserNotFound) {
+		// Audit username lookups so enumeration via this endpoint (a known,
+		// by-design oracle since sharing is by username) is detectable. The
+		// client-facing message is intentionally unchanged.
+		log.Printf("audit: share lookup miss: caller=%d team=%d username=%q", ownerID, teamID, req.Username)
 		writeError(w, http.StatusNotFound, "no user with that username")
 		return
 	}
@@ -407,6 +436,7 @@ func (s *Server) handleShareTeam(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "could not share team")
 		return
 	}
+	log.Printf("audit: share granted: caller=%d team=%d target=%d role=%s", ownerID, teamID, target.ID, req.Role)
 	team, err := s.teams.Get(r.Context(), teamID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not load team")

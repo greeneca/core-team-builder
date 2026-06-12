@@ -80,8 +80,8 @@
   }
 
   // --- Sign out ---
-  el("logout-btn").addEventListener("click", () => {
-    api.clearToken();
+  el("logout-btn").addEventListener("click", async () => {
+    await api.logout();
     window.location.replace("login.html");
   });
 

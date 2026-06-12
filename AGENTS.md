@@ -9,6 +9,7 @@ Other key docs:
 
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 - [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md)
+- [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)
 - [`docs/STYLE_GUIDE.md`](docs/STYLE_GUIDE.md)
 
 Ground rules:

@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -97,6 +98,10 @@ func (s *Server) handleCreateEncounter(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Printf("list encounters: %v", err)
 		writeError(w, http.StatusInternalServerError, "could not create encounter")
+		return
+	}
+	if len(existing) >= maxEncountersPerTeam {
+		writeError(w, http.StatusConflict, fmt.Sprintf("encounter limit reached (max %d)", maxEncountersPerTeam))
 		return
 	}
 	if verr := models.ValidateEncounterSelection(encounterNames(existing, 0), req.Name); verr != nil {

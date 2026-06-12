@@ -182,6 +182,16 @@ func (s *TeamStore) Create(ctx context.Context, ownerID int64, name string, copy
 	return s.Get(ctx, team.ID)
 }
 
+// CountOwned returns how many teams the given user owns. Used to enforce the
+// per-owner team cap before creating another.
+func (s *TeamStore) CountOwned(ctx context.Context, ownerID int64) (int, error) {
+	var n int
+	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM teams WHERE owner_id = $1`, ownerID).Scan(&n); err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
 // ListForUser returns every team the user owns or has been granted access to,
 // most recently updated first. Players and members are not populated here.
 func (s *TeamStore) ListForUser(ctx context.Context, userID int64) ([]Team, error) {

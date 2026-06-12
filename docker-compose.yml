@@ -31,6 +31,22 @@ services:
     networks:
       - ctb-net
     restart: unless-stopped
+    # Hardening. Postgres starts as root and steps down to the postgres user, so
+    # it keeps only the capabilities required to initialize the data dir and
+    # switch users (everything else dropped). no-new-privileges blocks setuid
+    # escalation; resource limits bound DoS blast radius.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+    mem_limit: 512m
+    pids_limit: 200
 
   backend:
     build: ./backend
@@ -40,6 +56,7 @@ services:
       DATABASE_URL: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?sslmode=disable"
       JWT_SECRET: ${JWT_SECRET}
       JWT_TTL: ${JWT_TTL}
+      REFRESH_TTL: ${REFRESH_TTL}
       CORS_ORIGIN: ${CORS_ORIGIN}
     depends_on:
       db:
@@ -47,6 +64,18 @@ services:
     networks:
       - ctb-net
     restart: unless-stopped
+    # Hardening. The scratch image runs as a non-root UID and needs no caps; the
+    # root filesystem is read-only (the static binary writes nothing), with a
+    # small tmpfs for any transient /tmp use.
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 256m
+    pids_limit: 100
 
   # One-shot seeder. Runs migrations and ensures the test user exists, then exits.
   seed:
@@ -68,17 +97,43 @@ services:
     networks:
       - ctb-net
     restart: "no"
+    # Same hardening as backend (same image, one-shot job).
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 256m
+    pids_limit: 100
 
   frontend:
     build: ./frontend
     image: ctb-frontend
+    # The container now listens on 8080 (unprivileged nginx); host port unchanged.
     ports:
-      - "${FRONTEND_PORT}:80"
+      - "${FRONTEND_PORT}:8080"
+    # Run nginx directly, bypassing the image's docker-entrypoint.d scripts which
+    # rewrite config files at startup (incompatible with a read-only rootfs).
+    entrypoint: ["nginx", "-g", "daemon off;"]
     depends_on:
       - backend
     networks:
       - ctb-net
     restart: unless-stopped
+    # Hardening. Non-root unprivileged image, no caps (binds 8080, not 80),
+    # read-only rootfs with tmpfs for nginx's runtime scratch (pid + temp files).
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/cache/nginx
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 128m
+    pids_limit: 100
 
 networks:
   ctb-net:

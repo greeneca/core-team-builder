@@ -6,25 +6,43 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/core-team-builder/backend/internal/auth"
 	"github.com/core-team-builder/backend/internal/models"
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
+// maxRequestBody bounds the size of any request body the API will read. JSON
+// payloads here are small (a team with a 12-player roster and loadouts is a few
+// KB), so 1 MiB is generous while still preventing memory-exhaustion DoS.
+const maxRequestBody = 1 << 20 // 1 MiB
+
+// Per-user / per-resource caps. These bound how much an authenticated user can
+// create so a single account can't exhaust storage or degrade the service.
+const (
+	// maxTeamsPerOwner caps how many teams one user may own.
+	maxTeamsPerOwner = 100
+	// maxEncountersPerTeam caps how many encounters a team may hold.
+	maxEncountersPerTeam = 10
+	// maxTeamTimezones caps the team's extra display-timezone list.
+	maxTeamTimezones = 20
+)
+
 // Server holds the dependencies shared across HTTP handlers.
 type Server struct {
-	users      *models.UserStore
-	teams      *models.TeamStore
-	encounters *models.EncounterStore
-	settings   *models.SettingsStore
-	tokens     *auth.TokenManager
-	corsOrigin string
+	users         *models.UserStore
+	teams         *models.TeamStore
+	encounters    *models.EncounterStore
+	settings      *models.SettingsStore
+	refreshTokens *models.RefreshTokenStore
+	tokens        *auth.TokenManager
+	corsOrigin    string
 }
 
 // New constructs a Server.
-func New(users *models.UserStore, teams *models.TeamStore, encounters *models.EncounterStore, settings *models.SettingsStore, tokens *auth.TokenManager, corsOrigin string) *Server {
-	return &Server{users: users, teams: teams, encounters: encounters, settings: settings, tokens: tokens, corsOrigin: corsOrigin}
+func New(users *models.UserStore, teams *models.TeamStore, encounters *models.EncounterStore, settings *models.SettingsStore, refreshTokens *models.RefreshTokenStore, tokens *auth.TokenManager, corsOrigin string) *Server {
+	return &Server{users: users, teams: teams, encounters: encounters, settings: settings, refreshTokens: refreshTokens, tokens: tokens, corsOrigin: corsOrigin}
 }
 
 // Routes returns the fully configured HTTP handler, including CORS handling.
@@ -35,6 +53,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/registration-status", s.handleRegistrationStatus)
 	mux.HandleFunc("POST /api/register", s.handleRegister)
 	mux.HandleFunc("POST /api/login", s.handleLogin)
+	mux.HandleFunc("POST /api/refresh", s.handleRefresh)
+	mux.HandleFunc("POST /api/logout", s.handleLogout)
 
 	// Protected routes.
 	protected := func(h http.HandlerFunc) http.Handler {
@@ -67,7 +87,19 @@ func (s *Server) Routes() http.Handler {
 	mux.Handle("DELETE /api/teams/{id}/encounters/{eid}", protected(s.handleDeleteEncounter))
 	mux.Handle("PUT /api/teams/{id}/encounters/{eid}/loadouts", protected(s.handleSaveLoadouts))
 
-	return s.withCORS(mux)
+	return s.withCORS(s.withMaxBytes(mux))
+}
+
+// withMaxBytes caps every request body via http.MaxBytesReader so an oversized
+// body is rejected (with 413 by the decoder) instead of being read into memory.
+// Applied globally so no handler can forget it.
+func (s *Server) withMaxBytes(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Body != nil {
+			r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // withCORS adds permissive-but-scoped CORS headers for the configured frontend
@@ -98,8 +130,14 @@ type credentials struct {
 }
 
 type authResponse struct {
-	Token string       `json:"token"`
-	User  *models.User `json:"user"`
+	Token        string       `json:"token"`
+	RefreshToken string       `json:"refresh_token"`
+	ExpiresIn    int          `json:"expires_in"`
+	User         *models.User `json:"user"`
+}
+
+type refreshRequest struct {
+	RefreshToken string `json:"refresh_token"`
 }
 
 // handleRegistrationStatus reports whether public self-registration is open. It
@@ -148,7 +186,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	}
 
 	hash, err := auth.HashPassword(creds.Password)
-	if errors.Is(err, auth.ErrPasswordTooShort) {
+	if auth.IsPasswordPolicyError(err) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -170,7 +208,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.issueAndRespond(w, user)
+	s.issueAndRespond(w, r, user)
 }
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
@@ -199,7 +237,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.issueAndRespond(w, user)
+	s.issueAndRespond(w, r, user)
 }
 
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
@@ -217,14 +255,79 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, user)
 }
 
-func (s *Server) issueAndRespond(w http.ResponseWriter, user *models.User) {
+func (s *Server) issueAndRespond(w http.ResponseWriter, r *http.Request, user *models.User) {
 	token, err := s.tokens.Issue(user.ID, user.Username)
 	if err != nil {
 		log.Printf("issue token: %v", err)
 		writeError(w, http.StatusInternalServerError, "could not issue token")
 		return
 	}
-	writeJSON(w, http.StatusOK, authResponse{Token: token, User: user})
+
+	refreshToken, refreshHash, err := auth.GenerateRefreshToken()
+	if err != nil {
+		log.Printf("generate refresh token: %v", err)
+		writeError(w, http.StatusInternalServerError, "could not issue token")
+		return
+	}
+	expiresAt := time.Now().Add(s.tokens.RefreshTTL())
+	if err := s.refreshTokens.Create(r.Context(), user.ID, refreshHash, expiresAt); err != nil {
+		log.Printf("persist refresh token: %v", err)
+		writeError(w, http.StatusInternalServerError, "could not issue token")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, authResponse{
+		Token:        token,
+		RefreshToken: refreshToken,
+		ExpiresIn:    int(s.tokens.AccessTTL().Seconds()),
+		User:         user,
+	})
+}
+
+// handleRefresh exchanges a valid refresh token for a new access token and a new
+// refresh token (single-use rotation). The presented token is consumed
+// atomically, so replaying it fails and a stolen-then-used token is detectable.
+func (s *Server) handleRefresh(w http.ResponseWriter, r *http.Request) {
+	var req refreshRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.RefreshToken == "" {
+		writeError(w, http.StatusBadRequest, "refresh_token is required")
+		return
+	}
+
+	userID, err := s.refreshTokens.Consume(r.Context(), auth.HashRefreshToken(req.RefreshToken))
+	if errors.Is(err, models.ErrRefreshTokenInvalid) {
+		writeError(w, http.StatusUnauthorized, "invalid refresh token")
+		return
+	}
+	if err != nil {
+		log.Printf("consume refresh token: %v", err)
+		writeError(w, http.StatusInternalServerError, "could not refresh session")
+		return
+	}
+
+	user, err := s.users.GetByID(r.Context(), userID)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "invalid refresh token")
+		return
+	}
+
+	s.issueAndRespond(w, r, user)
+}
+
+// handleLogout revokes the supplied refresh token so it can no longer mint
+// access tokens. It is idempotent and always returns 204.
+func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
+	var req refreshRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err == nil && req.RefreshToken != "" {
+		if err := s.refreshTokens.Revoke(r.Context(), auth.HashRefreshToken(req.RefreshToken)); err != nil {
+			log.Printf("revoke refresh token: %v", err)
+		}
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
