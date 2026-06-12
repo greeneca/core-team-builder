@@ -177,6 +177,23 @@ const api = {
     return this.request("/api/registration-status");
   },
 
+  // Public: request a password-reset email. Always resolves with a generic
+  // message (the backend never reveals whether the email is registered).
+  forgotPassword(email) {
+    return this.request("/api/forgot-password", {
+      method: "POST",
+      body: { email },
+    });
+  },
+
+  // Public: complete a password reset with the emailed token and a new password.
+  resetPassword(token, password) {
+    return this.request("/api/reset-password", {
+      method: "POST",
+      body: { token, password },
+    });
+  },
+
   // --- Admin: user management ---
 
   listUsers() {
@@ -289,6 +306,37 @@ const api = {
     return this.request(`/api/teams/${teamId}/encounters/${encounterId}/loadouts`, {
       method: "PUT",
       body: { loadouts },
+    });
+  },
+
+  // --- Groupings ---
+
+  listGroupings(teamId) {
+    return this.request(`/api/teams/${teamId}/groupings`);
+  },
+
+  createGrouping(teamId, name, groupCount) {
+    return this.request(`/api/teams/${teamId}/groupings`, {
+      method: "POST",
+      body: { name, group_count: groupCount },
+    });
+  },
+
+  getGrouping(teamId, groupingId) {
+    return this.request(`/api/teams/${teamId}/groupings/${groupingId}`);
+  },
+
+  // payload: { name, group_count, groups: [{ group_number, name, slots: [] }] }
+  saveGrouping(teamId, groupingId, payload) {
+    return this.request(`/api/teams/${teamId}/groupings/${groupingId}`, {
+      method: "PUT",
+      body: payload,
+    });
+  },
+
+  deleteGrouping(teamId, groupingId) {
+    return this.request(`/api/teams/${teamId}/groupings/${groupingId}`, {
+      method: "DELETE",
     });
   },
 };

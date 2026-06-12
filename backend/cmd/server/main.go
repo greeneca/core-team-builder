@@ -17,6 +17,7 @@ import (
 	"github.com/core-team-builder/backend/internal/auth"
 	"github.com/core-team-builder/backend/internal/config"
 	"github.com/core-team-builder/backend/internal/db"
+	"github.com/core-team-builder/backend/internal/email"
 	"github.com/core-team-builder/backend/internal/handlers"
 	"github.com/core-team-builder/backend/internal/models"
 )
@@ -45,11 +46,42 @@ func run() error {
 	users := models.NewUserStore(pool)
 	teams := models.NewTeamStore(pool)
 	encounters := models.NewEncounterStore(pool)
+	groupings := models.NewGroupingStore(pool)
 	settings := models.NewSettingsStore(pool)
 	refreshTokens := models.NewRefreshTokenStore(pool)
-	startRefreshTokenCleanup(ctx, refreshTokens, time.Hour)
+	passwordResets := models.NewPasswordResetStore(pool)
+	startTokenCleanup(ctx, refreshTokens, passwordResets, time.Hour)
 	tokens := auth.NewTokenManager(cfg.JWTSecret, cfg.JWTTTL, cfg.RefreshTTL)
-	srv := handlers.New(users, teams, encounters, settings, refreshTokens, tokens, cfg.CORSOrigin)
+
+	var mailer email.Mailer
+	if cfg.SMTP.Configured() {
+		mailer = email.NewSMTPMailer(email.SMTPConfig{
+			Host:     cfg.SMTP.Host,
+			Port:     cfg.SMTP.Port,
+			Username: cfg.SMTP.Username,
+			Password: cfg.SMTP.Password,
+			From:     cfg.SMTP.From,
+		})
+		log.Printf("email: SMTP delivery via %s:%s", cfg.SMTP.Host, cfg.SMTP.Port)
+	} else {
+		mailer = email.LogMailer{}
+		log.Print("email: SMTP not configured; reset emails will be logged (dev mode)")
+	}
+
+	srv := handlers.New(handlers.Config{
+		Users:            users,
+		Teams:            teams,
+		Encounters:       encounters,
+		Groupings:        groupings,
+		Settings:         settings,
+		RefreshTokens:    refreshTokens,
+		PasswordResets:   passwordResets,
+		Tokens:           tokens,
+		Mailer:           mailer,
+		CORSOrigin:       cfg.CORSOrigin,
+		AppBaseURL:       cfg.AppBaseURL,
+		PasswordResetTTL: cfg.PasswordResetTTL,
+	})
 
 	httpServer := &http.Server{
 		Addr:              cfg.HTTPAddr,
@@ -76,17 +108,21 @@ func run() error {
 	return httpServer.Shutdown(shutdownCtx)
 }
 
-// startRefreshTokenCleanup runs a periodic sweep that deletes expired/revoked
-// refresh tokens until ctx is cancelled. It runs an initial sweep on startup so
-// a long-down deployment doesn't wait a full interval to catch up. The deletes
-// are idempotent, so running it on multiple replicas is harmless.
-func startRefreshTokenCleanup(ctx context.Context, store *models.RefreshTokenStore, every time.Duration) {
+// startTokenCleanup runs a periodic sweep that deletes expired/revoked refresh
+// tokens and expired/used password-reset tokens until ctx is cancelled. It runs
+// an initial sweep on startup so a long-down deployment doesn't wait a full
+// interval to catch up. The deletes are idempotent, so running it on multiple
+// replicas is harmless.
+func startTokenCleanup(ctx context.Context, refreshTokens *models.RefreshTokenStore, passwordResets *models.PasswordResetStore, every time.Duration) {
 	sweep := func() {
 		// Bound each sweep so a slow query can't hang on shutdown.
 		sweepCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
-		if err := store.DeleteExpired(sweepCtx); err != nil {
+		if err := refreshTokens.DeleteExpired(sweepCtx); err != nil {
 			log.Printf("refresh token cleanup: %v", err)
+		}
+		if err := passwordResets.DeleteExpired(sweepCtx); err != nil {
+			log.Printf("password reset cleanup: %v", err)
 		}
 	}
 

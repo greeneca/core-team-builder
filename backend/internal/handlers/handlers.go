@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/core-team-builder/backend/internal/auth"
+	"github.com/core-team-builder/backend/internal/email"
 	"github.com/core-team-builder/backend/internal/models"
 	"github.com/jackc/pgx/v5/pgconn"
 )
@@ -31,22 +32,62 @@ const (
 	maxSignupNoteLen = 2000
 	// maxDetailedHeaderLen caps the free-form detailed-post header (in runes).
 	maxDetailedHeaderLen = 2000
+	// maxGroupingsPerTeam caps how many groupings a team may hold.
+	maxGroupingsPerTeam = 10
+	// maxGroupingNameLen caps a grouping's name (in runes).
+	maxGroupingNameLen = 100
+	// maxGroupNameLen caps a single group's name within a grouping (in runes).
+	maxGroupNameLen = 50
 )
 
 // Server holds the dependencies shared across HTTP handlers.
 type Server struct {
-	users         *models.UserStore
-	teams         *models.TeamStore
-	encounters    *models.EncounterStore
-	settings      *models.SettingsStore
-	refreshTokens *models.RefreshTokenStore
-	tokens        *auth.TokenManager
-	corsOrigin    string
+	users            *models.UserStore
+	teams            *models.TeamStore
+	encounters       *models.EncounterStore
+	groupings        *models.GroupingStore
+	settings         *models.SettingsStore
+	refreshTokens    *models.RefreshTokenStore
+	passwordResets   *models.PasswordResetStore
+	tokens           *auth.TokenManager
+	mailer           email.Mailer
+	corsOrigin       string
+	appBaseURL       string
+	passwordResetTTL time.Duration
 }
 
-// New constructs a Server.
-func New(users *models.UserStore, teams *models.TeamStore, encounters *models.EncounterStore, settings *models.SettingsStore, refreshTokens *models.RefreshTokenStore, tokens *auth.TokenManager, corsOrigin string) *Server {
-	return &Server{users: users, teams: teams, encounters: encounters, settings: settings, refreshTokens: refreshTokens, tokens: tokens, corsOrigin: corsOrigin}
+// Config bundles the values needed to construct a Server.
+type Config struct {
+	Users            *models.UserStore
+	Teams            *models.TeamStore
+	Encounters       *models.EncounterStore
+	Groupings        *models.GroupingStore
+	Settings         *models.SettingsStore
+	RefreshTokens    *models.RefreshTokenStore
+	PasswordResets   *models.PasswordResetStore
+	Tokens           *auth.TokenManager
+	Mailer           email.Mailer
+	CORSOrigin       string
+	AppBaseURL       string
+	PasswordResetTTL time.Duration
+}
+
+// New constructs a Server from the given configuration.
+func New(c Config) *Server {
+	return &Server{
+		users:            c.Users,
+		teams:            c.Teams,
+		encounters:       c.Encounters,
+		groupings:        c.Groupings,
+		settings:         c.Settings,
+		refreshTokens:    c.RefreshTokens,
+		passwordResets:   c.PasswordResets,
+		tokens:           c.Tokens,
+		mailer:           c.Mailer,
+		corsOrigin:       c.CORSOrigin,
+		appBaseURL:       c.AppBaseURL,
+		passwordResetTTL: c.PasswordResetTTL,
+	}
 }
 
 // Routes returns the fully configured HTTP handler, including CORS handling.
@@ -59,6 +100,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/login", s.handleLogin)
 	mux.HandleFunc("POST /api/refresh", s.handleRefresh)
 	mux.HandleFunc("POST /api/logout", s.handleLogout)
+	mux.HandleFunc("POST /api/forgot-password", s.handleForgotPassword)
+	mux.HandleFunc("POST /api/reset-password", s.handleResetPassword)
 
 	// Protected routes.
 	protected := func(h http.HandlerFunc) http.Handler {
@@ -90,6 +133,13 @@ func (s *Server) Routes() http.Handler {
 	mux.Handle("PUT /api/teams/{id}/encounters/{eid}", protected(s.handleUpdateEncounter))
 	mux.Handle("DELETE /api/teams/{id}/encounters/{eid}", protected(s.handleDeleteEncounter))
 	mux.Handle("PUT /api/teams/{id}/encounters/{eid}/loadouts", protected(s.handleSaveLoadouts))
+
+	// Groupings.
+	mux.Handle("GET /api/teams/{id}/groupings", protected(s.handleListGroupings))
+	mux.Handle("POST /api/teams/{id}/groupings", protected(s.handleCreateGrouping))
+	mux.Handle("GET /api/teams/{id}/groupings/{gid}", protected(s.handleGetGrouping))
+	mux.Handle("PUT /api/teams/{id}/groupings/{gid}", protected(s.handleUpdateGrouping))
+	mux.Handle("DELETE /api/teams/{id}/groupings/{gid}", protected(s.handleDeleteGrouping))
 
 	return s.withCORS(s.withMaxBytes(mux))
 }

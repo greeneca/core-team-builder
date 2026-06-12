@@ -72,6 +72,26 @@ func (s *UserStore) GetByUsername(ctx context.Context, username string) (*User, 
 	return u, nil
 }
 
+// GetByEmail looks up a user by their unique email (case-insensitive).
+func (s *UserStore) GetByEmail(ctx context.Context, email string) (*User, error) {
+	const q = `
+		SELECT id, username, email, password_hash, is_admin, created_at, updated_at
+		FROM users
+		WHERE lower(email) = lower($1)`
+
+	u := &User{}
+	err := s.pool.QueryRow(ctx, q, email).Scan(
+		&u.ID, &u.Username, &u.Email, &u.PasswordHash, &u.IsAdmin, &u.CreatedAt, &u.UpdatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrUserNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return u, nil
+}
+
 // GetByID looks up a user by their primary key.
 func (s *UserStore) GetByID(ctx context.Context, id int64) (*User, error) {
 	const q = `
@@ -138,6 +158,18 @@ func (s *UserStore) List(ctx context.Context) ([]User, error) {
 // SetAdmin updates a user's admin flag.
 func (s *UserStore) SetAdmin(ctx context.Context, id int64, isAdmin bool) error {
 	tag, err := s.pool.Exec(ctx, `UPDATE users SET is_admin = $1 WHERE id = $2`, isAdmin, id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrUserNotFound
+	}
+	return nil
+}
+
+// UpdatePassword sets a user's password hash (used by the reset flow).
+func (s *UserStore) UpdatePassword(ctx context.Context, id int64, passwordHash string) error {
+	tag, err := s.pool.Exec(ctx, `UPDATE users SET password_hash = $1 WHERE id = $2`, passwordHash, id)
 	if err != nil {
 		return err
 	}

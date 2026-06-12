@@ -35,6 +35,11 @@ reachable on the `ctb-net` bridge only. See `docs/ARCHITECTURE.md`.
       (e.g. `8081`). This maps to the container's `8080`.
 - [x] Review token lifetimes: `JWT_TTL` (access token, default `15m`) and
       `REFRESH_TTL` (refresh token, default `720h` = 30 days).
+- [x] **Email (password reset):** set `APP_BASE_URL` to the public site URL (used
+      to build reset links; defaults to `CORS_ORIGIN`) and configure the `SMTP_*`
+      relay so reset emails actually send. With `SMTP_HOST` empty the reset link
+      is only written to the backend log, so the flow won't work for real users.
+      Optionally tune `PASSWORD_RESET_TTL` (default `1h`).
 - [x] Confirm `.env` is **not** world-readable: `chmod 600 .env`.
 
 Full variable reference:
@@ -48,6 +53,13 @@ Full variable reference:
 | `JWT_TTL`           | backend   | Access-token lifetime (default `15m`)              |
 | `REFRESH_TTL`       | backend   | Refresh-token lifetime (default `720h`)            |
 | `CORS_ORIGIN`       | backend   | **Public `https://` origin**                       |
+| `APP_BASE_URL`      | backend   | Public site URL for email links (default `CORS_ORIGIN`) |
+| `PASSWORD_RESET_TTL`| backend   | Reset-link lifetime (default `1h`)                 |
+| `SMTP_HOST`         | backend   | SMTP relay host (empty → reset emails only logged) |
+| `SMTP_PORT`         | backend   | SMTP port (default `587`; `465` = implicit TLS)    |
+| `SMTP_USERNAME`     | backend   | SMTP auth username (empty → no auth)               |
+| `SMTP_PASSWORD`     | backend   | SMTP auth password                                 |
+| `SMTP_FROM`         | backend   | From address, e.g. `Name <noreply@example.com>`    |
 | `FRONTEND_PORT`     | frontend  | Host port → container `8080`                        |
 | `SEED_USERNAME`     | seed      | Bootstrap admin username                            |
 | `SEED_EMAIL`        | seed      | Bootstrap admin email                              |

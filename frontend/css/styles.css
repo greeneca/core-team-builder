@@ -138,6 +138,112 @@ a.brand--home:hover {
   max-width: 400px;
 }
 
+/* Collapsible sections: a `.collapsible` keeps its header (`.collapsible-head`)
+   visible and hides its `.collapsible-body` when `.is-collapsed`. The direct-
+   child combinator keeps nested collapsibles (player slots inside the roster)
+   independent of their parent. */
+.collapsible-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.collapsible-head-main {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  flex: 1;
+}
+.collapsible.is-collapsed > .collapsible-body {
+  display: none;
+}
+.section-collapsible {
+  /* Clear the sticky topbar + encounters panel when jumped to from the nav. */
+  scroll-margin-top: 160px;
+}
+.collapse-toggle {
+  flex-shrink: 0;
+  width: 1.5rem;
+  height: 1.5rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: var(--radius);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+.collapse-toggle:hover {
+  color: var(--color-text);
+  background: var(--color-surface-alt);
+}
+.collapse-toggle::before {
+  content: "\25BE";
+  display: inline-block;
+  font-size: 0.8rem;
+  line-height: 1;
+  transition: transform 0.15s ease;
+}
+.collapse-toggle[aria-expanded="false"]::before {
+  transform: rotate(-90deg);
+}
+
+/* Detail view toolbar: back button on the left, global collapse/expand on the
+   right. */
+.detail-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+.detail-toolbar-actions {
+  margin-left: auto;
+}
+
+/* Group Stats: buffs, crit, and penetration as light inner panels stacked
+   inside one collapsible card. */
+.group-stats-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.group-stat {
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: var(--space-4);
+}
+
+/* On narrow screens a section header (title + actions) can't fit on one row —
+   worst on the main team card whose actions hold the encounters toggle, save
+   status, and Delete button. Let the header wrap so the title takes the full
+   width and the actions drop to their own row instead of overflowing. */
+@media (max-width: 640px) {
+  .section-head {
+    flex-wrap: wrap;
+  }
+  .collapsible-head-main {
+    flex-basis: 100%;
+  }
+  .section-head > .form-actions {
+    width: 100%;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+  .team-name-input {
+    max-width: none;
+    width: 100%;
+    font-size: var(--font-size-lg);
+  }
+  .save-status {
+    min-width: 0;
+  }
+}
+
 /* Forms */
 .form-group {
   margin-bottom: var(--space-4);
@@ -265,6 +371,22 @@ a.brand--home:hover {
   color: var(--color-success);
   background: rgba(91, 185, 140, 0.1);
   border: 1px solid rgba(91, 185, 140, 0.3);
+}
+
+/* Link-styled button: a plain <button> that reads as an inline text link (used
+   for the forgot-password / back-to-sign-in toggles, which switch views rather
+   than navigate). */
+.link-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--color-accent);
+  cursor: pointer;
+  text-decoration: underline;
+}
+.link-btn:hover {
+  color: var(--color-accent-hover);
 }
 .is-hidden {
   display: none !important;
@@ -556,8 +678,8 @@ a.brand--home:hover {
 }
 .player-slot {
   display: flex;
-  align-items: flex-start;
-  gap: var(--space-4);
+  flex-direction: column;
+  gap: var(--space-3);
   background: var(--color-surface-alt);
   border: 1px solid var(--color-border);
   border-left: 3px solid var(--color-border);
@@ -566,6 +688,16 @@ a.brand--home:hover {
   transition: background 0.15s ease, border-color 0.15s ease;
   /* Clear the sticky topbar + encounters panel when jumped to from the nav. */
   scroll-margin-top: 160px;
+}
+.player-head {
+  cursor: pointer;
+}
+.player-head-name {
+  font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Role-based slot coloring: subtle background tint + saturated left accent bar
@@ -598,7 +730,6 @@ a.brand--home:hover {
   font-weight: 700;
   font-size: var(--font-size-sm);
   flex-shrink: 0;
-  margin-top: var(--space-5);
 }
 .player-body {
   display: flex;
@@ -853,6 +984,82 @@ a.brand--home:hover {
   padding: 0;
 }
 .chip-remove:hover { color: var(--color-danger); }
+
+/* Groupings: named sets of numbered groups (ice cages, slayer stacks, …). */
+.groupings-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.grouping {
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: var(--space-4);
+}
+.grouping-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+.grouping-name {
+  flex: 1 1 12rem;
+  min-width: 8rem;
+  max-width: 18rem;
+  font-weight: 600;
+}
+.grouping-count-field {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+.grouping-count {
+  width: 4.5rem;
+}
+.grouping-actions {
+  margin-left: auto;
+}
+.grouping-groups {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+.grouping-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: var(--space-3);
+}
+.grouping-group-name {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+.grouping-group .chip-list {
+  min-height: 1.5rem;
+}
+.grouping-add-player {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+@media (max-width: 640px) {
+  .grouping-groups {
+    grid-template-columns: 1fr 1fr;
+  }
+  .grouping-name {
+    flex-basis: 100%;
+    max-width: none;
+  }
+  .grouping-actions {
+    margin-left: auto;
+  }
+}
 
 /* Floating hover/focus tooltip (see initTooltips in components.js). Appended to
    <body> and positioned via fixed coordinates so it is never clipped. Used for

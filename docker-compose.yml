@@ -66,6 +66,15 @@ services:
       JWT_TTL: ${JWT_TTL}
       REFRESH_TTL: ${REFRESH_TTL}
       CORS_ORIGIN: ${CORS_ORIGIN}
+      # Password reset / outbound email. SMTP_HOST empty → reset emails are
+      # logged instead of sent (dev default).
+      APP_BASE_URL: ${APP_BASE_URL}
+      PASSWORD_RESET_TTL: ${PASSWORD_RESET_TTL}
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT}
+      SMTP_USERNAME: ${SMTP_USERNAME}
+      SMTP_PASSWORD: ${SMTP_PASSWORD}
+      SMTP_FROM: ${SMTP_FROM}
     depends_on:
       db:
         condition: service_healthy

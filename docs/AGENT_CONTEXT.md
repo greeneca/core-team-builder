@@ -12,8 +12,10 @@ has a trial schedule (days + a UTC time shown in each viewer's own zone, plus
 optional team display timezones) and a fixed 12-player roster — name,
 discord handle, role, ESO class, and a per-player build (either a subclassed set
 of 3 skill lines or 2 class masteries). Teams also have **encounters** (Default,
-Trash, or a trial boss), each holding a per-player gear/skills loadout. The UI
-autosaves changes (no Save buttons).
+Trash, or a trial boss), each holding a per-player gear/skills loadout, and
+**groupings** (named sets of numbered groups for mechanics, e.g. ice cages or
+slayer stacks). A team can also export a **Discord signup** (a detailed post or a
+condensed list) to the clipboard. The UI autosaves changes (no Save buttons).
 
 ## Stack at a glance
 
@@ -31,12 +33,35 @@ autosaves changes (no Save buttons).
 ## How auth works (current)
 
 1. `POST /api/register` or `POST /api/login` → backend verifies/creates user,
-   returns a signed JWT (`{ token, user }`). The `user` includes an `is_admin`
-   flag.
-2. Frontend stores the token in `localStorage` (`ctb_token`) and sends it as
+   returns a short-lived **access token** (JWT) plus a long-lived **refresh
+   token** and the user (`{ token, refresh_token, user }`). The `user` includes
+   an `is_admin` flag.
+2. Frontend stores both tokens in `localStorage` (`ctb_token` /
+   `ctb_refresh_token`) and sends the access token as
    `Authorization: Bearer <token>` on protected calls.
-3. `auth.Middleware` validates the token and injects the user ID into the
+3. `auth.Middleware` validates the access token and injects the user ID into the
    request context. `GET /api/me` is the example protected route.
+4. **Refresh / logout** (`016_refresh_tokens.sql`): access tokens are stateless
+   JWTs (default 15m, `JWT_TTL`); refresh tokens are opaque random strings stored
+   **only as a SHA-256 hash** in `refresh_tokens` (default 30d, `REFRESH_TTL`).
+   `POST /api/refresh` rotates the pair (revokes the old refresh row, issues a new
+   one); `POST /api/logout` revokes the presented refresh token. A background
+   hourly sweep (`startTokenCleanup` in `cmd/server/main.go`) prunes expired
+   refresh **and** password-reset rows. `RefreshTokenStore`
+   (`backend/internal/models/refresh_token.go`) handles persistence.
+5. **Forgot / reset password** (`021_password_resets.sql`): `POST /api/forgot-password`
+   takes an email and **always** returns a generic message (no account
+   enumeration). When the email matches a user it invalidates that user's prior
+   reset tokens, mints a new opaque token (stored **only as a SHA-256 hash** in
+   `password_resets`, single-use, default 1h `PASSWORD_RESET_TTL`), and emails a
+   link to `<APP_BASE_URL>/reset.html?token=…` in the background.
+   `POST /api/reset-password` validates the new password against the policy,
+   consumes the token (atomic single-use), updates the hash, and revokes all of
+   the user's refresh tokens (sign-out-everywhere). Email goes through the
+   `email.Mailer` abstraction (`backend/internal/email/`): an `SMTPMailer` when
+   `SMTP_HOST` is set, else a `LogMailer` that logs the message (dev). Handlers
+   live in `backend/internal/handlers/password_reset.go`; persistence in
+   `PasswordResetStore` (`backend/internal/models/password_reset.go`).
 
 Passwords: bcrypt cost 12, min length 8. Hashes only ever leave via `password_hash`
 column; the `User` JSON model hides it (`json:"-"`).
@@ -164,12 +189,32 @@ column; the `User` JSON model hides it (`json:"-"`).
   `GET/PUT/DELETE /api/teams/{id}`, `POST /api/teams/{id}/share`,
   `DELETE /api/teams/{id}/members/{userID}`. Mutations return the full refreshed
   team.
+- **Encounters toggle** (`017_team_encounters_enabled.sql`):
+  `teams.encounters_enabled BOOLEAN` (default **false**) controls whether the UI
+  surfaces the multi-encounter section. When off, the encounters card + chip
+  selector are hidden and only the first encounter is shown; the team still keeps
+  ≥1 encounter in the DB. An editor opts in per team via the topbar/section
+  toggle.
+- **Discord signup export** (`018_team_signup_note.sql`,
+  `019_team_detailed_header.sql`): each team carries `signup_note TEXT` (footer
+  appended to the **condensed** list) and `detailed_header TEXT` (header
+  prepended to the **detailed** post), both free-form (default `''`, ≤2000 runes,
+  validated in the team handler). The team page "Discord signup" controls
+  generate clipboard text: **Copy detailed post** (each player's full build +
+  per-encounter gear/skills, with `detailed_header` on top) and **Copy condensed
+  list** (a short roster with the schedule, tagged Discord handles, role, class,
+  abbreviated gear, with `signup_note` at the bottom). Both export the team's
+  groupings too. The formatters (`formatDetailed` / `formatCondensed` /
+  `formatGroupings` / `generateDiscord` in `app.js`) are frontend-only — no
+  export endpoint.
 - **Save-all**: `PUT /api/teams/{id}` is the single "save everything" call —
-  body is `{ name, schedule_days, schedule_time, team_timezones, players: [{slot,name,discord_handle,role,class,subclassed,skill_line_1..3,mastery_1..2}] }`
+  body is `{ name, schedule_days, schedule_time, team_timezones,
+  encounters_enabled, signup_note, detailed_header, players: [{slot,name,discord_handle,role,class,subclassed,skill_line_1..3,mastery_1..2}] }`
   and the backend (`TeamStore.Save`) updates team meta + roster in one
   transaction (there is no per-player save endpoint). `schedule_time` is sent in
   UTC (the UI converts from the viewer's current zone,
-  `Intl.DateTimeFormat().resolvedOptions().timeZone`, before saving).
+  `Intl.DateTimeFormat().resolvedOptions().timeZone`, before saving). Groupings
+  are **not** part of this call — they have their own endpoints (see below).
 - **Autosave (UI)**: there are no Save buttons. Changes are persisted
   automatically and debounced/coalesced (~700ms) via `scheduleAutosave` in
   `app.js`: text inputs save on `change` (blur — "input finished"), while
@@ -284,6 +329,60 @@ column; the `User` JSON model hides it (`json:"-"`).
   teams list (SPA navigation, with an `index.html` no-JS fallback). See
   **Autosave (UI)** above.
 
+## Groupings model (current)
+
+- **What it is** (`020_groupings.sql`): a **grouping** splits a team's roster
+  into a set of numbered groups for trial mechanics (e.g. "ice cages", "slayer
+  stacks"). A team may have several groupings; each has a `name`, a `group_count`
+  (1–12), and a `position` for ordering. Each numbered group has an optional
+  `name` (blank → UI shows "Group N") and any number of player slots. A player
+  may belong to **at most one group per grouping** — enforced by the
+  `grouping_members` primary key `(grouping_id, player_slot)`.
+- **Tables**: `groupings` (per-team, name/group_count/position),
+  `grouping_groups` (`(grouping_id, group_number)` PK → per-group name), and
+  `grouping_members` (`(grouping_id, player_slot)` PK → which group a slot is in).
+  All cascade on team/grouping delete. `GroupingStore`
+  (`backend/internal/models/grouping.go`) always returns a full set of
+  `group_count` groups (blanks filled in) so the client gets a complete shape.
+- **Limits**: `maxGroupingsPerTeam` (10, in `handlers.go`) caps groupings per
+  team (`409` when exceeded); `MaxGroupsPerGrouping` (12) and `clampGroupCount`
+  bound the group count; grouping/group names are capped (`maxGroupingNameLen`
+  100, `maxGroupNameLen` 50). The update handler rejects a slot appearing in two
+  groups (`400`).
+- **Copy on create**: `copyGroupingsTx` (in `grouping.go`) copies all groupings
+  (names, group names, member assignments) when a team is created with
+  `copy_from`, alongside the schedule/roster/encounters copy.
+- **Access/permissions**: mirror the roster — any role reads; editors/owner add,
+  rename, delete, and edit; viewers are read-only.
+- **Endpoints** (all JWT-protected, nested under a team):
+  `GET/POST /api/teams/{id}/groupings`,
+  `GET/PUT/DELETE /api/teams/{id}/groupings/{gid}`. The `PUT` body is
+  `{ name, group_count, groups: [{ group_number, name, slots: [...] }] }` and
+  replaces the grouping's name, count, per-group names, and **all** member
+  assignments in one transaction (`GroupingStore.Save`).
+- **UI** (`app.js` / `index.html`): a **Groupings** card on the team detail page
+  lists each grouping as its own sub-card (group-count control + per-group blocks,
+  each with a name input, removable player chips, and an "+ Add player…" dropdown
+  of slots not yet assigned in that grouping). Each grouping autosaves
+  on its own debounce (`scheduleGroupingSave` / `saveGroupingNow`); structural
+  edits (add/remove player, change group count) re-render while name edits save
+  without re-rendering to preserve focus. `renderGroupings` reads the live roster
+  for slot labels. Groupings are also included in the Discord export.
+
+## Detail page layout (collapsible sections)
+
+- The team detail page is a stack of **collapsible** cards (`.collapsible` /
+  `.section-collapsible` with a `.collapse-toggle` chevron in the head and a
+  `.collapsible-body`). A topbar **Collapse all / Expand all** toggles the
+  sections; the Roster card has its own **Collapse / Expand players** (each
+  `.player-slot` is independently collapsible). `setCollapsed` /
+  `expandAncestors` in `app.js` drive this; jumping to a target (side nav)
+  auto-expands its collapsed ancestors.
+- The **Group Stats** card consolidates the **Group Buffs**, **Crit Damage**, and
+  **Penetration** sub-panels (formerly three separate cards) into one collapsible
+  section. The left **floating jump nav** links to Top, Group Stats, Groupings,
+  and each player.
+
 ## Buffs model (current)
 
 - **What it is**: a team wants to cover a fixed list of ESO buffs. The app shows
@@ -385,9 +484,12 @@ generally not triggered (the backend still sets CORS headers as defense).
 
 ## Where to make changes
 
-- **New API endpoint**: add a handler in `backend/internal/handlers/handlers.go`
-  and register it in `Routes()`. Protected routes wrap with
-  `s.tokens.Middleware(...)`.
+- **New API endpoint**: add a handler in `backend/internal/handlers/` (handlers
+  are split by area: `handlers.go` for the `Server`/routing/auth + shared
+  helpers, `teams.go`, `encounters.go`, `groupings.go`, `password_reset.go`, and
+  admin in `admin.go`) and register it in `Routes()`. Protected routes wrap with
+  `s.tokens.Middleware(...)`. `Server` is constructed from `handlers.Config`
+  (a struct), so adding a dependency means adding a field there and in `New`.
 - **New table / query**: add migration in `database/migrations/` (idempotent),
   add a store + methods in `backend/internal/models/`.
 - **New page / UI**: add an `.html` file in `frontend/`, a script in
@@ -422,10 +524,16 @@ cd backend && go vet ./...         # static checks
 
 ## Status / TODO ideas
 
-- [ ] Token refresh / logout server-side invalidation (currently stateless JWT).
+- [x] Token refresh / logout server-side invalidation (short-lived access JWT +
+      DB-backed rotating refresh tokens; `/api/refresh`, `/api/logout`).
+- [x] Forgot/reset password via email (single-use hashed reset tokens;
+      `/api/forgot-password`, `/api/reset-password`; SMTP or dev log mailer).
 - [x] Teams: ownership, sharing, and a 12-player roster (name/discord/role/class).
-- [x] Encounters: per-team named fights with per-player gear/skill loadouts.
+- [x] Encounters: per-team named fights with per-player gear/skill loadouts
+      (+ per-team encounters-enabled toggle).
+- [x] Groupings: per-team named sets of numbered groups (e.g. ice cages).
+- [x] Discord signup export (detailed post / condensed list).
 - [x] Admin users + user management (list/add/remove/promote) + registration toggle.
+- [x] Rate limiting on auth endpoints (at the nginx edge; see `docs/DEPLOYMENT.md`).
 - [ ] Expand the gear-set/skill/boss seed data to full ESO coverage.
 - [ ] Tests (handlers, auth, models).
-- [ ] Rate limiting on auth endpoints.

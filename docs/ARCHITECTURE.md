@@ -20,18 +20,24 @@ Core Team Builder is a three-tier application:
                             ▼
             ┌─────────────────────────────────────────────┐
             │  backend (Go, net/http)                      │
-            │   • /api/register, /api/login,               │
+            │   • /api/register, /api/login, /api/refresh,  │
+            │     /api/logout, /api/forgot-password,        │
+            │     /api/reset-password,                      │
             │     /api/registration-status (public)        │
             │   • /api/me, /api/teams, .../encounters,      │
-            │     /api/admin/* (JWT-protected)             │
-            │   • bcrypt password hashing, JWT issuance     │
+            │     .../groupings, /api/admin/* (JWT)         │
+            │   • bcrypt hashing, access JWT + refresh tokens│
+            │   • SMTP email (password resets)             │
             └───────────────┬─────────────────────────────┘
                             │ pgx connection pool
                             ▼
             ┌─────────────────────────────────────────────┐
             │  db (PostgreSQL 16)                           │
-            │   • users, app_settings, teams, team_members, │
-            │     players, encounters, encounter_loadouts   │
+            │   • users, app_settings, refresh_tokens,      │
+            │     password_resets, teams, team_members,     │
+            │     players, encounters, encounter_loadouts,  │
+            │     groupings, grouping_groups,               │
+            │     grouping_members                          │
             └─────────────────────────────────────────────┘
 ```
 
@@ -76,12 +82,20 @@ method-aware patterns, Go 1.22+). Layout:
 - `internal/config` — environment configuration (12-factor).
 - `internal/db` — pgx pool with startup retry.
 - `internal/models` — domain types + data access (`UserStore`, `TeamStore`,
-  `EncounterStore`, `SettingsStore` for the `app_settings` key/value store). ESO
-  game reference data and the player-build validators live in `eso.go`, kept
-  separate from the persistence stores.
-- `internal/auth` — bcrypt hashing, JWT issuing/parsing, auth middleware.
-- `internal/handlers` — HTTP handlers, JSON helpers, CORS. Admin-only user and
-  settings handlers (with a `requireAdmin` gate) live in `admin.go`.
+  `EncounterStore`, `GroupingStore`, `RefreshTokenStore`, `PasswordResetStore`,
+  and `SettingsStore` for the `app_settings` key/value store). ESO game reference
+  data and the player-build validators live in `eso.go`, kept separate from the
+  persistence stores.
+- `internal/auth` — bcrypt hashing, access-JWT issuing/parsing, opaque-token
+  generation (refresh + reset), auth middleware.
+- `internal/email` — outbound mail abstraction (`Mailer`): an `SMTPMailer`
+  (implicit TLS on 465, STARTTLS otherwise) when SMTP is configured, else a
+  `LogMailer` that logs messages for local development.
+- `internal/handlers` — HTTP handlers, JSON helpers, CORS. The `Server` is
+  constructed from a `handlers.Config` struct. Split by area: `handlers.go` (the
+  `Server`, routing, auth/refresh, shared helpers), `teams.go`, `encounters.go`,
+  `groupings.go`, `password_reset.go` (forgot/reset password), and admin-only
+  user/settings handlers (with a `requireAdmin` gate) in `admin.go`.
 
 ### Database (`database/`)
 
@@ -123,6 +137,45 @@ A simple key/value store for global configuration (`015_admin_and_settings.sql`)
 Currently holds `registration_enabled` (`'true'`/`'false'`, default `'true'`),
 which gates public self-registration. Read/written via `SettingsStore`.
 
+### `refresh_tokens`
+
+Backs the access-token / refresh-token scheme (`016_refresh_tokens.sql`). Access
+tokens are stateless JWTs; refresh tokens are opaque random strings stored here
+**only as a SHA-256 hash** so a DB read yields no usable credential.
+
+| column     | type        | notes                                          |
+|------------|-------------|------------------------------------------------|
+| id         | bigint (IDENTITY) | primary key                              |
+| user_id    | bigint      | FK → `users(id)`, cascade                      |
+| token_hash | text        | hex SHA-256 of the token, unique               |
+| expires_at | timestamptz | refresh-token expiry (`REFRESH_TTL`)           |
+| revoked_at | timestamptz | set on rotation/logout (NULL while active)     |
+| created_at | timestamptz | default `now()`                                |
+
+Rows support rotation (`/api/refresh`) and explicit revocation (`/api/logout`);
+a background hourly sweep prunes expired rows. Managed via `RefreshTokenStore`.
+
+### `password_resets`
+
+Backs the forgot/reset-password flow (`021_password_resets.sql`). A reset token
+is an opaque random string emailed to the user; only its SHA-256 hash is stored
+here, so a DB read yields no usable token. Tokens are single-use and
+time-limited.
+
+| column     | type        | notes                                          |
+|------------|-------------|------------------------------------------------|
+| id         | bigint (IDENTITY) | primary key                              |
+| user_id    | bigint      | FK → `users(id)`, cascade                      |
+| token_hash | text        | hex SHA-256 of the token, unique               |
+| expires_at | timestamptz | reset-token expiry (`PASSWORD_RESET_TTL`)      |
+| used_at    | timestamptz | set when consumed (NULL while unused)          |
+| created_at | timestamptz | default `now()`                                |
+
+`POST /api/forgot-password` issues a row (after invalidating the user's prior
+unused rows); `POST /api/reset-password` consumes it atomically and then revokes
+all of the user's refresh tokens. The same hourly sweep prunes expired/used
+rows. Managed via `PasswordResetStore`.
+
 ### `teams`
 
 | column         | type              | notes                                      |
@@ -133,6 +186,9 @@ which gates public self-registration. Read/written via `SettingsStore`.
 | schedule_days  | text[]            | weekday keys, e.g. `{mon,wed}` (default `{}`) |
 | schedule_time  | varchar(5)        | `"HH:MM"` 24h **in UTC**, `''` when unset  |
 | team_timezones | text[]            | extra IANA zones to display the time in (default `{}`) |
+| encounters_enabled | boolean       | surface multi-encounter UI; default `false`; `017_team_encounters_enabled.sql` |
+| signup_note    | text              | condensed-list footer (default `''`); `018_team_signup_note.sql` |
+| detailed_header| text              | detailed-post header (default `''`); `019_team_detailed_header.sql` |
 | created_at     | timestamptz       | default `now()`                            |
 | updated_at     | timestamptz       | auto-updated via trigger                   |
 
@@ -140,6 +196,9 @@ The trial schedule lives on `teams` (`004_team_schedule.sql`,
 `009_team_timezones.sql`). `schedule_time` is stored in UTC and converted to/from
 each viewer's current timezone in the browser; the old per-team
 `schedule_timezone` column was removed in `010_drop_schedule_timezone.sql`.
+`encounters_enabled` gates the multi-encounter UI (off → only the first encounter
+shows); `signup_note` / `detailed_header` are free-form text for the Discord
+signup export (see `docs/AGENT_CONTEXT.md` "Discord signup export").
 
 ### `team_members` (sharing)
 
@@ -222,13 +281,49 @@ master data (`frontend/js/data.js`). The crit-input columns
 inputs feed the penetration calculator (see "Penetration model"); `players.race`
 (`013_player_race.sql`) is the roster-level input both also read.
 
+### `groupings` + `grouping_groups` + `grouping_members`
+
+A **grouping** (`020_groupings.sql`) splits a team's roster into numbered groups
+for mechanics (e.g. ice cages, slayer stacks). A team may have several; a player
+belongs to at most one group per grouping.
+
+`groupings`:
+
+| column      | type              | notes                                |
+|-------------|-------------------|--------------------------------------|
+| id          | bigint (IDENTITY) | primary key                          |
+| team_id     | bigint            | FK → `teams(id)`, cascade            |
+| name        | varchar(100)      | default `'Grouping'`                 |
+| group_count | int               | 1–12 (CHECK), default `2`            |
+| position    | int               | ordering within the team             |
+| created_at  | timestamptz       | default `now()`                      |
+| updated_at  | timestamptz       | auto-updated via trigger             |
+
+`grouping_groups` holds each numbered group's optional name (PK
+`(grouping_id, group_number)`; blank → UI shows "Group N"). `grouping_members`
+holds slot assignments with PK `(grouping_id, player_slot)`, which guarantees a
+player is in at most one group per grouping. Both cascade on grouping delete.
+Managed via `GroupingStore`; see `docs/AGENT_CONTEXT.md` "Groupings model".
+
 ## Authentication & security
 
 - **Hashing**: bcrypt (cost 12) with per-hash random salt. Minimum password
   length 8. Plaintext is never stored or logged.
-- **Tokens**: HS256-signed JWT containing the user ID (`sub`) and username, with
-  an expiry (`JWT_TTL`, default 24h). Stateless — there is no server-side
-  session store yet.
+- **Tokens**: a short-lived HS256-signed **access JWT** containing the user ID
+  (`sub`) and username, with an expiry (`JWT_TTL`, default 15m), paired with a
+  long-lived opaque **refresh token** (`REFRESH_TTL`, default 30d) stored
+  DB-backed as a SHA-256 hash in `refresh_tokens`. `POST /api/refresh` rotates the
+  pair; `POST /api/logout` revokes the refresh token. Access tokens stay stateless
+  (no per-request DB lookup); revocation/logout is handled via the refresh-token
+  table.
+- **Password reset**: `/api/forgot-password` always returns a generic response
+  (no account enumeration) and emails a single-use, hashed, time-limited token
+  (`PASSWORD_RESET_TTL`, default 1h) as a link to `<APP_BASE_URL>/reset.html`.
+  `/api/reset-password` enforces the password policy, consumes the token
+  atomically (single-use), and revokes all of the user's refresh tokens
+  (sign-out-everywhere). Tokens are stored only as a SHA-256 hash in
+  `password_resets`; email is sent via SMTP (or logged in dev when SMTP is
+  unset). Both endpoints sit behind the nginx `auth` rate-limit zone.
 - **Login hardening**: a constant-time bcrypt comparison runs even when the
   username does not exist, and all failures return the same generic message, to
   reduce user enumeration and timing side channels.

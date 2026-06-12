@@ -105,3 +105,15 @@ func HashRefreshToken(token string) string {
 	sum := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(sum[:])
 }
+
+// GenerateOpaqueToken returns a new opaque, high-entropy token (the value handed
+// to the user) together with the SHA-256 hash to persist server-side. Used for
+// any single-use credential we store only as a hash, e.g. password resets.
+func GenerateOpaqueToken() (token string, hash string, err error) {
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return "", "", fmt.Errorf("generate token: %w", err)
+	}
+	token = base64.RawURLEncoding.EncodeToString(raw)
+	return token, HashRefreshToken(token), nil
+}

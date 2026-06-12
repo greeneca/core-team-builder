@@ -31,6 +31,31 @@ type Config struct {
 
 	// CORSOrigin is the allowed origin for browser requests (the frontend URL).
 	CORSOrigin string
+
+	// AppBaseURL is the public base URL of the frontend, used to build links in
+	// outgoing emails (e.g. the password-reset link). Defaults to CORSOrigin.
+	AppBaseURL string
+
+	// PasswordResetTTL is how long an issued password-reset token remains valid.
+	PasswordResetTTL time.Duration
+
+	// SMTP holds the outbound email configuration. When SMTP.Host is empty,
+	// emails are logged instead of sent (suitable for local development).
+	SMTP SMTPConfig
+}
+
+// SMTPConfig holds outbound email (SMTP) settings.
+type SMTPConfig struct {
+	Host     string
+	Port     string
+	Username string
+	Password string
+	From     string
+}
+
+// Configured reports whether enough SMTP settings are present to send mail.
+func (c SMTPConfig) Configured() bool {
+	return c.Host != ""
 }
 
 // MinJWTSecretLen is the minimum acceptable length (in bytes) for JWT_SECRET. A
@@ -45,18 +70,34 @@ const defaultAccessTTL = 15 * time.Minute
 // defaultRefreshTTL is the refresh-token lifetime when REFRESH_TTL is unset.
 const defaultRefreshTTL = 30 * 24 * time.Hour
 
+// defaultPasswordResetTTL is the reset-token lifetime when PASSWORD_RESET_TTL is
+// unset. Kept short so a leaked reset link has a small window of validity.
+const defaultPasswordResetTTL = time.Hour
+
 // Load reads configuration from the environment, applying sane defaults for
 // local development. It returns an error when a required production value is
 // missing.
 func Load() (*Config, error) {
 	cfg := &Config{
-		HTTPAddr:    getEnv("HTTP_ADDR", ":8080"),
-		DatabaseURL: getEnv("DATABASE_URL", ""),
-		JWTSecret:   []byte(getEnv("JWT_SECRET", "")),
-		JWTTTL:      defaultAccessTTL,
-		RefreshTTL:  defaultRefreshTTL,
-		CORSOrigin:  getEnv("CORS_ORIGIN", "http://localhost:8081"),
+		HTTPAddr:         getEnv("HTTP_ADDR", ":8080"),
+		DatabaseURL:      getEnv("DATABASE_URL", ""),
+		JWTSecret:        []byte(getEnv("JWT_SECRET", "")),
+		JWTTTL:           defaultAccessTTL,
+		RefreshTTL:       defaultRefreshTTL,
+		PasswordResetTTL: defaultPasswordResetTTL,
+		CORSOrigin:       getEnv("CORS_ORIGIN", "http://localhost:8081"),
+		SMTP: SMTPConfig{
+			Host:     getEnv("SMTP_HOST", ""),
+			Port:     getEnv("SMTP_PORT", "587"),
+			Username: getEnv("SMTP_USERNAME", ""),
+			Password: getEnv("SMTP_PASSWORD", ""),
+			From:     getEnv("SMTP_FROM", ""),
+		},
 	}
+
+	// The reset link points at the frontend; fall back to the CORS origin when
+	// APP_BASE_URL is not set explicitly.
+	cfg.AppBaseURL = getEnv("APP_BASE_URL", cfg.CORSOrigin)
 
 	if cfg.DatabaseURL == "" {
 		return nil, fmt.Errorf("DATABASE_URL is required")
@@ -82,6 +123,14 @@ func Load() (*Config, error) {
 			return nil, fmt.Errorf("invalid REFRESH_TTL: %w", err)
 		}
 		cfg.RefreshTTL = d
+	}
+
+	if ttl := os.Getenv("PASSWORD_RESET_TTL"); ttl != "" {
+		d, err := time.ParseDuration(ttl)
+		if err != nil {
+			return nil, fmt.Errorf("invalid PASSWORD_RESET_TTL: %w", err)
+		}
+		cfg.PasswordResetTTL = d
 	}
 
 	return cfg, nil

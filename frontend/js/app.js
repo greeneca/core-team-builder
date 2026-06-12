@@ -39,6 +39,17 @@
   let currentEncounter = null;
   // The team's extra display timezones (chips); edited on the team page.
   let teamTimezones = [];
+  // The open team's groupings (e.g. ice cages / slayer stacks). Each grouping is
+  // { id, name, group_count, position, groups: [{ group_number, name, slots }] }.
+  // Edited locally and autosaved per-grouping.
+  let currentGroupings = [];
+
+  // Client-side mirrors of the backend caps (the server still enforces these).
+  const MAX_GROUPINGS = 10;
+  const MAX_GROUPS_PER_GROUPING = 12;
+  // Per-grouping debounce timers, keyed by grouping id.
+  const groupingSaveTimers = {};
+  const GROUPING_SAVE_DELAY = 700;
 
   // --- Helpers ---
   // A fixed toast at the top of the screen (see #message in index.html). It is
@@ -153,6 +164,7 @@
             ${owned ? "Owner" : "Shared"}
           </span>
           <button class="btn btn--ghost btn--sm team-card-share" type="button">Share</button>
+          ${owned ? `<button class="btn btn--danger btn--sm team-card-delete" type="button">Delete</button>` : ""}
         </div>`;
       card.querySelector(".team-card-name").textContent = team.name;
       card.querySelector(".team-card-schedule").textContent = formatSchedule(
@@ -161,6 +173,10 @@
       );
       card.querySelector(".team-card-open").addEventListener("click", () => openTeam(team.id));
       card.querySelector(".team-card-share").addEventListener("click", () => openShare(team.id));
+      const deleteBtn = card.querySelector(".team-card-delete");
+      if (deleteBtn) {
+        deleteBtn.addEventListener("click", () => deleteTeam(team));
+      }
       list.appendChild(card);
     });
   }
@@ -218,6 +234,8 @@
       if (currentEncounters.length) {
         currentEncounter = await api.getEncounter(id, currentEncounters[0].id);
       }
+      const { groupings } = await api.listGroupings(id);
+      currentGroupings = groupings || [];
       // Show the detail view *before* rendering so the buff/crit coverage
       // refreshes (which bail when the view is hidden) paint on first load.
       showView("detail");
@@ -275,7 +293,6 @@
 
     el("team-save-status").classList.toggle("is-hidden", !editable);
     setSaveStatus("team", "");
-    el("delete-team-btn").classList.toggle("is-hidden", !isOwner());
 
     const headerInput = el("detailed-header-input");
     if (headerInput) {
@@ -294,6 +311,7 @@
     renderEncounterControls();
     applyEncountersMode();
     renderRoster();
+    renderGroupings();
     refreshBuffCoverage();
   }
 
@@ -547,6 +565,11 @@
     try {
       currentTeam = await api.saveTeam(currentTeam.id, payload);
       setSaveStatus("team", "saved");
+      // Roster name/role edits change the labels groupings show for each slot;
+      // refresh them now that currentTeam reflects the saved roster — but not
+      // while the user is mid-interaction in the groupings section, since the
+      // rebuild would close an open dropdown.
+      if (!isGroupingsInteracting()) renderGroupings();
     } catch (err) {
       setSaveStatus("team", "error");
       handleError(err);
@@ -567,6 +590,8 @@
     if (e.target.closest("[data-copy]")) return;
     // The team-timezone picker manages its own state + autosave (via onSelect).
     if (e.target.closest("#team-tz-add")) return;
+    // Groupings manage their own per-grouping state + autosave.
+    if (e.target.closest("#groupings-card")) return;
     if (e.target.matches("input, select, textarea")) {
       scheduleAutosave("team");
       // Build/role/class/race changes can change buff + crit coverage; repaint.
@@ -616,8 +641,9 @@
     smoothScrollTo(top);
   }
 
-  // Floating jump-nav: scroll to the top, the Group Buffs card, or a player slot.
-  // Delegated so it works for the dynamically rebuilt per-player links.
+  // Floating jump-nav: scroll to the top, the Group Buffs card, the Groupings
+  // card, or a player slot. Delegated so it works for the dynamically rebuilt
+  // per-player links.
   el("player-nav").addEventListener("click", (e) => {
     const link = e.target.closest("[data-nav]");
     if (!link) return;
@@ -626,14 +652,93 @@
     if (kind === "top") {
       smoothScrollTo(0);
     } else if (kind === "buffs") {
-      const card = document.querySelector(".buffs-card");
-      if (card) smoothScrollToEl(card);
+      const card = el("group-stats-card") || document.querySelector(".buffs-card");
+      if (card) {
+        expandAncestors(card);
+        smoothScrollToEl(card);
+      }
+    } else if (kind === "groupings") {
+      const card = el("groupings-card");
+      if (card) {
+        expandAncestors(card);
+        smoothScrollToEl(card);
+      }
     } else if (kind === "player") {
       const slotEl = el("roster").querySelector(
         `.player-slot[data-slot="${link.dataset.slot}"]`
       );
-      if (slotEl) smoothScrollToEl(slotEl);
+      if (slotEl) {
+        expandAncestors(slotEl);
+        smoothScrollToEl(slotEl);
+      }
     }
+  });
+
+  // --- Collapsible sections ---
+  // Every collapsible region is a `.collapsible` whose own header is a direct
+  // child `.collapsible-head` and whose hideable content is a direct child
+  // `.collapsible-body`. Collapsing toggles `.is-collapsed` (CSS hides the body)
+  // and flips the header chevron via its toggle's aria-expanded. The `>` child
+  // combinator in the CSS keeps nested collapsibles (player slots inside the
+  // roster) independent of their parent.
+  function ownCollapseToggle(root) {
+    return root.querySelector(":scope > .collapsible-head .collapse-toggle");
+  }
+  function setCollapsed(root, collapsed) {
+    if (!root) return;
+    root.classList.toggle("is-collapsed", collapsed);
+    const toggle = ownCollapseToggle(root);
+    if (toggle) {
+      toggle.setAttribute("aria-expanded", String(!collapsed));
+      toggle.setAttribute("aria-label", collapsed ? "Expand section" : "Collapse section");
+    }
+  }
+  // Expand the element and every collapsible ancestor so a jumped-to target is
+  // actually visible (e.g. clicking a player in the side nav while the roster is
+  // collapsed).
+  function expandAncestors(elm) {
+    let node = elm;
+    while (node && node !== detailView) {
+      if (node.classList && node.classList.contains("collapsible")) {
+        setCollapsed(node, false);
+      }
+      node = node.parentElement;
+    }
+  }
+  function sectionRoots() {
+    return detailView.querySelectorAll(".section-collapsible");
+  }
+  function playerRoots() {
+    return el("roster").querySelectorAll(".player-slot.collapsible");
+  }
+
+  // Click on a chevron toggles its section; click anywhere on a player header
+  // (a non-interactive bar) toggles that player.
+  detailView.addEventListener("click", (e) => {
+    const toggle = e.target.closest(".collapse-toggle");
+    if (toggle) {
+      const root = toggle.closest(".collapsible");
+      if (root) setCollapsed(root, !root.classList.contains("is-collapsed"));
+      return;
+    }
+    const head = e.target.closest(".player-head");
+    if (head) {
+      const root = head.closest(".collapsible");
+      if (root) setCollapsed(root, !root.classList.contains("is-collapsed"));
+    }
+  });
+
+  el("collapse-all-btn").addEventListener("click", () => {
+    sectionRoots().forEach((r) => setCollapsed(r, true));
+  });
+  el("expand-all-btn").addEventListener("click", () => {
+    sectionRoots().forEach((r) => setCollapsed(r, false));
+  });
+  el("players-collapse-all-btn").addEventListener("click", () => {
+    playerRoots().forEach((r) => setCollapsed(r, true));
+  });
+  el("players-expand-all-btn").addEventListener("click", () => {
+    playerRoots().forEach((r) => setCollapsed(r, false));
   });
 
   // Ctrl+S / Cmd+S forces an immediate save of the team page (roster + the
@@ -651,20 +756,309 @@
     }
   });
 
-  el("delete-team-btn").addEventListener("click", async () => {
-    if (!confirm(`Delete team “${currentTeam.name}”? This cannot be undone.`)) {
+  // Delete a team from the teams list (owner only). Confirms, deletes, and
+  // refreshes the list in place.
+  async function deleteTeam(team) {
+    if (!confirm(`Delete team “${team.name}”? This cannot be undone.`)) {
       return;
     }
     try {
-      await api.deleteTeam(currentTeam.id);
-      currentTeam = null;
-      showView("teams");
+      await api.deleteTeam(team.id);
       showMessage("Team deleted", "success");
       loadTeams();
     } catch (err) {
       handleError(err);
     }
-  });
+  }
+
+  // --- Groupings ---
+  // A grouping splits the roster into a set of numbered groups (e.g. ice cages
+  // or slayer stacks). Each grouping is edited locally and autosaved on its own
+  // debounce; structural edits (add/remove player, change group count) re-render
+  // while text edits (names) save without re-rendering to preserve focus.
+
+  // The display name for a player slot: their roster name, else "Slot N".
+  function playerSlotLabel(slot) {
+    const p = (currentTeam.players || []).find((x) => x.slot === slot);
+    const name = p && p.name ? p.name.trim() : "";
+    return name || `Slot ${slot}`;
+  }
+
+  // Slots already assigned to some group within this grouping (a player may be
+  // in only one group per grouping).
+  function assignedSlots(grouping) {
+    const set = new Set();
+    grouping.groups.forEach((g) => g.slots.forEach((s) => set.add(s)));
+    return set;
+  }
+
+  // Resize a grouping's group list to `count`, preserving existing groups and
+  // dropping any beyond the new count (their members become unassigned).
+  function setGroupCount(grouping, count) {
+    count = Math.max(1, Math.min(MAX_GROUPS_PER_GROUPING, count));
+    const groups = [];
+    for (let n = 1; n <= count; n++) {
+      const existing = grouping.groups.find((g) => g.group_number === n);
+      groups.push(existing || { group_number: n, name: "", slots: [] });
+    }
+    grouping.group_count = count;
+    grouping.groups = groups;
+  }
+
+  function setGroupingSaveStatus(groupingId, state) {
+    const node = el(`grouping-status-${groupingId}`);
+    if (!node) return;
+    node.classList.remove("is-saving", "is-saved", "is-error");
+    if (state === "saving") {
+      node.textContent = "Saving…";
+      node.classList.add("is-saving");
+    } else if (state === "saved") {
+      node.textContent = "Saved ✓";
+      node.classList.add("is-saved");
+    } else if (state === "error") {
+      node.textContent = "Not saved";
+      node.classList.add("is-error");
+    } else {
+      node.textContent = "";
+    }
+  }
+
+  function scheduleGroupingSave(groupingId) {
+    if (!canEdit()) return;
+    setGroupingSaveStatus(groupingId, "saving");
+    clearTimeout(groupingSaveTimers[groupingId]);
+    groupingSaveTimers[groupingId] = setTimeout(
+      () => saveGroupingNow(groupingId),
+      GROUPING_SAVE_DELAY
+    );
+  }
+
+  async function saveGroupingNow(groupingId) {
+    clearTimeout(groupingSaveTimers[groupingId]);
+    delete groupingSaveTimers[groupingId];
+    const grouping = currentGroupings.find((g) => g.id === groupingId);
+    if (!grouping || !currentTeam || !canEdit()) return;
+    const payload = {
+      name: (grouping.name || "").trim() || "Grouping",
+      group_count: grouping.group_count,
+      groups: grouping.groups.map((g) => ({
+        group_number: g.group_number,
+        name: (g.name || "").trim(),
+        slots: g.slots.slice(),
+      })),
+    };
+    setGroupingSaveStatus(groupingId, "saving");
+    try {
+      const updated = await api.saveGrouping(currentTeam.id, groupingId, payload);
+      // Reconcile server-canonical state, but not while the user is still
+      // interacting here: swapping the object would orphan the live DOM
+      // closures (losing an in-flight edit) and could close an open dropdown.
+      // Local state already mirrors what we just sent, so it's safe to skip.
+      const idx = currentGroupings.findIndex((g) => g.id === groupingId);
+      if (idx !== -1 && !isGroupingsInteracting()) currentGroupings[idx] = updated;
+      setGroupingSaveStatus(groupingId, "saved");
+    } catch (err) {
+      setGroupingSaveStatus(groupingId, "error");
+      handleError(err);
+    }
+  }
+
+  // True while the user is actively interacting with a control in the groupings
+  // section (e.g. an open native <select> popup, which keeps focus on the
+  // <select>). Re-rendering the groupings DOM then would detach that control and
+  // close the popup, so save side-effects defer their refresh while this holds.
+  function isGroupingsInteracting() {
+    const card = el("groupings-card");
+    return !!card && card.contains(document.activeElement);
+  }
+
+  function renderGroupings() {
+    const list = el("groupings-list");
+    if (!list) return;
+    const editable = canEdit();
+    el("add-grouping-btn").classList.toggle(
+      "is-hidden",
+      !editable || currentGroupings.length >= MAX_GROUPINGS
+    );
+    el("groupings-empty").classList.toggle("is-hidden", currentGroupings.length > 0);
+    list.innerHTML = "";
+    currentGroupings.forEach((grouping) => {
+      list.appendChild(renderGroupingCard(grouping, editable));
+    });
+  }
+
+  function renderGroupingCard(grouping, editable) {
+    const card = document.createElement("div");
+    card.className = "grouping";
+
+    const head = document.createElement("div");
+    head.className = "grouping-head";
+
+    const nameInput = document.createElement("input");
+    nameInput.className = "input grouping-name";
+    nameInput.type = "text";
+    nameInput.maxLength = 100;
+    nameInput.placeholder = "Grouping name";
+    nameInput.value = grouping.name || "";
+    nameInput.readOnly = !editable;
+    nameInput.addEventListener("input", () => {
+      grouping.name = nameInput.value;
+      scheduleGroupingSave(grouping.id);
+    });
+    head.appendChild(nameInput);
+
+    const countField = document.createElement("label");
+    countField.className = "grouping-count-field";
+    countField.append("Groups");
+    const countInput = document.createElement("input");
+    countInput.className = "input grouping-count";
+    countInput.type = "number";
+    countInput.min = "1";
+    countInput.max = String(MAX_GROUPS_PER_GROUPING);
+    countInput.value = String(grouping.group_count);
+    countInput.disabled = !editable;
+    countInput.addEventListener("change", () => {
+      const n = parseInt(countInput.value, 10);
+      setGroupCount(grouping, Number.isNaN(n) ? grouping.group_count : n);
+      renderGroupings();
+      scheduleGroupingSave(grouping.id);
+    });
+    countField.appendChild(countInput);
+    head.appendChild(countField);
+
+    const actions = document.createElement("div");
+    actions.className = "form-actions grouping-actions";
+    const status = document.createElement("span");
+    status.className = "save-status";
+    status.id = `grouping-status-${grouping.id}`;
+    actions.appendChild(status);
+    if (editable) {
+      const del = document.createElement("button");
+      del.type = "button";
+      del.className = "btn btn--ghost btn--sm btn--danger";
+      del.textContent = "Delete";
+      del.addEventListener("click", () => deleteGrouping(grouping));
+      actions.appendChild(del);
+    }
+    head.appendChild(actions);
+    card.appendChild(head);
+
+    const groupsWrap = document.createElement("div");
+    groupsWrap.className = "grouping-groups";
+    const taken = assignedSlots(grouping);
+    grouping.groups.forEach((group) => {
+      groupsWrap.appendChild(renderGroup(grouping, group, taken, editable));
+    });
+    card.appendChild(groupsWrap);
+    return card;
+  }
+
+  function renderGroup(grouping, group, taken, editable) {
+    const box = document.createElement("div");
+    box.className = "grouping-group";
+
+    const nameInput = document.createElement("input");
+    nameInput.className = "input grouping-group-name";
+    nameInput.type = "text";
+    nameInput.maxLength = 50;
+    nameInput.placeholder = `Group ${group.group_number}`;
+    nameInput.value = group.name || "";
+    nameInput.readOnly = !editable;
+    nameInput.addEventListener("input", () => {
+      group.name = nameInput.value;
+      scheduleGroupingSave(grouping.id);
+    });
+    box.appendChild(nameInput);
+
+    const chips = document.createElement("div");
+    chips.className = "chip-list";
+    group.slots
+      .slice()
+      .sort((a, b) => a - b)
+      .forEach((slot) => {
+        const chip = document.createElement("span");
+        chip.className = "chip";
+        chip.append(playerSlotLabel(slot));
+        if (editable) {
+          const rm = document.createElement("button");
+          rm.type = "button";
+          rm.className = "chip-remove";
+          rm.setAttribute("aria-label", `Remove ${playerSlotLabel(slot)}`);
+          rm.textContent = "×";
+          rm.addEventListener("click", () => {
+            group.slots = group.slots.filter((s) => s !== slot);
+            renderGroupings();
+            scheduleGroupingSave(grouping.id);
+          });
+          chip.appendChild(rm);
+        }
+        chips.appendChild(chip);
+      });
+    box.appendChild(chips);
+
+    if (editable) {
+      // Only players not yet assigned anywhere in this grouping can be added.
+      const available = (currentTeam.players || [])
+        .map((p) => p.slot)
+        .filter((slot) => !taken.has(slot))
+        .sort((a, b) => a - b);
+      const select = document.createElement("select");
+      select.className = "input grouping-add-player";
+      const placeholder = document.createElement("option");
+      placeholder.value = "";
+      placeholder.textContent = available.length ? "+ Add player…" : "All players assigned";
+      select.appendChild(placeholder);
+      available.forEach((slot) => {
+        const opt = document.createElement("option");
+        opt.value = String(slot);
+        opt.textContent = `${slot}. ${playerSlotLabel(slot)}`;
+        select.appendChild(opt);
+      });
+      select.disabled = available.length === 0;
+      select.addEventListener("change", () => {
+        const slot = parseInt(select.value, 10);
+        if (Number.isNaN(slot)) return;
+        group.slots.push(slot);
+        renderGroupings();
+        scheduleGroupingSave(grouping.id);
+      });
+      box.appendChild(select);
+    }
+    return box;
+  }
+
+  async function addGrouping() {
+    if (!currentTeam || !canEdit()) return;
+    if (currentGroupings.length >= MAX_GROUPINGS) {
+      showMessage(`You can have at most ${MAX_GROUPINGS} groupings per team`);
+      return;
+    }
+    try {
+      const grouping = await api.createGrouping(
+        currentTeam.id,
+        `Grouping ${currentGroupings.length + 1}`,
+        2
+      );
+      currentGroupings.push(grouping);
+      expandAncestors(el("groupings-card"));
+      renderGroupings();
+    } catch (err) {
+      handleError(err);
+    }
+  }
+
+  async function deleteGrouping(grouping) {
+    if (!confirm(`Delete grouping “${grouping.name || "Grouping"}”?`)) return;
+    try {
+      await api.deleteGrouping(currentTeam.id, grouping.id);
+      currentGroupings = currentGroupings.filter((g) => g.id !== grouping.id);
+      renderGroupings();
+    } catch (err) {
+      handleError(err);
+    }
+  }
+
+  el("add-grouping-btn").addEventListener("click", addGrouping);
 
   // --- Discord signup export ---
   // Two one-click generators that build text to paste into Discord and copy it
@@ -741,8 +1135,38 @@
     return parts;
   }
 
+  // A player slot's display name for export (roster name, else "Slot N"), keyed
+  // off the supplied team snapshot rather than live state.
+  function exportSlotName(team, slot) {
+    const p = (team.players || []).find((x) => x.slot === slot);
+    const name = p && p.name ? p.name.trim() : "";
+    return name || `Slot ${slot}`;
+  }
+
+  // Build the groupings section lines for a Discord post (shared by both the
+  // detailed and condensed formats). Each grouping lists its numbered groups
+  // (defaulting to "Group N" when unnamed) and the players assigned to each.
+  // Returns [] when the team has no groupings so nothing is appended.
+  function formatGroupings(team, groupings) {
+    if (!groupings || !groupings.length) return [];
+    const L = ["**Groupings**"];
+    groupings.forEach((grouping) => {
+      L.push("");
+      L.push(`__${(grouping.name || "Grouping").trim() || "Grouping"}__`);
+      (grouping.groups || []).forEach((g) => {
+        const label = (g.name || "").trim() || `Group ${g.group_number}`;
+        const members = (g.slots || [])
+          .slice()
+          .sort((a, b) => a - b)
+          .map((slot) => `${slot}. ${exportSlotName(team, slot)}`);
+        L.push(`• ${label}: ${members.length ? members.join(", ") : "—"}`);
+      });
+    });
+    return L;
+  }
+
   // Build the detailed Discord post: per-player build + each encounter's loadout.
-  function formatDetailed(team, encounters) {
+  function formatDetailed(team, encounters, groupings) {
     const L = [];
     // User-editable header prepended at the top (e.g. intro, instructions, links).
     const header = (team.detailed_header || "").trim();
@@ -770,13 +1194,20 @@
       });
       L.push("");
     });
+
+    // Groupings appear under the roster.
+    const groupingLines = formatGroupings(team, groupings);
+    if (groupingLines.length) {
+      L.push("");
+      groupingLines.forEach((s) => L.push(s));
+    }
     return L.join("\n").trim();
   }
 
   // Build the condensed Discord roster: one line per player with the schedule
   // header, tagged handle, role/class, and abbreviated gear from the first
   // encounter (the only one shown when encounters are disabled).
-  function formatCondensed(team, encounters) {
+  function formatCondensed(team, encounters, groupings) {
     const L = [];
     const days = (team.schedule_days || []).map((d) => labelFor(DAYS, d)).join(", ") || "TBD";
     const times = timesCompact(team);
@@ -833,6 +1264,13 @@
       });
     });
 
+    // Groupings appear under the roster.
+    const groupingLines = formatGroupings(team, groupings);
+    if (groupingLines.length) {
+      L.push("");
+      groupingLines.forEach((s) => L.push(s));
+    }
+
     // User-editable footer appended at the bottom (e.g. raid lead, voice, rules).
     const note = (team.signup_note || "").trim();
     if (note) {
@@ -856,7 +1294,8 @@
     } else if (list.length) {
       full = [await api.getEncounter(team.id, list[0].id)];
     }
-    return { team, encounters: full };
+    const { groupings } = await api.listGroupings(team.id);
+    return { team, encounters: full, groupings: groupings || [] };
   }
 
   // Copy text to the clipboard, falling back to a temporary textarea when the
@@ -889,11 +1328,11 @@
   async function generateDiscord(kind) {
     if (!currentTeam) return;
     try {
-      const { team, encounters } = await gatherExportData();
+      const { team, encounters, groupings } = await gatherExportData();
       const text =
         kind === "detailed"
-          ? formatDetailed(team, encounters)
-          : formatCondensed(team, encounters);
+          ? formatDetailed(team, encounters, groupings)
+          : formatCondensed(team, encounters, groupings);
       const ok = await copyText(text);
       if (ok) {
         showMessage(
@@ -1004,7 +1443,7 @@
 
     currentTeam.players.forEach((player) => {
       const slot = document.createElement("div");
-      slot.className = "player-slot";
+      slot.className = "player-slot collapsible";
       slot.dataset.slot = player.slot;
       // Drives the role-based background color (see .player-slot[data-role] CSS).
       slot.dataset.role = player.role;
@@ -1016,8 +1455,12 @@
           </div>`
         : "";
       slot.innerHTML = `
-        <span class="slot-number">${player.slot}</span>
-        <div class="player-body">
+        <div class="player-head collapsible-head">
+          <button class="collapse-toggle" type="button" aria-expanded="true" aria-label="Collapse player"></button>
+          <span class="slot-number">${player.slot}</span>
+          <span class="player-head-name" data-slot-summary></span>
+        </div>
+        <div class="player-body collapsible-body">
           ${copyControl}
           <div class="player-fields">
             <div class="form-group">
@@ -1118,7 +1561,14 @@
       const roleSel = slot.querySelector('[data-field="role"]');
       roleSel.addEventListener("change", () => {
         slot.dataset.role = roleSel.value;
+        updateSlotSummary(slot);
       });
+
+      // Keep the collapsed-header summary (slot number, name, role) in sync as
+      // the player's name is typed.
+      const nameInput = slot.querySelector('[data-field="name"]');
+      nameInput.addEventListener("input", () => updateSlotSummary(slot));
+      updateSlotSummary(slot);
 
       // Build the loadout add-controls (one per gear/skills column) for the
       // currently selected encounter. The chips themselves are filled by
@@ -1175,6 +1625,20 @@
 
     renderRosterLoadouts(editable);
     renderPlayerNav();
+  }
+
+  // Fill a player slot's collapsed-header summary with its number, current name
+  // (falling back to "Slot N"), and role label so it stays useful when the slot
+  // is collapsed.
+  function updateSlotSummary(slot) {
+    const target = slot.querySelector("[data-slot-summary]");
+    if (!target) return;
+    const num = slot.dataset.slot;
+    const nameEl = slot.querySelector('[data-field="name"]');
+    const roleEl = slot.querySelector('[data-field="role"]');
+    const name = nameEl && nameEl.value.trim() ? nameEl.value.trim() : `Slot ${num}`;
+    const role = roleEl ? labelFor(ROLES, roleEl.value) : "";
+    target.textContent = role ? `${num}. ${name} — ${role}` : `${num}. ${name}`;
   }
 
   // Build the desktop floating jump-nav list from the live roster (name + role),
@@ -1509,6 +1973,7 @@
       return;
     }
     populateCopyFromSelect(el("add-encounter-copy"));
+    expandAncestors(addEncounterForm);
     addEncounterForm.classList.remove("is-hidden");
   });
   el("add-encounter-cancel").addEventListener("click", () => {

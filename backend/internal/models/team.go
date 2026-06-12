@@ -172,6 +172,9 @@ func (s *TeamStore) Create(ctx context.Context, ownerID int64, name string, copy
 		if err := copyEncountersTx(ctx, tx, copyFromTeamID, team.ID); err != nil {
 			return nil, err
 		}
+		if err := copyGroupingsTx(ctx, tx, copyFromTeamID, team.ID); err != nil {
+			return nil, err
+		}
 	} else {
 		const insertSlot = `INSERT INTO players (team_id, slot, role) VALUES ($1, $2, $3)`
 		for slot := 1; slot <= TeamSize; slot++ {

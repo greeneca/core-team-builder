@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Dashboard — Core Team Builder</title>
-  <link rel="stylesheet" href="css/styles.css?v=71" />
+  <link rel="stylesheet" href="css/styles.css?v=76" />
 </head>
 <body>
   <div id="message" class="toast is-hidden" role="alert" aria-live="assertive"></div>
@@ -60,27 +60,34 @@
            narrow viewports via CSS. -->
       <nav id="player-nav" class="player-nav" aria-label="Jump to section or player">
         <a class="player-nav-link player-nav-anchor" data-nav="top" href="#">↑ Top</a>
-        <a class="player-nav-link player-nav-anchor" data-nav="buffs" href="#">Group Buffs</a>
+        <a class="player-nav-link player-nav-anchor" data-nav="buffs" href="#">Group Stats</a>
+        <a class="player-nav-link player-nav-anchor" data-nav="groupings" href="#">Groupings</a>
         <div id="player-nav-list" class="player-nav-list"></div>
       </nav>
 
-      <button id="back-btn" class="btn btn--ghost" type="button">← Back to teams</button>
+      <div class="detail-toolbar mt-4">
+        <button id="back-btn" class="btn btn--ghost" type="button">← Back to teams</button>
+        <div class="form-actions detail-toolbar-actions">
+          <button id="collapse-all-btn" class="btn btn--ghost btn--sm" type="button">Collapse all</button>
+          <button id="expand-all-btn" class="btn btn--ghost btn--sm" type="button">Expand all</button>
+        </div>
+      </div>
 
-      <div class="card mt-4">
-        <div class="section-head">
-          <div>
-            <input id="team-name-input" class="input team-name-input" maxlength="100" />
-            <p class="text-muted" id="team-meta" style="margin: var(--space-2) 0 0;"></p>
+      <div class="card mt-4 collapsible section-collapsible">
+        <div class="section-head collapsible-head">
+          <div class="collapsible-head-main">
+            <button class="collapse-toggle" type="button" aria-expanded="true" aria-label="Collapse section"></button>
+            <div>
+              <input id="team-name-input" class="input team-name-input" maxlength="100" />
+              <p class="text-muted" id="team-meta" style="margin: var(--space-2) 0 0;"></p>
+            </div>
           </div>
           <div class="form-actions">
-            <label class="toggle" id="encounters-enabled-label" title="When off, the encounters section is hidden and only the first encounter is shown.">
-              <input type="checkbox" id="encounters-enabled-toggle" /> Encounters enabled
-            </label>
             <span id="team-save-status" class="save-status" aria-live="polite"></span>
-            <button id="delete-team-btn" class="btn btn--danger is-hidden" type="button">Delete Team</button>
           </div>
         </div>
 
+        <div class="collapsible-body">
         <div class="schedule mt-6">
           <h3 class="schedule-heading">Trial schedule</h3>
           <div class="form-group">
@@ -115,16 +122,28 @@
             <textarea id="signup-note-input" class="input" rows="3" maxlength="2000" placeholder="Optional notes appended to the bottom of the condensed list (e.g. raid lead, voice channel, loot rules)."></textarea>
           </div>
         </div>
+
+        <div class="team-features mt-6">
+          <h3 class="schedule-heading">Team Features</h3>
+          <label class="toggle" id="encounters-enabled-label" title="When off, the encounters section is hidden and only the first encounter is shown.">
+            <input type="checkbox" id="encounters-enabled-toggle" /> Encounters enabled
+          </label>
+        </div>
+        </div>
       </div>
 
       <!-- Encounters: manage the team's encounters (add / rename / delete).
            The chip selector below attaches flush as this card's bottom section
            (squared bottom corners) and splits off into a sticky strip on scroll. -->
-      <div id="encounters-manage-card" class="card mt-4 encounters-manage-card">
-        <div class="section-head">
-          <h2 style="margin: 0;">Encounters<span class="info-indicator" tabindex="0" role="img" aria-label="How encounters work: Encounters are per-fight loadout setups for your team. Add the Default/Trash encounters or bosses from a single trial, then give each player their gear and skills for that fight. Use the chips below to switch the active encounter you are editing. When adding an encounter you can copy gear and skills from an existing one." data-tip="Encounters are per-fight loadout setups for your team. Add the Default/Trash encounters or bosses from a single trial, then give each player their gear and skills for that fight. Use the chips below to switch the active encounter you are editing. When adding an encounter you can copy gear & skills from an existing one.">i</span></h2>
+      <div id="encounters-manage-card" class="card mt-4 encounters-manage-card collapsible section-collapsible">
+        <div class="section-head collapsible-head">
+          <div class="collapsible-head-main">
+            <button class="collapse-toggle" type="button" aria-expanded="true" aria-label="Collapse section"></button>
+            <h2 style="margin: 0;">Encounters<span class="info-indicator" tabindex="0" role="img" aria-label="How encounters work: Encounters are per-fight loadout setups for your team. Add the Default/Trash encounters or bosses from a single trial, then give each player their gear and skills for that fight. Use the chips below to switch the active encounter you are editing. When adding an encounter you can copy gear and skills from an existing one." data-tip="Encounters are per-fight loadout setups for your team. Add the Default/Trash encounters or bosses from a single trial, then give each player their gear and skills for that fight. Use the chips below to switch the active encounter you are editing. When adding an encounter you can copy gear & skills from an existing one.">i</span></h2>
+          </div>
           <button id="add-encounter-btn" class="btn btn--ghost btn--sm is-hidden" type="button">+ Add Encounter</button>
         </div>
+        <div class="collapsible-body">
         <form id="add-encounter-form" class="add-encounter-form is-hidden mt-4">
           <div class="form-group">
             <label for="add-encounter-name">Encounter</label>
@@ -151,6 +170,7 @@
             <button id="encounter-delete-btn" class="btn btn--danger btn--sm is-hidden" type="button">Delete Encounter</button>
           </div>
         </div>
+        </div>
       </div>
 
       <!-- Encounter chip selector, in its own titled box. Only this panel is
@@ -165,9 +185,20 @@
         <div id="encounters-bar" class="encounters-bar"></div>
       </div>
 
+      <!-- Group Stats: buff coverage, crit damage, and penetration for the
+           active encounter, grouped under one collapsible section. -->
+      <div id="group-stats-card" class="card mt-4 collapsible section-collapsible">
+        <div class="section-head collapsible-head">
+          <div class="collapsible-head-main">
+            <button class="collapse-toggle" type="button" aria-expanded="true" aria-label="Collapse section"></button>
+            <h2 style="margin: 0;">Group Stats</h2>
+          </div>
+        </div>
+        <div class="collapsible-body group-stats-body">
+
       <!-- Buffs coverage: how many of the tracked buffs the roster covers for
            the active encounter. The Details button opens a per-buff breakdown. -->
-      <div class="card mt-4 buffs-card">
+      <div class="group-stat buffs-card">
         <div class="buffs-summary">
           <div class="buffs-summary-main">
             <h2 style="margin: 0;">Group Buffs<span class="info-indicator" tabindex="0" role="img" aria-label="Buff coverage: How many of the team's tracked buffs are covered by the current roster and the active encounter's gear, skills, and potions. A buff counts as covered when at least one player provides one of its sources. Click Details for the full breakdown." data-tip="How many tracked buffs are covered by the current roster and the active encounter's gear, skills, and potions. A buff counts when at least one player provides one of its sources. Click Details for the full breakdown.">i</span></h2>
@@ -182,7 +213,7 @@
            provides, how much is applied to the target, and how much each player
            must supply themselves to reach the cap. Per-player crit shows on each
            roster slot. -->
-      <div class="card mt-4 crit-card">
+      <div class="group-stat crit-card">
         <div class="buffs-summary">
           <div class="buffs-summary-main">
             <h2 style="margin: 0;">Crit Damage<span class="info-indicator" tabindex="0" role="img" aria-label="Crit damage coverage: Critical damage caps at 125% total. 'Group' is provided to the whole team (including the 50% base); 'Target' is applied to the boss; 'Solo required' is what each player must supply from their own sources (mundus, CP, armor, weapon line, race, class passive, sets) to reach the cap. Each roster slot shows that player's total crit and whether it meets the cap. Click Details for the full breakdown." data-tip="Critical damage caps at 125% total. Group is provided to the whole team (incl. the 50% base); Target is applied to the boss; Solo required is what each player must supply themselves to reach the cap. Each roster slot shows its crit total. Click Details for the breakdown.">i</span></h2>
@@ -206,7 +237,7 @@
       </div>
 
       <!-- Penetration -->
-      <div class="card mt-4 crit-card">
+      <div class="group-stat crit-card">
         <div class="buffs-summary">
           <div class="buffs-summary-main">
             <h2 style="margin: 0;">Penetration<span class="info-indicator" tabindex="0" role="img" aria-label="Penetration coverage: players want their Offensive Penetration to reach the target's Resistance (18200 for trial bosses). 'Group' is provided to the whole team (Breaches, Alkosh, Crusher, etc.); 'Self required' is what each player must supply from their own sources (CP, light armor, mundus, race, class passive, sets, weapon trait) to reach the target. Each roster slot shows that player's total penetration and whether it meets the target. Click Details for the full breakdown." data-tip="Players want penetration to reach the target's Resistance (18200). Group is provided to the whole team (Breaches, Alkosh, Crusher…); Self required is what each player must supply themselves. Each roster slot shows its pen total. Click Details for the breakdown.">i</span></h2>
@@ -229,10 +260,41 @@
         </div>
       </div>
 
+        </div>
+      </div>
+
       <!-- Roster -->
-      <div class="card mt-4">
-        <h2 style="margin-top: 0;">Roster <span class="text-muted">(12 players)</span></h2>
-        <div id="roster" class="roster-grid"></div>
+      <div id="roster-card" class="card mt-4 collapsible section-collapsible">
+        <div class="section-head collapsible-head">
+          <div class="collapsible-head-main">
+            <button class="collapse-toggle" type="button" aria-expanded="true" aria-label="Collapse section"></button>
+            <h2 style="margin: 0;">Roster <span class="text-muted">(12 players)</span></h2>
+          </div>
+          <div class="form-actions">
+            <button id="players-collapse-all-btn" class="btn btn--ghost btn--sm" type="button">Collapse players</button>
+            <button id="players-expand-all-btn" class="btn btn--ghost btn--sm" type="button">Expand players</button>
+          </div>
+        </div>
+        <div class="collapsible-body">
+          <div id="roster" class="roster-grid"></div>
+        </div>
+      </div>
+
+      <!-- Groupings: split the roster into named sets of numbered groups (e.g.
+           ice cages, slayer stacks). Each grouping assigns each player to at
+           most one of its groups. -->
+      <div id="groupings-card" class="card mt-4 collapsible section-collapsible">
+        <div class="section-head collapsible-head">
+          <div class="collapsible-head-main">
+            <button class="collapse-toggle" type="button" aria-expanded="true" aria-label="Collapse section"></button>
+            <h2 style="margin: 0;">Groupings<span class="info-indicator" tabindex="0" role="img" aria-label="Groupings: split your team into named sets of numbered groups for mechanics — for example ice cages or slayer stacks. Add a grouping, set how many groups it has, then assign each player to one group. Groups default to 'Group 1', 'Group 2', … but you can rename them. A player can be in only one group per grouping." data-tip="Split your team into named sets of numbered groups for mechanics — e.g. ice cages or slayer stacks. Add a grouping, set how many groups it has, then assign each player to one group. Groups default to numbered names but can be renamed. A player can be in only one group per grouping.">i</span></h2>
+          </div>
+          <button id="add-grouping-btn" class="btn btn--ghost btn--sm is-hidden" type="button">+ Add Grouping</button>
+        </div>
+        <div class="collapsible-body">
+          <p id="groupings-empty" class="text-muted mt-4 is-hidden">No groupings yet.</p>
+          <div id="groupings-list" class="groupings-list mt-4"></div>
+        </div>
       </div>
     </section>
 
@@ -326,9 +388,9 @@
     </section>
   </main>
 
-  <script src="js/api.js?v=71"></script>
-  <script src="js/data.js?v=71"></script>
-  <script src="js/components.js?v=71"></script>
-  <script src="js/app.js?v=71"></script>
+  <script src="js/api.js?v=76"></script>
+  <script src="js/data.js?v=76"></script>
+  <script src="js/components.js?v=76"></script>
+  <script src="js/app.js?v=76"></script>
 </body>
 </html>

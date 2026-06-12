@@ -84,7 +84,7 @@ Consistent conventions across the codebase. Keep this in sync with reality.
 - **Cache-busting**: reference CSS/JS assets with a shared version query string
   (e.g. `app.js?v=N`) and bump `N` on every frontend change so browsers (and the
   baked nginx image) pick up updates. Keep the version consistent across
-  `index.html` and `login.html`. nginx serves HTML/JS/CSS with
+  `index.html`, `login.html`, and `reset.html`. nginx serves HTML/JS/CSS with
   `Cache-Control: no-cache` (see `frontend/nginx.conf`). Note the frontend is
   baked into the nginx image, so changes require
   `docker compose up -d --build frontend` to deploy.
