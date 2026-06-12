@@ -580,6 +580,42 @@
     }
   });
 
+  // Quick, fixed-duration smooth scroll. The native `behavior: "smooth"` is
+  // distance-based and feels sluggish for long jumps (e.g. slot 1 → slot 12), so
+  // we animate ourselves over a short constant duration. Honors reduced-motion.
+  const NAV_SCROLL_DURATION = 220; // ms
+  function smoothScrollTo(targetY) {
+    const maxY = Math.max(
+      0,
+      document.documentElement.scrollHeight - window.innerHeight
+    );
+    const dest = Math.max(0, Math.min(targetY, maxY));
+    const startY = window.scrollY;
+    const delta = dest - startY;
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduce || Math.abs(delta) < 2) {
+      window.scrollTo(0, dest);
+      return;
+    }
+    const start = performance.now();
+    // easeOutCubic: fast start, gentle settle.
+    const ease = (t) => 1 - Math.pow(1 - t, 3);
+    function step(now) {
+      const t = Math.min(1, (now - start) / NAV_SCROLL_DURATION);
+      window.scrollTo(0, startY + delta * ease(t));
+      if (t < 1) requestAnimationFrame(step);
+    }
+    requestAnimationFrame(step);
+  }
+
+  // Scroll an element's top just below the sticky chrome, honoring its CSS
+  // scroll-margin-top (the same offset native scrollIntoView would respect).
+  function smoothScrollToEl(elm) {
+    const marginTop = parseFloat(getComputedStyle(elm).scrollMarginTop) || 0;
+    const top = elm.getBoundingClientRect().top + window.scrollY - marginTop;
+    smoothScrollTo(top);
+  }
+
   // Floating jump-nav: scroll to the top, the Group Buffs card, or a player slot.
   // Delegated so it works for the dynamically rebuilt per-player links.
   el("player-nav").addEventListener("click", (e) => {
@@ -588,15 +624,15 @@
     e.preventDefault();
     const kind = link.dataset.nav;
     if (kind === "top") {
-      window.scrollTo({ top: 0, behavior: "smooth" });
+      smoothScrollTo(0);
     } else if (kind === "buffs") {
       const card = document.querySelector(".buffs-card");
-      if (card) card.scrollIntoView({ behavior: "smooth", block: "start" });
+      if (card) smoothScrollToEl(card);
     } else if (kind === "player") {
       const slotEl = el("roster").querySelector(
         `.player-slot[data-slot="${link.dataset.slot}"]`
       );
-      if (slotEl) slotEl.scrollIntoView({ behavior: "smooth", block: "start" });
+      if (slotEl) smoothScrollToEl(slotEl);
     }
   });
 
