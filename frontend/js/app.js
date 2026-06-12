@@ -547,6 +547,8 @@
     if (e.target.closest("#add-encounter-form")) return;
     if (e.target.closest("#encounter-controls")) return;
     if (e.target.closest("[data-loadout]")) return;
+    // The "Copy to…" control performs its own save; ignore it here.
+    if (e.target.closest("[data-copy]")) return;
     // The team-timezone picker manages its own state + autosave (via onSelect).
     if (e.target.closest("#team-tz-add")) return;
     if (e.target.matches("input, select, textarea")) {
@@ -555,6 +557,30 @@
       refreshBuffCoverage();
       refreshCritCoverage();
       refreshPenCoverage();
+      // Name/role edits change the jump-nav labels.
+      if (e.target.matches('[data-field="name"], [data-field="role"]')) {
+        renderPlayerNav();
+      }
+    }
+  });
+
+  // Floating jump-nav: scroll to the top, the Group Buffs card, or a player slot.
+  // Delegated so it works for the dynamically rebuilt per-player links.
+  el("player-nav").addEventListener("click", (e) => {
+    const link = e.target.closest("[data-nav]");
+    if (!link) return;
+    e.preventDefault();
+    const kind = link.dataset.nav;
+    if (kind === "top") {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } else if (kind === "buffs") {
+      const card = document.querySelector(".buffs-card");
+      if (card) card.scrollIntoView({ behavior: "smooth", block: "start" });
+    } else if (kind === "player") {
+      const slotEl = el("roster").querySelector(
+        `.player-slot[data-slot="${link.dataset.slot}"]`
+      );
+      if (slotEl) slotEl.scrollIntoView({ behavior: "smooth", block: "start" });
     }
   });
 
@@ -682,9 +708,17 @@
       slot.dataset.slot = player.slot;
       // Drives the role-based background color (see .player-slot[data-role] CSS).
       slot.dataset.role = player.role;
+      const copyControl = editable
+        ? `<div class="slot-actions" data-copy>
+            <select class="input slot-copy" data-copy-select aria-label="Copy another player's build and loadout into this slot">
+              <option value="">Copy from…</option>
+            </select>
+          </div>`
+        : "";
       slot.innerHTML = `
         <span class="slot-number">${player.slot}</span>
         <div class="player-body">
+          ${copyControl}
           <div class="player-fields">
             <div class="form-group">
               <label>Name</label>
@@ -809,6 +843,26 @@
         });
       }
 
+      // "Copy from…" pulls another player's build + loadout INTO this slot
+      // (everything except name and discord handle). Options are rebuilt from
+      // the live roster on open so slot names stay current.
+      const copySel = slot.querySelector("[data-copy-select]");
+      if (copySel) {
+        copySel.addEventListener("mousedown", () =>
+          populateCopyOptions(copySel, Number(slot.dataset.slot))
+        );
+        copySel.addEventListener("focus", () =>
+          populateCopyOptions(copySel, Number(slot.dataset.slot))
+        );
+        copySel.addEventListener("change", () => {
+          const source = Number(copySel.value);
+          copySel.value = "";
+          if (!source) return;
+          const src = el("roster").querySelector(`.player-slot[data-slot="${source}"]`);
+          if (src) copyPlayerToSlot(src, slot);
+        });
+      }
+
       // Viewers get a read-only roster; editors/owner autosave on change.
       if (!editable) {
         slot.querySelectorAll("input, select").forEach((field) => {
@@ -820,6 +874,112 @@
     });
 
     renderRosterLoadouts(editable);
+    renderPlayerNav();
+  }
+
+  // Build the desktop floating jump-nav list from the live roster (name + role),
+  // so it reflects unsaved name/role edits. The Top/Group Buffs anchors are
+  // static in the markup; only the per-player list is regenerated here.
+  function renderPlayerNav() {
+    const list = el("player-nav-list");
+    if (!list) return;
+    list.innerHTML = "";
+    el("roster")
+      .querySelectorAll(".player-slot")
+      .forEach((slot) => {
+        const num = Number(slot.dataset.slot);
+        const nameEl = slot.querySelector('[data-field="name"]');
+        const roleEl = slot.querySelector('[data-field="role"]');
+        const role = roleEl ? roleEl.value : "";
+        const name = nameEl && nameEl.value.trim() ? nameEl.value.trim() : `Slot ${num}`;
+        const link = document.createElement("a");
+        link.className = "player-nav-link";
+        link.href = "#";
+        link.dataset.nav = "player";
+        link.dataset.slot = String(num);
+        link.dataset.role = role;
+        link.innerHTML = `<span class="player-nav-name">${num}. ${escapeAttr(
+          name
+        )}</span><span class="player-nav-role">${escapeAttr(labelFor(ROLES, role))}</span>`;
+        list.appendChild(link);
+      });
+  }
+
+  // Rebuild a slot's "Copy from…" options from the live roster (every slot except
+  // its own), labelled with the current name when present.
+  function populateCopyOptions(selectEl, ownSlot) {
+    const opts = ['<option value="">Copy from…</option>'];
+    el("roster")
+      .querySelectorAll(".player-slot")
+      .forEach((s) => {
+        const num = Number(s.dataset.slot);
+        if (num === ownSlot) return;
+        const nameEl = s.querySelector('[data-field="name"]');
+        const name = nameEl && nameEl.value.trim() ? ` — ${nameEl.value.trim()}` : "";
+        opts.push(`<option value="${num}">Slot ${num}${escapeAttr(name)}</option>`);
+      });
+    selectEl.innerHTML = opts.join("");
+    selectEl.value = "";
+  }
+
+  // Copy everything from one roster slot to another EXCEPT name + discord handle:
+  // role/class/race/subclass + the active build (skill lines or masteries) and
+  // the full per-encounter loadout (gear/skills/potions/CP/weapons/pen sources,
+  // mundus, armor counts). Operates on the live DOM (so unsaved edits are
+  // included), then persists both the team and the encounter.
+  function copyPlayerToSlot(srcSlot, dstSlot) {
+    const field = (slotEl, f) => {
+      const e = slotEl.querySelector(`[data-field="${f}"]`);
+      return e ? e.value : "";
+    };
+
+    ["role", "class", "race"].forEach((f) => {
+      const s = srcSlot.querySelector(`[data-field="${f}"]`);
+      const d = dstSlot.querySelector(`[data-field="${f}"]`);
+      if (s && d) d.value = s.value;
+    });
+    dstSlot.dataset.role = field(dstSlot, "role");
+
+    const srcSub = srcSlot.querySelector('[data-field="subclassed"]');
+    const dstSub = dstSlot.querySelector('[data-field="subclassed"]');
+    if (srcSub && dstSub) dstSub.checked = srcSub.checked;
+
+    // Re-render the target's conditional build with the source's selections.
+    renderBuild(dstSlot, {
+      skill_line_1: field(srcSlot, "skill_line_1"),
+      skill_line_2: field(srcSlot, "skill_line_2"),
+      skill_line_3: field(srcSlot, "skill_line_3"),
+      mastery_1: field(srcSlot, "mastery_1"),
+      mastery_2: field(srcSlot, "mastery_2"),
+    });
+
+    // Loadout chip columns: clear the target list and copy the source's chips.
+    dstSlot.querySelectorAll("[data-loadout] .loadout-col").forEach((dstCol) => {
+      const type = dstCol.dataset.type;
+      const dstList = dstCol.querySelector("[data-list]");
+      if (!dstList) return;
+      dstList.innerHTML = "";
+      const srcChips = srcSlot.querySelectorAll(
+        `[data-loadout] .loadout-col[data-type="${type}"] .chip`
+      );
+      srcChips.forEach((chip) => addChip(dstList, type, chip.dataset.value, true));
+    });
+
+    // Crit/pen setup fields (mundus + armor counts).
+    ["mundus", "armor_heavy", "armor_medium", "armor_light"].forEach((f) => {
+      const s = srcSlot.querySelector(`[data-crit-field="${f}"]`);
+      const d = dstSlot.querySelector(`[data-crit-field="${f}"]`);
+      if (s && d) d.value = s.value;
+    });
+
+    refreshBuffCoverage();
+    refreshCritCoverage();
+    refreshPenCoverage();
+
+    // Programmatic value changes don't fire input/change, so persist explicitly.
+    setSaveStatus("team", "saving");
+    setSaveStatus("encounter", "saving");
+    Promise.resolve(saveAll()).then(() => saveLoadouts());
   }
 
   // Fill each roster slot's gear/skills chip lists from the currently selected

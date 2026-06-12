@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Dashboard — Core Team Builder</title>
-  <link rel="stylesheet" href="css/styles.css?v=50" />
+  <link rel="stylesheet" href="css/styles.css?v=57" />
 </head>
 <body>
   <div id="message" class="toast is-hidden" role="alert" aria-live="assertive"></div>
@@ -54,6 +54,15 @@
 
     <!-- Single team detail view -->
     <section id="team-detail-view" class="is-hidden">
+      <!-- Desktop-only floating jump nav: quick links to the top, the Group
+           Buffs section, and each player slot (populated by app.js). Hidden on
+           narrow viewports via CSS. -->
+      <nav id="player-nav" class="player-nav" aria-label="Jump to section or player">
+        <a class="player-nav-link player-nav-anchor" data-nav="top" href="#">↑ Top</a>
+        <a class="player-nav-link player-nav-anchor" data-nav="buffs" href="#">Group Buffs</a>
+        <div id="player-nav-list" class="player-nav-list"></div>
+      </nav>
+
       <button id="back-btn" class="btn btn--ghost" type="button">← Back to teams</button>
 
       <div class="card mt-4">
@@ -141,7 +150,7 @@
       <div class="card mt-4 buffs-card">
         <div class="buffs-summary">
           <div class="buffs-summary-main">
-            <h2 style="margin: 0;">Buffs<span class="info-indicator" tabindex="0" role="img" aria-label="Buff coverage: How many of the team's tracked buffs are covered by the current roster and the active encounter's gear, skills, and potions. A buff counts as covered when at least one player provides one of its sources. Click Details for the full breakdown." data-tip="How many tracked buffs are covered by the current roster and the active encounter's gear, skills, and potions. A buff counts when at least one player provides one of its sources. Click Details for the full breakdown.">i</span></h2>
+            <h2 style="margin: 0;">Group Buffs<span class="info-indicator" tabindex="0" role="img" aria-label="Buff coverage: How many of the team's tracked buffs are covered by the current roster and the active encounter's gear, skills, and potions. A buff counts as covered when at least one player provides one of its sources. Click Details for the full breakdown." data-tip="How many tracked buffs are covered by the current roster and the active encounter's gear, skills, and potions. A buff counts when at least one player provides one of its sources. Click Details for the full breakdown.">i</span></h2>
             <span id="buffs-count" class="buffs-count">0 / 0</span>
           </div>
           <button id="buffs-details-btn" class="btn btn--ghost btn--sm" type="button">Details</button>
@@ -271,9 +280,9 @@
     </section>
   </main>
 
-  <script src="js/api.js?v=50"></script>
-  <script src="js/data.js?v=50"></script>
-  <script src="js/components.js?v=50"></script>
-  <script src="js/app.js?v=50"></script>
+  <script src="js/api.js?v=57"></script>
+  <script src="js/data.js?v=57"></script>
+  <script src="js/components.js?v=57"></script>
+  <script src="js/app.js?v=57"></script>
 </body>
 </html>

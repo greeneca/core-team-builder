@@ -527,6 +527,8 @@ a.brand--home:hover {
   border-radius: var(--radius);
   padding: var(--space-3) var(--space-4);
   transition: background 0.15s ease, border-color 0.15s ease;
+  /* Clear the sticky topbar + encounters panel when jumped to from the nav. */
+  scroll-margin-top: 160px;
 }
 
 /* Role-based slot coloring: subtle background tint + saturated left accent bar
@@ -567,6 +569,19 @@ a.brand--home:hover {
   gap: var(--space-3);
   flex: 1;
   min-width: 0;
+}
+.slot-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: calc(-1 * var(--space-2));
+}
+.slot-actions .slot-copy {
+  width: auto;
+  max-width: 220px;
+  font-size: var(--font-size-sm);
+  padding-top: var(--space-1);
+  padding-bottom: var(--space-1);
+  color: var(--color-text-muted);
 }
 .player-fields {
   display: grid;
@@ -1100,6 +1115,81 @@ a.brand--home:hover {
 .crit-label.is-met::before { content: "\2713 "; }
 .crit-label.is-unmet { color: var(--color-danger); }
 .crit-label.is-unmet::before { content: "\2717 "; }
+
+/* Floating jump nav (desktop only): fixed to the left edge, lists the Top /
+   Group Buffs anchors plus every player slot. Hidden on narrow viewports where
+   there isn't room beside the content. */
+.buffs-card {
+  scroll-margin-top: 160px;
+}
+.player-nav {
+  display: none;
+}
+@media (min-width: 1280px) {
+  .player-nav {
+    position: fixed;
+    top: 50%;
+    left: var(--space-4);
+    transform: translateY(-50%);
+    z-index: 150;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    width: 190px;
+    max-height: 84vh;
+    overflow-y: auto;
+    padding: var(--space-3);
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow);
+  }
+}
+.player-nav-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-border);
+}
+.player-nav-link {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius);
+  border-left: 3px solid transparent;
+  color: var(--color-text);
+  text-decoration: none;
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+}
+.player-nav-link:hover {
+  background: var(--color-surface-alt);
+  text-decoration: none;
+}
+.player-nav-anchor {
+  font-weight: 600;
+  color: var(--color-accent);
+}
+.player-nav-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.player-nav-role {
+  flex-shrink: 0;
+  font-size: 0.7rem;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.player-nav-link[data-role="tank"] { border-left-color: var(--role-tank); }
+.player-nav-link[data-role="healer"] { border-left-color: var(--role-healer); }
+.player-nav-link[data-role="dps"] { border-left-color: var(--role-dps); }
+.player-nav-link[data-role="support_dps"] { border-left-color: var(--role-support); }
 
 /* Utility text */
 .text-muted { color: var(--color-text-muted); }
