@@ -277,6 +277,18 @@
     setSaveStatus("team", "");
     el("delete-team-btn").classList.toggle("is-hidden", !isOwner());
 
+    const headerInput = el("detailed-header-input");
+    if (headerInput) {
+      headerInput.value = currentTeam.detailed_header || "";
+      headerInput.readOnly = !editable;
+    }
+
+    const noteInput = el("signup-note-input");
+    if (noteInput) {
+      noteInput.value = currentTeam.signup_note || "";
+      noteInput.readOnly = !editable;
+    }
+
     renderSchedule(editable);
     renderEncountersBar();
     renderEncounterControls();
@@ -527,6 +539,8 @@
       schedule_time: convertWallTime(el("schedule-time").value, localTimezone(), "UTC"),
       team_timezones: teamTimezones,
       encounters_enabled: encountersEnabled(),
+      signup_note: el("signup-note-input") ? el("signup-note-input").value : "",
+      detailed_header: el("detailed-header-input") ? el("detailed-header-input").value : "",
       players,
     };
     setSaveStatus("team", "saving");
@@ -615,6 +629,254 @@
       handleError(err);
     }
   });
+
+  // --- Discord signup export ---
+  // Two one-click generators that build text to paste into Discord and copy it
+  // to the clipboard: a "detailed post" (full per-player build + per-encounter
+  // gear/skills) and a "condensed list" (schedule, tagged handles, role/class,
+  // abbreviated gear). Both pull a fresh, consistent snapshot from the server
+  // (after flushing any pending autosave) so the output matches what is saved.
+
+  // Prefix a stored Discord handle with "@" so pasting it pings the user.
+  function discordTag(handle) {
+    const h = (handle || "").trim();
+    if (!h) return "";
+    return h.startsWith("@") ? h : `@${h}`;
+  }
+
+  // A player's build line: subclass skill lines, or class masteries.
+  function buildText(p) {
+    if (p.subclassed) {
+      const lines = [p.skill_line_1, p.skill_line_2, p.skill_line_3]
+        .filter(Boolean)
+        .map((v) => labelFor(SKILL_LINES, v));
+      return `Subclass: ${lines.length ? lines.join(" / ") : "—"}`;
+    }
+    const m = [p.mastery_1, p.mastery_2].filter(Boolean).map((v) => labelFor(MASTERIES, v));
+    return `Masteries: ${m.length ? m.join(", ") : "—"}`;
+  }
+
+  // The configured schedule time rendered in each of the team's set timezones.
+  // Returns an array of lines (detailed) — falls back to UTC when no zones set.
+  function scheduleTimeLines(team) {
+    const time = team.schedule_time;
+    if (!time) return ["**Time:** TBD"];
+    const zones = team.team_timezones || [];
+    if (!zones.length) return [`**Time:** ${time} UTC`];
+    const lines = ["**Time:**"];
+    zones.forEach((tz) => {
+      lines.push(`• ${convertWallTime(time, "UTC", tz)} ${shortZoneName(tz)} (${tz})`);
+    });
+    return lines;
+  }
+
+  // The schedule time across the set timezones as one compact string (condensed).
+  function timesCompact(team) {
+    const time = team.schedule_time;
+    if (!time) return "";
+    const zones = team.team_timezones || [];
+    if (!zones.length) return `${time} UTC`;
+    return zones
+      .map((tz) => `${convertWallTime(time, "UTC", tz)} ${shortZoneName(tz)}`)
+      .join(" · ");
+  }
+
+  // Format one encounter loadout into labelled detail segments.
+  function loadoutDetailParts(lo) {
+    const parts = [];
+    const gear = (lo.gear || []).map(gearLabel);
+    if (gear.length) parts.push(`Gear: ${gear.join(", ")}`);
+    const skills = (lo.skills || []).map(skillLabel);
+    if (skills.length) parts.push(`Skills: ${skills.join(", ")}`);
+    const weapons = (lo.weapons || []).map(weaponLabel);
+    if (weapons.length) parts.push(`Weapons: ${weapons.join(", ")}`);
+    if (lo.mundus) parts.push(`Mundus: ${mundusLabel(lo.mundus)}`);
+    const potions = (lo.potions || []).map(potionLabel);
+    if (potions.length) parts.push(`Potions: ${potions.join(", ")}`);
+    const cp = (lo.cp_blue || []).map(cpBlueLabel);
+    if (cp.length) parts.push(`CP: ${cp.join(", ")}`);
+    const armor = [];
+    if (lo.armor_heavy) armor.push(`${lo.armor_heavy}H`);
+    if (lo.armor_medium) armor.push(`${lo.armor_medium}M`);
+    if (lo.armor_light) armor.push(`${lo.armor_light}L`);
+    if (armor.length) parts.push(`Armor: ${armor.join("/")}`);
+    const pen = (lo.pen_extra || []).map(penExtraLabel);
+    if (pen.length) parts.push(`Pen: ${pen.join(", ")}`);
+    return parts;
+  }
+
+  // Build the detailed Discord post: per-player build + each encounter's loadout.
+  function formatDetailed(team, encounters) {
+    const L = [];
+    // User-editable header prepended at the top (e.g. intro, instructions, links).
+    const header = (team.detailed_header || "").trim();
+    if (header) {
+      L.push(header);
+      L.push("");
+    }
+    L.push(`**${team.name}** — Trial Signup`);
+    L.push("");
+    L.push(`**Schedule:** ${(team.schedule_days || []).map((d) => labelFor(DAYS, d)).join(", ") || "TBD"}`);
+    scheduleTimeLines(team).forEach((s) => L.push(s));
+    L.push("");
+
+    const players = (team.players || []).slice().sort((a, b) => a.slot - b.slot);
+    players.forEach((p) => {
+      const name = p.name || `Slot ${p.slot}`;
+      const tag = discordTag(p.discord_handle);
+      L.push(`__${p.slot}. ${name}__ — ${labelFor(ROLES, p.role)}${tag ? ` · ${tag}` : ""}`);
+      L.push(`Class: ${labelFor(CLASSES, p.class)} · Race: ${labelFor(RACES, p.race)}`);
+      L.push(buildText(p));
+      encounters.forEach((enc) => {
+        const lo = (enc.loadouts || []).find((l) => l.slot === p.slot) || {};
+        const parts = loadoutDetailParts(lo);
+        L.push(`• ${enc.name}: ${parts.length ? parts.join(" | ") : "(no loadout set)"}`);
+      });
+      L.push("");
+    });
+    return L.join("\n").trim();
+  }
+
+  // Build the condensed Discord roster: one line per player with the schedule
+  // header, tagged handle, role/class, and abbreviated gear from the first
+  // encounter (the only one shown when encounters are disabled).
+  function formatCondensed(team, encounters) {
+    const L = [];
+    const days = (team.schedule_days || []).map((d) => labelFor(DAYS, d)).join(", ") || "TBD";
+    const times = timesCompact(team);
+    L.push(`**${team.name}**`);
+    // Day(s) and the per-timezone times share one line.
+    L.push(times ? `${days} · ${times}` : days);
+    L.push("");
+
+    const primary = encounters[0];
+    const bySlot = {};
+    if (primary) (primary.loadouts || []).forEach((l) => { bySlot[l.slot] = l; });
+
+    const players = (team.players || []).slice().sort((a, b) => a.slot - b.slot);
+    const rows = players.map((p) => ({
+      role: p.role,
+      slot: `${p.slot}.`,
+      who: discordTag(p.discord_handle) || p.name || `Slot ${p.slot}`,
+      cls: p.class ? labelFor(CLASSES, p.class) : "—",
+      gear: ((bySlot[p.slot] || {}).gear || []).map(gearAbbrev).join("/") || "—",
+    }));
+
+    // Pad each field to its column's max width (across all rows, so columns line
+    // up between groups) in a monospace view. No code block is used, so handles
+    // still actively notify (Discord's proportional font means alignment is
+    // best-effort).
+    const width = (key) => (rows.length ? Math.max(...rows.map((r) => r[key].length)) : 0);
+    const wSlot = width("slot");
+    const wWho = width("who");
+    const wCls = width("cls");
+
+    // Group players by role, each under a heading. The signup order intentionally
+    // lists Support DPS above DPS (independent of the ROLES picker order). Any
+    // role not listed (shouldn't happen) is collected into a trailing "Other"
+    // group so no player is dropped.
+    const groupOrder = ["tank", "healer", "support_dps", "dps"];
+    const known = new Set(groupOrder);
+    const groups = groupOrder.map((value) => ({ label: labelFor(ROLES, value), value }));
+    if (rows.some((r) => !known.has(r.role))) {
+      groups.push({ label: "Other", value: null });
+    }
+    let first = true;
+    groups.forEach((g) => {
+      const groupRows = rows.filter((r) =>
+        g.value === null ? !known.has(r.role) : r.role === g.value
+      );
+      if (!groupRows.length) return;
+      if (!first) L.push("");
+      first = false;
+      L.push(`__${g.label}__`);
+      groupRows.forEach((r) => {
+        L.push(
+          `${r.slot.padEnd(wSlot)}  ${r.who.padEnd(wWho)}  ${r.cls.padEnd(wCls)}  ${r.gear}`
+        );
+      });
+    });
+
+    // User-editable footer appended at the bottom (e.g. raid lead, voice, rules).
+    const note = (team.signup_note || "").trim();
+    if (note) {
+      L.push("");
+      L.push(note);
+    }
+    return L.join("\n").trim();
+  }
+
+  // Fetch a fresh, consistent snapshot (team + encounter loadouts) for export.
+  // Pending edits are flushed first so the output matches the saved state. When
+  // encounters are disabled, only the first encounter is included.
+  async function gatherExportData() {
+    await flushAutosave();
+    const team = await api.getTeam(currentTeam.id);
+    const { encounters } = await api.listEncounters(team.id);
+    const list = encounters || [];
+    let full = [];
+    if (encountersEnabled()) {
+      full = await Promise.all(list.map((e) => api.getEncounter(team.id, e.id)));
+    } else if (list.length) {
+      full = [await api.getEncounter(team.id, list[0].id)];
+    }
+    return { team, encounters: full };
+  }
+
+  // Copy text to the clipboard, falling back to a temporary textarea when the
+  // async Clipboard API is unavailable. Returns true on success.
+  async function copyText(text) {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+        return true;
+      }
+    } catch {
+      /* fall through to the legacy path */
+    }
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      const ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+      return ok;
+    } catch {
+      return false;
+    }
+  }
+
+  async function generateDiscord(kind) {
+    if (!currentTeam) return;
+    try {
+      const { team, encounters } = await gatherExportData();
+      const text =
+        kind === "detailed"
+          ? formatDetailed(team, encounters)
+          : formatCondensed(team, encounters);
+      const ok = await copyText(text);
+      if (ok) {
+        showMessage(
+          kind === "detailed"
+            ? "Detailed post copied to clipboard"
+            : "Condensed list copied to clipboard",
+          "success"
+        );
+      } else {
+        console.log(text);
+        showMessage("Could not copy automatically — the text was logged to the console.");
+      }
+    } catch (err) {
+      handleError(err);
+    }
+  }
+
+  el("discord-detailed-btn").addEventListener("click", () => generateDiscord("detailed"));
+  el("discord-condensed-btn").addEventListener("click", () => generateDiscord("condensed"));
 
   // --- Sharing ---
   function renderMembers() {

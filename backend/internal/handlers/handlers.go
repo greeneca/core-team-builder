@@ -27,6 +27,10 @@ const (
 	maxEncountersPerTeam = 10
 	// maxTeamTimezones caps the team's extra display-timezone list.
 	maxTeamTimezones = 20
+	// maxSignupNoteLen caps the free-form Discord signup footer (in runes).
+	maxSignupNoteLen = 2000
+	// maxDetailedHeaderLen caps the free-form detailed-post header (in runes).
+	maxDetailedHeaderLen = 2000
 )
 
 // Server holds the dependencies shared across HTTP handlers.

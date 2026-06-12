@@ -774,6 +774,77 @@ function gearDesc(key) {
 function gearByLabel(label) {
   return GEAR_BY_LABEL[String(label || "").trim().toLowerCase()] || null;
 }
+
+// Short, Discord-friendly gear-set abbreviations, keyed by set value. These are
+// sensible defaults meant to be hand-tuned later — edit freely. Any set not
+// listed here falls back to an auto-generated acronym (see gearAbbrev).
+const GEAR_ABBREVIATIONS = {
+  // 5-piece sets
+  perfected_relequen: "pRele",
+  relequen: "Rele",
+  pillar_of_nirn: "Pillar",
+  sul_xans_torment: "Sul-Xan",
+  whorl_of_the_depths: "Whorl",
+  coral_riptide: "Coral",
+  deadly_strike: "Deadly",
+  tzogvins_warband: "Tzogvin",
+  kinras_wrath: "Kinras",
+  bahseis_mania: "Bahsei",
+  ansuuls_torment: "Ansuul",
+  highland_sentinel: "Highland",
+  aegis_caller: "Aegis",
+  perfected_olorime: "pOlo",
+  spell_power_cure: "SPC",
+  master_architect: "MA",
+  roaring_opportunist: "RO",
+  saxhleel_champion: "Sax",
+  pearlescent_ward: "PW",
+  lucent_echoes: "LE",
+  powerful_assault: "PA",
+  pillagers_profit: "PP",
+  z_ens_redress: "Redress",
+  crimson_oaths_rive: "Crimson",
+  plaguebreak: "Plague",
+  roar_of_alkosh: "Alkosh",
+  touch_of_zen: "ToZ",
+  way_of_martial_knowledge: "WMK",
+  elemental_catalyst: "Catalyst",
+  // Monster sets
+  slimecraw: "Slime",
+  zaan: "Zaan",
+  nazaray: "Nazaray",
+  selene: "Selene",
+  encratiss_behemoth: "Encratis",
+  baron_zaudrus: "Zaudrus",
+  nunatak: "Nunatak",
+  symphony_of_blades: "Symphony",
+  ozezan_the_inferno: "Ozezan",
+  tremorscale: "Tremor",
+  // Arena weapons
+  merciless_charge: "Merciless",
+  crushing_wall: "Crushing",
+  wrath_of_elements: "Wrath",
+  frenzied_momentum: "Frenzied",
+  masters_destruction_staff: "Master DS",
+  // Mythic items
+  velothi_ur_mages_amulet: "Velothi",
+  oakensoul_ring: "Oakensoul",
+  sea_serpents_coil: "Sea-Serpent",
+  spaulder_of_ruin: "Spaulder",
+  death_dealers_fete: "Death Dealer",
+  harpooners_wading_kilt: "Kilt",
+};
+
+// gearAbbrev(key): the curated abbreviation for a gear set, or an auto-generated
+// acronym from its label as a fallback (e.g. "Pillar of Nirn" -> "PN"). Used by
+// the condensed Discord export.
+function gearAbbrev(key) {
+  if (GEAR_ABBREVIATIONS[key]) return GEAR_ABBREVIATIONS[key];
+  const label = gearLabel(key).replace(/\(.*?\)/g, "").trim();
+  const words = label.split(/\s+/).filter((w) => w && !/^(of|the|and)$/i.test(w));
+  if (words.length <= 1) return words[0] || label;
+  return words.map((w) => w[0].toUpperCase()).join("");
+}
 function skillLabel(key) {
   const s = SKILL_BY_KEY[key];
   return s ? s.label : key;

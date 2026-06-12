@@ -99,6 +99,22 @@
             <div id="team-tz-list" class="chip-list mt-2"></div>
           </div>
         </div>
+
+        <div class="discord-export mt-6">
+          <h3 class="schedule-heading">Discord signup<span class="info-indicator" tabindex="0" role="img" aria-label="Discord signup: Generate text to paste into Discord. The detailed post lists each player's full build and per-encounter gear/skills; the condensed list is a short roster with the schedule, tagged Discord handles, role, class, and abbreviated gear." data-tip="Generate text to paste into Discord. The detailed post lists each player's full build and per-encounter gear/skills; the condensed list is a short roster with the schedule, tagged Discord handles, role, class, and abbreviated gear.">i</span></h3>
+          <div class="form-actions">
+            <button id="discord-detailed-btn" class="btn btn--ghost btn--sm" type="button">Copy detailed post</button>
+            <button id="discord-condensed-btn" class="btn btn--ghost btn--sm" type="button">Copy condensed list</button>
+          </div>
+          <div class="form-group mt-4">
+            <label for="detailed-header-input">Detailed post header<span class="info-indicator" tabindex="0" role="img" aria-label="Detailed post header: free-form text prepended to the top of the generated detailed post (e.g. an intro, sign-up instructions, links). Saved with the team." data-tip="Free-form text prepended to the top of the generated detailed post (e.g. an intro, sign-up instructions, links). Saved with the team.">i</span></label>
+            <textarea id="detailed-header-input" class="input" rows="3" maxlength="2000" placeholder="Optional text prepended to the top of the detailed post (e.g. intro, sign-up instructions, links)."></textarea>
+          </div>
+          <div class="form-group mt-4">
+            <label for="signup-note-input">Condensed list footer<span class="info-indicator" tabindex="0" role="img" aria-label="Condensed list footer: free-form text appended to the bottom of the generated condensed list (e.g. raid lead, voice channel, loot rules). Saved with the team." data-tip="Free-form text appended to the bottom of the generated condensed list (e.g. raid lead, voice channel, loot rules). Saved with the team.">i</span></label>
+            <textarea id="signup-note-input" class="input" rows="3" maxlength="2000" placeholder="Optional notes appended to the bottom of the condensed list (e.g. raid lead, voice channel, loot rules)."></textarea>
+          </div>
+        </div>
       </div>
 
       <!-- Encounters: manage the team's encounters (add / rename / delete).
@@ -310,9 +326,9 @@
     </section>
   </main>
 
-  <script src="js/api.js?v=62"></script>
-  <script src="js/data.js?v=62"></script>
-  <script src="js/components.js?v=62"></script>
-  <script src="js/app.js?v=62"></script>
+  <script src="js/api.js?v=70"></script>
+  <script src="js/data.js?v=70"></script>
+  <script src="js/components.js?v=70"></script>
+  <script src="js/app.js?v=70"></script>
 </body>
 </html>

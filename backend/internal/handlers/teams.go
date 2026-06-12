@@ -159,8 +159,12 @@ type updateTeamRequest struct {
 	// TeamTimezones are extra IANA zones the team wants the time shown in.
 	TeamTimezones []string `json:"team_timezones"`
 	// EncountersEnabled toggles whether the team uses multiple encounters.
-	EncountersEnabled bool            `json:"encounters_enabled"`
-	Players           []playerPayload `json:"players"`
+	EncountersEnabled bool `json:"encounters_enabled"`
+	// SignupNote is the free-form footer for the condensed Discord signup list.
+	SignupNote string `json:"signup_note"`
+	// DetailedHeader is the free-form header for the detailed Discord signup post.
+	DetailedHeader string          `json:"detailed_header"`
+	Players        []playerPayload `json:"players"`
 }
 
 type playerPayload struct {
@@ -225,6 +229,18 @@ func (s *Server) handleUpdateTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	signupNote := strings.TrimRight(req.SignupNote, " \t\r\n")
+	if len([]rune(signupNote)) > maxSignupNoteLen {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("signup note too long (max %d characters)", maxSignupNoteLen))
+		return
+	}
+
+	detailedHeader := strings.TrimRight(req.DetailedHeader, " \t\r\n")
+	if len([]rune(detailedHeader)) > maxDetailedHeaderLen {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("detailed header too long (max %d characters)", maxDetailedHeaderLen))
+		return
+	}
+
 	players := make([]models.Player, 0, len(req.Players))
 	for _, p := range req.Players {
 		if p.Slot < 1 || p.Slot > models.TeamSize {
@@ -285,7 +301,7 @@ func (s *Server) handleUpdateTeam(w http.ResponseWriter, r *http.Request) {
 		players = append(players, player)
 	}
 
-	if err := s.teams.Save(r.Context(), teamID, req.Name, days, scheduleTime, teamTimezones, req.EncountersEnabled, players); err != nil {
+	if err := s.teams.Save(r.Context(), teamID, req.Name, days, scheduleTime, teamTimezones, req.EncountersEnabled, signupNote, detailedHeader, players); err != nil {
 		log.Printf("update team: %v", err)
 		writeError(w, http.StatusInternalServerError, "could not update team")
 		return
