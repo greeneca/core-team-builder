@@ -51,17 +51,23 @@ hit CORS). The JS is split into:
 
 - `js/api.js` — fetch wrapper, token storage, and endpoint helpers (the `api`
   client object only — no domain data).
-- `js/data.js` — all shared reference data + display helpers: roles, classes,
-  races, share roles, days, timezone/schedule helpers, subclassing skill lines
-  and class masteries, and the ESO encounter master/seed data (boss names grouped
-  by trial, gear sets with tooltips, skills, potions, mundus stones, weapon lines,
-  blue CP) with lookup helpers. Also holds the `BUFFS` list +
-  `computeBuffCoverage()`, the crit model (`CRIT_*` source tables +
-  `computeCritCoverage()`), and the penetration model (`PEN_*` source tables +
-  `computePenCoverage()`). Buffs, crit, and penetration are frontend-only
-  reference data; coverage is computed from the roster build + the selected
-  encounter's loadout — see `docs/AGENT_CONTEXT.md` "Buffs model", "Crit damage
-  model", and "Penetration model".
+- `js/gear-skills.js` — the ESO gear-set and skill (ability) catalogs
+  (`GEAR_SET_GROUPS` / `GEAR_SETS`, `SKILL_GROUPS` / `SKILLS`, and
+  `GEAR_ABBREVIATIONS`), split out from `data.js` so these frequently-updated
+  tables are easy to edit in isolation. **Must load before `data.js`** (the
+  lookups/helpers there consume these globals).
+- `js/data.js` — the rest of the shared reference data + display helpers: roles,
+  classes, races, share roles, days, timezone/schedule helpers, subclassing skill
+  lines and class masteries, and the remaining ESO encounter master/seed data
+  (boss names grouped by trial, potions, mundus stones, weapon lines, blue CP)
+  plus the gear/skill lookup helpers (which consume the catalogs from
+  `gear-skills.js`). Also holds the `BUFFS` list + `computeBuffCoverage()`, the
+  crit model (`CRIT_*` source tables + `computeCritCoverage()`), and the
+  penetration model (`PEN_*` source tables + `computePenCoverage()`). Buffs,
+  crit, and penetration are frontend-only reference data; coverage is computed
+  from the roster build + the selected encounter's loadout — see
+  `docs/AGENT_CONTEXT.md` "Buffs model", "Crit damage model", and "Penetration
+  model".
 - `js/components.js` — reusable, framework-free UI components
   (`createSearchableSelect`: a search box with optional group headers, used by
   the loadout gear/skills pickers) plus `initTooltips`: an app-wide floating

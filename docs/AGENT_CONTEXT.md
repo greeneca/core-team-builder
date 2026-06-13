@@ -278,7 +278,9 @@ column; the `User` JSON model hides it (`json:"-"`).
   searchable dropdowns, labels, and gear tooltips live entirely in the frontend
   master data (`GEAR_SET_GROUPS` — gear grouped by set type (5pc, monster,
   arena, mythic) — and `SKILL_GROUPS` — skills grouped by skill line — in
-  `data.js`, each with a flat `GEAR_SETS`/`SKILLS` derived from it for lookups);
+  `frontend/js/gear-skills.js` (split out from `data.js` for ease of updating;
+  loaded before it), each with a flat `GEAR_SETS`/`SKILLS` derived from it for
+  lookups);
   unknown keys fall back to the raw value. Both pickers use the in-house
   `createSearchableSelect` component (`js/components.js`) — a dropdown with full
   free-text search **and** group headers. Skills supply one header per skill

@@ -58,13 +58,17 @@ Consistent conventions across the codebase. Keep this in sync with reality.
   before the entry script. Keep concerns separated:
   - `api.js` — **only** the `api` client object (token storage + endpoint
     helpers). No domain data lives here.
-  - `data.js` — all shared reference data + display helpers: roles, classes,
-    races, share roles, days, timezone/schedule helpers, the subclassing skill
-    lines and class masteries (+ option/lookup helpers), and the ESO encounter
-    master/seed data (boss names grouped by trial, gear sets with tooltips,
-    skills grouped by skill line, potions, mundus stones, weapon lines, blue CP,
-    extra penetration sources). Also the `BUFFS`/`CRIT_*`/`PEN_*` source tables
-    and their coverage calculators. Keys mirror the backend allow-lists in
+  - `gear-skills.js` — the ESO gear-set and skill (ability) catalogs
+    (`GEAR_SET_GROUPS`/`GEAR_SETS`, `SKILL_GROUPS`/`SKILLS`, `GEAR_ABBREVIATIONS`),
+    split out from `data.js` so these frequently-updated tables are easy to edit.
+    **Loads before `data.js`**, which consumes these globals.
+  - `data.js` — the rest of the shared reference data + display helpers: roles,
+    classes, races, share roles, days, timezone/schedule helpers, the subclassing
+    skill lines and class masteries (+ option/lookup helpers), and the remaining
+    ESO encounter master/seed data (boss names grouped by trial, potions, mundus
+    stones, weapon lines, blue CP, extra penetration sources) plus the gear/skill
+    lookup helpers. Also the `BUFFS`/`CRIT_*`/`PEN_*` source tables and their
+    coverage calculators. Keys mirror the backend allow-lists in
     `internal/models` (`eso.go`, `encounter.go`).
   - `components.js` — reusable, framework-free UI components
     (`createSearchableSelect`, `initTooltips`). Tooltips are shown via a
