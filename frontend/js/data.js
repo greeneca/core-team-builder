@@ -402,6 +402,17 @@ function masteryDesc(cls, value) {
   return m ? m.desc : "";
 }
 
+// masteryClass(value): the class (lowercase key, e.g. "dragonknight") that owns
+// a class-mastery value, or "" if unknown. Class masteries are class-locked, so
+// this also identifies which class supplies any mastery-sourced group buff.
+function masteryClass(value) {
+  if (!value) return "";
+  for (const [cls, list] of Object.entries(MASTERIES_BY_CLASS)) {
+    if (list.some((m) => m.value === value)) return cls;
+  }
+  return "";
+}
+
 // --- Encounters: names, gear sets, skills ---
 
 // Encounter names, grouped for an <optgroup> picker. Each `names` entry's
@@ -749,8 +760,10 @@ const BUFFS = [
   // and the Templar Radiant Aura.
   { value: "minor_fei", label: "Minor Fortitude, Endurance, Intellect", desc: "Increases group Health, Stamina, and Magicka Recovery.",
     sources: { skills: ["arcanists_domain", "reconstructive_domain", "zenas_empowering_disc", "radiant_aura"] } },
+  // Minor Evasion: the Arcanist Soldier of Apocrypha passive shares it with the
+  // group, plus the Abyssal Brace set.
   { value: "minor_evasion", label: "Minor Evasion", desc: "Reduces group damage taken from area attacks.",
-    sources: { gear: ["abyssal_brace"] } },
+    sources: { skillLines: ["soldier_of_apocrypha"], classes: ["arcanist"], gear: ["abyssal_brace"] } },
   // --- Group survival/support buffs (several only come from class masteries) ---
   // Major Protection (−10% group damage taken): DK Lead From the Front mastery,
   // the Warden Sleet Storm ultimate line, and supporting sets.
@@ -806,7 +819,13 @@ function buffSourceLabel(category, key) {
     case "gear": return gearLabel(key);
     case "skills": return skillLabel(key);
     case "potions": return potionLabel(key);
-    case "masteries": return labelFor(MASTERIES, key);
+    // Class masteries are class-locked, so name the supplying class in the label
+    // (e.g. "Lead From the Front (Dragonknight)") for the buff tooltips/sources.
+    case "masteries": {
+      const name = labelFor(MASTERIES, key);
+      const cls = masteryClass(key);
+      return cls ? `${name} (${labelFor(CLASSES, cls)})` : name;
+    }
     case "classes": return labelFor(CLASSES, key);
     case "skillLines": return labelFor(SKILL_LINES, key);
     default: return key;
