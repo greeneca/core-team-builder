@@ -49,6 +49,7 @@ type Server struct {
 	settings         *models.SettingsStore
 	refreshTokens    *models.RefreshTokenStore
 	passwordResets   *models.PasswordResetStore
+	discord          *models.DiscordStore
 	tokens           *auth.TokenManager
 	mailer           email.Mailer
 	corsOrigin       string
@@ -65,6 +66,7 @@ type Config struct {
 	Settings         *models.SettingsStore
 	RefreshTokens    *models.RefreshTokenStore
 	PasswordResets   *models.PasswordResetStore
+	Discord          *models.DiscordStore
 	Tokens           *auth.TokenManager
 	Mailer           email.Mailer
 	CORSOrigin       string
@@ -82,6 +84,7 @@ func New(c Config) *Server {
 		settings:         c.Settings,
 		refreshTokens:    c.RefreshTokens,
 		passwordResets:   c.PasswordResets,
+		discord:          c.Discord,
 		tokens:           c.Tokens,
 		mailer:           c.Mailer,
 		corsOrigin:       c.CORSOrigin,
@@ -108,6 +111,11 @@ func (s *Server) Routes() http.Handler {
 		return s.tokens.Middleware(h)
 	}
 	mux.Handle("GET /api/me", protected(s.handleMe))
+
+	// Discord account linking (per-user).
+	mux.Handle("POST /api/discord/link-code", protected(s.handleDiscordLinkCode))
+	mux.Handle("GET /api/discord/link", protected(s.handleGetDiscordLink))
+	mux.Handle("DELETE /api/discord/link", protected(s.handleDeleteDiscordLink))
 
 	// Admin-only user/settings management.
 	mux.Handle("GET /api/admin/users", protected(s.handleListUsers))

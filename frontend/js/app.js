@@ -2757,6 +2757,75 @@
     }
   });
 
+  // --- Discord account linking ---
+  // The topbar "Link Discord" button opens a modal that shows the current link
+  // status and lets the user generate a one-time code to type into Discord via
+  // /coreteam link (matching the bot's account-link flow).
+  async function openDiscordModal() {
+    el("discord-modal").classList.remove("is-hidden");
+    el("discord-code").textContent = "—";
+    el("discord-command-hint").textContent = "";
+    await refreshDiscordStatus();
+  }
+
+  function closeDiscordModal() {
+    el("discord-modal").classList.add("is-hidden");
+  }
+
+  async function refreshDiscordStatus() {
+    const statusEl = el("discord-status");
+    statusEl.textContent = "Checking your link status…";
+    try {
+      const link = await api.discordLink();
+      if (link && link.linked) {
+        el("discord-link-section").classList.add("is-hidden");
+        el("discord-linked-section").classList.remove("is-hidden");
+        el("discord-linked-name").textContent = link.discord_username || "your Discord account";
+        statusEl.textContent = "Your account is linked to Discord.";
+      } else {
+        el("discord-link-section").classList.remove("is-hidden");
+        el("discord-linked-section").classList.add("is-hidden");
+        statusEl.textContent = "Not linked yet.";
+      }
+    } catch (err) {
+      statusEl.textContent = "";
+      handleError(err);
+    }
+  }
+
+  el("link-discord-btn").addEventListener("click", openDiscordModal);
+  el("discord-modal-close").addEventListener("click", closeDiscordModal);
+  el("discord-modal").addEventListener("click", (e) => {
+    if (e.target === el("discord-modal")) closeDiscordModal();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !el("discord-modal").classList.contains("is-hidden")) {
+      closeDiscordModal();
+    }
+  });
+
+  el("discord-generate-btn").addEventListener("click", async () => {
+    try {
+      const res = await api.discordLinkCode();
+      el("discord-code").textContent = res.code;
+      el("discord-command-hint").textContent =
+        `Run ${res.command} in your Discord server. The code expires shortly.`;
+    } catch (err) {
+      handleError(err);
+    }
+  });
+
+  el("discord-unlink-btn").addEventListener("click", async () => {
+    if (!confirm("Unlink your Discord account?")) return;
+    try {
+      await api.discordUnlink();
+      showMessage("Discord account unlinked", "success");
+      await refreshDiscordStatus();
+    } catch (err) {
+      handleError(err);
+    }
+  });
+
   el("admin-registration-toggle").addEventListener("change", async (e) => {
     try {
       await api.setRegistrationEnabled(e.target.checked);

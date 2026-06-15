@@ -50,7 +50,8 @@ func run() error {
 	settings := models.NewSettingsStore(pool)
 	refreshTokens := models.NewRefreshTokenStore(pool)
 	passwordResets := models.NewPasswordResetStore(pool)
-	startTokenCleanup(ctx, refreshTokens, passwordResets, time.Hour)
+	discord := models.NewDiscordStore(pool)
+	startTokenCleanup(ctx, refreshTokens, passwordResets, discord, time.Hour)
 	tokens := auth.NewTokenManager(cfg.JWTSecret, cfg.JWTTTL, cfg.RefreshTTL)
 
 	var mailer email.Mailer
@@ -76,6 +77,7 @@ func run() error {
 		Settings:         settings,
 		RefreshTokens:    refreshTokens,
 		PasswordResets:   passwordResets,
+		Discord:          discord,
 		Tokens:           tokens,
 		Mailer:           mailer,
 		CORSOrigin:       cfg.CORSOrigin,
@@ -113,7 +115,7 @@ func run() error {
 // an initial sweep on startup so a long-down deployment doesn't wait a full
 // interval to catch up. The deletes are idempotent, so running it on multiple
 // replicas is harmless.
-func startTokenCleanup(ctx context.Context, refreshTokens *models.RefreshTokenStore, passwordResets *models.PasswordResetStore, every time.Duration) {
+func startTokenCleanup(ctx context.Context, refreshTokens *models.RefreshTokenStore, passwordResets *models.PasswordResetStore, discord *models.DiscordStore, every time.Duration) {
 	sweep := func() {
 		// Bound each sweep so a slow query can't hang on shutdown.
 		sweepCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -123,6 +125,9 @@ func startTokenCleanup(ctx context.Context, refreshTokens *models.RefreshTokenSt
 		}
 		if err := passwordResets.DeleteExpired(sweepCtx); err != nil {
 			log.Printf("password reset cleanup: %v", err)
+		}
+		if err := discord.DeleteExpiredLinkCodes(sweepCtx); err != nil {
+			log.Printf("discord link code cleanup: %v", err)
 		}
 	}
 

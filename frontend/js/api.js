@@ -172,6 +172,24 @@ const api = {
     return this.request("/api/me");
   },
 
+  // --- Discord account linking ---
+
+  // Generate a one-time code to type into Discord via /coreteam link.
+  // Returns { code, command, expires_at }.
+  discordLinkCode() {
+    return this.request("/api/discord/link-code", { method: "POST" });
+  },
+
+  // Current user's Discord link status: { linked, discord_username }.
+  discordLink() {
+    return this.request("/api/discord/link");
+  },
+
+  // Remove the current user's Discord link.
+  discordUnlink() {
+    return this.request("/api/discord/link", { method: "DELETE" });
+  },
+
   // Public: whether self-registration is currently open (login page reads this).
   registrationStatus() {
     return this.request("/api/registration-status");

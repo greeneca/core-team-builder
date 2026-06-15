@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Dashboard — Core Team Builder</title>
-  <link rel="stylesheet" href="css/styles.css?v=77" />
+  <link rel="stylesheet" href="css/styles.css?v=78" />
 </head>
 <body>
   <div id="message" class="toast is-hidden" role="alert" aria-live="assertive"></div>
@@ -19,6 +19,7 @@
       <label class="toggle" title="Show set/skill descriptions on hover">
         <input type="checkbox" id="tooltips-toggle" /> Tooltips
       </label>
+      <button id="link-discord-btn" class="btn btn--ghost" type="button">Link Discord</button>
       <button id="manage-users-btn" class="btn btn--ghost is-hidden" type="button">Manage Users</button>
       <button id="logout-btn" class="btn btn--ghost" type="button">Sign Out</button>
     </div>
@@ -364,6 +365,34 @@
       </div>
     </div>
 
+    <!-- Discord account linking modal -->
+    <div id="discord-modal" class="modal-overlay is-hidden" role="dialog" aria-modal="true" aria-labelledby="discord-modal-title">
+      <div class="modal">
+        <div class="modal-head">
+          <h2 id="discord-modal-title" style="margin: 0;">Link Discord</h2>
+          <button id="discord-modal-close" class="btn btn--ghost btn--sm" type="button" aria-label="Close">✕</button>
+        </div>
+
+        <p class="text-muted mt-2" id="discord-status">Checking your link status…</p>
+
+        <div id="discord-link-section">
+          <p class="mt-2">
+            Generate a one-time code, then run this in your Discord server (the bot must be invited):
+          </p>
+          <div class="discord-code-row mt-2">
+            <code id="discord-code" class="discord-code">—</code>
+            <button id="discord-generate-btn" class="btn btn--primary btn--sm" type="button">Generate code</button>
+          </div>
+          <p class="text-muted mt-2" id="discord-command-hint"></p>
+        </div>
+
+        <div id="discord-linked-section" class="is-hidden mt-2">
+          <p>Linked as <strong id="discord-linked-name">…</strong>.</p>
+          <button id="discord-unlink-btn" class="btn btn--ghost btn--sm" type="button">Unlink</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Sharing view (own page) -->
     <section id="share-view" class="is-hidden">
       <button id="share-back-btn" class="btn btn--ghost" type="button">← Back to teams</button>
@@ -388,10 +417,10 @@
     </section>
   </main>
 
-  <script src="js/api.js?v=77"></script>
+  <script src="js/api.js?v=78"></script>
   <script src="js/gear-skills.js?v=79"></script>
   <script src="js/data.js?v=80"></script>
   <script src="js/components.js?v=77"></script>
-  <script src="js/app.js?v=80"></script>
+  <script src="js/app.js?v=81"></script>
 </body>
 </html>

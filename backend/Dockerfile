@@ -14,10 +14,11 @@ RUN go mod download
 
 COPY . .
 
-# Build both binaries (server + seed) statically. -trimpath + stripped symbols
-# keep the binaries small and free of local path leakage.
+# Build all binaries (server + seed + bot) statically. -trimpath + stripped
+# symbols keep the binaries small and free of local path leakage.
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/server ./cmd/server
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/seed ./cmd/seed
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/bot ./cmd/bot
 
 # ---- Runtime stage ----
 # scratch has no shell/package manager/userland, minimizing the attack surface.
@@ -27,6 +28,7 @@ FROM scratch
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=build /out/server /app/server
 COPY --from=build /out/seed /app/seed
+COPY --from=build /out/bot /app/bot
 
 # Run as a non-root numeric UID/GID (no /etc/passwd needed on scratch).
 USER 10001:10001

@@ -37,7 +37,15 @@ Core Team Builder is a three-tier application:
             │     password_resets, teams, team_members,     │
             │     players, encounters, encounter_loadouts,  │
             │     groupings, grouping_groups,               │
-            │     grouping_members                          │
+            │     grouping_members, discord_link_codes,     │
+            │     discord_channels                          │
+            └───────────────▲─────────────────────────────┘
+                            │ pgx (shares stores)
+            ┌───────────────┴─────────────────────────────┐
+            │  bot (Go, discordgo) — optional, no inbound  │
+            │   • /coreteam slash command (link/setup/     │
+            │     post/status/unset) + Get my details DM    │
+            │   • outbound WebSocket to the Discord gateway │
             └─────────────────────────────────────────────┘
 ```
 
@@ -85,13 +93,22 @@ method-aware patterns, Go 1.22+). Layout:
 
 - `cmd/server` — HTTP server entrypoint with graceful shutdown.
 - `cmd/seed` — one-shot migration + test-user seeder.
+- `cmd/bot` — the Discord bot (`discordgo`): registers the `/coreteam` slash
+  command and handles its component/modal interactions. Shares the same stores
+  and DB; opens only an outbound gateway connection (no inbound port). Run via
+  the `bot` compose profile. See `docs/AGENT_CONTEXT.md` "Discord bot".
 - `internal/config` — environment configuration (12-factor).
 - `internal/db` — pgx pool with startup retry.
 - `internal/models` — domain types + data access (`UserStore`, `TeamStore`,
   `EncounterStore`, `GroupingStore`, `RefreshTokenStore`, `PasswordResetStore`,
-  and `SettingsStore` for the `app_settings` key/value store). ESO game reference
-  data and the player-build validators live in `eso.go`, kept separate from the
-  persistence stores.
+  `DiscordStore` (link codes + channel bindings), and `SettingsStore` for the
+  `app_settings` key/value store). ESO game reference data and the player-build
+  validators live in `eso.go`, kept separate from the persistence stores.
+- `internal/esoref` — code-generated ESO labels/abbreviations
+  (`data_gen.go`, produced by `tools/gen-esoref/gen.js` from the frontend's
+  `gear-skills.js`/`data.js`) so the bot renders the same names as the web UI.
+- `internal/discordfmt` — Go ports of the frontend Discord formatters
+  (condensed overview + per-player detail) used by the bot.
 - `internal/auth` — bcrypt hashing, access-JWT issuing/parsing, opaque-token
   generation (refresh + reset), auth middleware.
 - `internal/email` — outbound mail abstraction (`Mailer`): an `SMTPMailer`
@@ -124,6 +141,8 @@ PostgreSQL. The schema in `migrations/*.sql` (e.g. `001_init.sql`,
 | email          | varchar(255)  | unique, not null                   |
 | password_hash  | text          | bcrypt hash, not null              |
 | is_admin       | boolean       | default `false`; `015_admin_and_settings.sql` |
+| discord_user_id  | text        | linked Discord user ID, unique when set; `027_discord.sql` |
+| discord_username | text        | linked Discord display name (default `''`); `027_discord.sql` |
 | created_at     | timestamptz   | default `now()`                    |
 | updated_at     | timestamptz   | auto-updated via trigger           |
 
@@ -315,6 +334,38 @@ holds slot assignments with PK `(grouping_id, player_slot)`, which guarantees a
 player is in at most one group per grouping. Both cascade on grouping delete.
 Managed via `GroupingStore`; see `docs/AGENT_CONTEXT.md` "Groupings model".
 
+### `discord_link_codes` + `discord_channels`
+
+Back the Discord bot (`027_discord.sql`). A **link code** is a short, opaque,
+single-use code generated in the web UI to link a Discord identity to an app
+account; only its SHA-256 hash is stored (mirrors `password_resets`).
+
+`discord_link_codes`:
+
+| column     | type        | notes                                          |
+|------------|-------------|------------------------------------------------|
+| id         | bigint (IDENTITY) | primary key                              |
+| user_id    | bigint      | FK → `users(id)`, cascade                      |
+| code_hash  | text        | hex SHA-256 of the link code, unique           |
+| expires_at | timestamptz | code expiry (15 min)                           |
+| used_at    | timestamptz | set when consumed (NULL while unused)          |
+| created_at | timestamptz | default `now()`                                |
+
+`discord_channels` binds a Discord channel to a team (so `/coreteam post` knows
+which roster to render):
+
+| column         | type        | notes                                      |
+|----------------|-------------|--------------------------------------------|
+| guild_id       | text        | Discord guild (server) ID                  |
+| channel_id     | text        | primary key                                |
+| team_id        | bigint      | FK → `teams(id)`, cascade                  |
+| set_by_user_id | bigint      | FK → `users(id)`, set null on delete       |
+| created_at     | timestamptz | default `now()`                            |
+| updated_at     | timestamptz | bump on rebind                             |
+
+Managed via `DiscordStore`; the hourly sweep prunes expired/used link codes. See
+`docs/AGENT_CONTEXT.md` "Discord bot".
+
 ## Authentication & security
 
 - **Hashing**: bcrypt (cost 12) with per-hash random salt. Minimum password
@@ -346,9 +397,12 @@ Managed via `GroupingStore`; see `docs/AGENT_CONTEXT.md` "Groupings model".
 
 ## Deployment model
 
-`docker-compose.yml` defines four services: `db`, `backend`, `seed` (one-shot),
-and `frontend`. The backend waits for the database healthcheck before starting.
-All services are attached to a single user-defined bridge network (`ctb-net`),
-which isolates the project from other compose stacks and lets the services reach
-each other by service name (e.g. `db:5432`, `backend:8080`). Only the frontend
-publishes a host port; `db` and `backend` are reachable on `ctb-net` only.
+`docker-compose.yml` defines five services: `db`, `backend`, `seed` (one-shot),
+`frontend`, and `bot` (Discord bot, behind the `bot` compose profile so a plain
+`docker compose up` does not start it). The backend waits for the database
+healthcheck before starting. All services are attached to a single user-defined
+bridge network (`ctb-net`), which isolates the project from other compose stacks
+and lets the services reach each other by service name (e.g. `db:5432`,
+`backend:8080`). Only the frontend publishes a host port; `db`, `backend`, and
+`bot` are reachable on `ctb-net` only (the bot also makes an outbound connection
+to the Discord gateway). Start the bot with `docker compose --profile bot up`.

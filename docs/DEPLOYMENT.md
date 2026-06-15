@@ -64,6 +64,9 @@ Full variable reference:
 | `SEED_USERNAME`     | seed      | Bootstrap admin username                            |
 | `SEED_EMAIL`        | seed      | Bootstrap admin email                              |
 | `SEED_PASSWORD`     | seed      | **Strong, ≥ 12 chars.** Bootstrap admin password   |
+| `DISCORD_BOT_TOKEN` | bot       | Discord bot token (only needed to run the bot)     |
+| `DISCORD_APP_ID`    | bot       | Discord application/client ID (optional)           |
+| `DISCORD_GUILD_ID`  | bot       | Register commands to one guild (optional; empty = global) |
 
 ---
 
@@ -207,7 +210,42 @@ The `seed` service creates a permanent **admin** account. After bootstrapping:
 
 ---
 
-## 8. Hardening already baked in (no action needed)
+## 8. Discord bot (optional)
+
+The Discord bot is a separate container behind the `bot` compose profile (so it
+is **not** started by a plain `docker compose up`). It opens an outbound
+connection to the Discord gateway and reaches the database over `ctb-net`; it
+publishes **no** host port and is independent of the upstream nginx / TLS setup.
+
+Discord-side setup (one-time):
+
+- [ ] Create an application at <https://discord.com/developers/applications>, then
+      add a **Bot** to it and copy the **bot token** into `DISCORD_BOT_TOKEN`.
+- [ ] Copy the application's **Application (client) ID** into `DISCORD_APP_ID`
+      (optional — the bot falls back to its own user ID for command registration).
+- [ ] Invite the bot to your server with the **`bot`** and
+      **`applications.commands`** OAuth2 scopes (the developer portal's URL
+      generator builds the invite link). No special gateway intents/permissions
+      are required beyond sending messages and using slash commands.
+- [ ] (Dev/fast) set `DISCORD_GUILD_ID` to your server's ID so `/coreteam`
+      registers instantly to that guild. Leave it empty in production to register
+      globally (the first global registration can take up to ~1h to appear).
+
+Run it:
+
+- [ ] `docker compose --profile bot up -d bot` (after `db`/migrations are up).
+- [ ] In Discord, a user runs `/coreteam link code:<code>` with a code generated
+      from the web UI ("Link Discord" button), then `/coreteam setup` in a channel
+      to bind a team, and `/coreteam post` to share the trial. See
+      `docs/AGENT_CONTEXT.md` "Discord bot".
+
+> Treat `DISCORD_BOT_TOKEN` like any other secret (keep it in `.env`, `chmod 600`).
+> Rotating it in the developer portal requires updating `.env` and restarting the
+> bot container.
+
+---
+
+## 9. Hardening already baked in (no action needed)
 
 - TLS-adjacent: CSP + security headers, real-IP support, nginx rate limiting
   (auth / share / general zones), edge + backend body caps.

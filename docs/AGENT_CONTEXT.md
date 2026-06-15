@@ -28,7 +28,9 @@ condensed list) to the clipboard. The UI autosaves changes (no Save buttons).
 
 - Go module path: `github.com/core-team-builder/backend` (Go 1.25).
 - Key deps: `jackc/pgx/v5` (Postgres), `golang-jwt/jwt/v5` (tokens),
-  `golang.org/x/crypto/bcrypt` (passwords).
+  `golang.org/x/crypto/bcrypt` (passwords), `bwmarrin/discordgo` (Discord bot).
+- Binaries (`backend/cmd/`): `server` (API), `seed` (migrations + test user),
+  `bot` (Discord bot — see "Discord bot" below).
 
 ## How auth works (current)
 
@@ -372,6 +374,50 @@ column; the `User` JSON model hides it (`json:"-"`).
   without re-rendering to preserve focus. `renderGroupings` reads the live roster
   for slot labels. Groupings are also included in the Discord export.
 
+## Discord bot (current)
+
+- **What it is** (`027_discord.sql`): a separate Go binary (`backend/cmd/bot`,
+  built into the same image and run via the `bot` compose **profile**) that
+  connects out to the Discord gateway with `bwmarrin/discordgo`. It shares the
+  database (same stores) but exposes **no inbound port**. It registers one slash
+  command, `/coreteam`, with subcommands:
+  - `link code:<code>` — links the invoking Discord user to an app account using
+    a one-time code generated in the web UI.
+  - `setup` — (Manage Channels) binds the current channel to one of the linked
+    user's teams, or creates a new team. Shows a select menu; "Create a new team"
+    opens a modal for the name.
+  - `post` — posts the team's condensed **overview** (roster by role with
+    abbreviated gear, schedule, groupings) with a **Get my details** button.
+  - `status` / `unset` — show / remove the channel's team binding.
+  - **Get my details** button → matches the presser to a roster slot (by Discord
+    ID/mention in `players.discord_handle`, else case-insensitive username/global
+    name) and DMs them their full per-encounter loadout (falls back to an
+    ephemeral reply if DMs are closed).
+- **Account linking**: `users.discord_user_id` (unique) / `discord_username` link
+  an app account to a Discord identity. The web UI ("Link Discord" topbar button,
+  `#discord-modal`) calls `POST /api/discord/link-code` to mint a short,
+  single-use code stored **only as a SHA-256 hash** in `discord_link_codes`
+  (15-min TTL, mirrors `password_resets`); the bot's `/coreteam link` consumes it
+  (`DiscordStore.ConsumeLinkCode` → `LinkUser`). `GET`/`DELETE /api/discord/link`
+  report/clear the link. The hourly `startTokenCleanup` sweep also prunes expired
+  link codes.
+- **Channel bindings**: `discord_channels` maps `channel_id` → `team_id` (upsert;
+  `DiscordStore.BindChannel`/`GetChannelTeam`/`UnbindChannel`).
+- **Label data (codegen)**: the bot formats posts using
+  `backend/internal/discordfmt` (Go ports of the JS `formatCondensed` /
+  `formatDetailed` formatters), which reads labels/abbreviations from
+  `backend/internal/esoref`. `esoref/data_gen.go` is **code-generated** from the
+  frontend's single-source data (`frontend/js/gear-skills.js` + `data.js`) by
+  `tools/gen-esoref/gen.js` — run `node tools/gen-esoref/gen.js` (or `go generate
+  ./internal/esoref`) whenever that frontend data changes, then commit the result.
+- **Config**: `DISCORD_BOT_TOKEN` (required to run the bot), optional
+  `DISCORD_APP_ID` and `DISCORD_GUILD_ID` (set the guild ID for instant,
+  dev-friendly command registration; empty = global). Loaded in `config.go`
+  (`Config.Discord`), wired via `docker-compose.yml` + `.env`. Run the bot with
+  `docker compose --profile bot up`. See `docs/DEPLOYMENT.md` for the Discord
+  developer-portal setup (create app + bot, invite with the `bot` and
+  `applications.commands` scopes).
+
 ## Detail page layout (collapsible sections)
 
 - The team detail page is a stack of **collapsible** cards (`.collapsible` /
@@ -519,6 +565,11 @@ generally not triggered (the backend still sets CORS headers as defense).
   `js/data.js`; reusable widgets go in `js/components.js`.
 - **Config**: env vars are read in `backend/internal/config/config.go` and wired
   through `docker-compose.yml` + `.env`.
+- **Discord bot**: command/interaction handlers live in `backend/cmd/bot`
+  (`main.go` wiring, `commands.go` handlers). Post formatting lives in
+  `backend/internal/discordfmt`; the labels it uses are code-generated into
+  `backend/internal/esoref/data_gen.go` from the frontend JS — re-run
+  `node tools/gen-esoref/gen.js` after changing `gear-skills.js`/`data.js`.
 
 ## Conventions
 
@@ -536,10 +587,12 @@ generally not triggered (the backend still sets CORS headers as defense).
 ## Common commands
 
 ```bash
-docker compose up --build          # run the whole stack
+docker compose up --build          # run the whole stack (without the bot)
+docker compose --profile bot up    # also run the Discord bot (needs DISCORD_BOT_TOKEN)
 docker compose run --rm seed       # (re)apply migrations + ensure test user
-cd backend && go build ./...       # compile backend
+cd backend && go build ./...       # compile backend (server + seed + bot)
 cd backend && go vet ./...         # static checks
+node tools/gen-esoref/gen.js       # regenerate Go label data from frontend JS
 ```
 
 ## Status / TODO ideas
@@ -554,6 +607,8 @@ cd backend && go vet ./...         # static checks
 - [x] Groupings: per-team named sets of numbered groups (e.g. ice cages).
 - [x] Discord signup export (detailed post / condensed list).
 - [x] Admin users + user management (list/add/remove/promote) + registration toggle.
+- [x] Discord bot: `/coreteam` post overview + DM per-player details, account
+      linking, channel→team binding (`backend/cmd/bot`).
 - [x] Rate limiting on auth endpoints (at the nginx edge; see `docs/DEPLOYMENT.md`).
 - [ ] Expand the gear-set/skill/boss seed data to full ESO coverage.
 - [ ] Tests (handlers, auth, models).

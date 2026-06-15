@@ -42,6 +42,27 @@ type Config struct {
 	// SMTP holds the outbound email configuration. When SMTP.Host is empty,
 	// emails are logged instead of sent (suitable for local development).
 	SMTP SMTPConfig
+
+	// Discord holds the Discord bot configuration. Only the bot binary requires
+	// these; the API server ignores them.
+	Discord DiscordConfig
+}
+
+// DiscordConfig holds the Discord bot settings.
+type DiscordConfig struct {
+	// BotToken authenticates the bot to the Discord gateway. Required by the bot.
+	BotToken string
+	// AppID is the Discord application (client) ID, used for command registration.
+	AppID string
+	// GuildID, when set, registers slash commands to that single guild for
+	// instant availability (dev). Empty registers commands globally (can take up
+	// to ~1h to propagate the first time).
+	GuildID string
+}
+
+// Configured reports whether the bot has the minimum settings to start.
+func (c DiscordConfig) Configured() bool {
+	return c.BotToken != ""
 }
 
 // SMTPConfig holds outbound email (SMTP) settings.
@@ -92,6 +113,11 @@ func Load() (*Config, error) {
 			Username: getEnv("SMTP_USERNAME", ""),
 			Password: getEnv("SMTP_PASSWORD", ""),
 			From:     getEnv("SMTP_FROM", ""),
+		},
+		Discord: DiscordConfig{
+			BotToken: getEnv("DISCORD_BOT_TOKEN", ""),
+			AppID:    getEnv("DISCORD_APP_ID", ""),
+			GuildID:  getEnv("DISCORD_GUILD_ID", ""),
 		},
 	}
 
