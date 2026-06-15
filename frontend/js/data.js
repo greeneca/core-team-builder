@@ -690,35 +690,88 @@ const LOADOUT_TYPES = {
 //   - skillLines  : a subclassed player's skill-line keys (roster build)
 //
 // A buff is "met" for an encounter if at least one player provides at least one
-// of its sources. The source keys below are SENSIBLE PLACEHOLDERS — adjust them
-// to match the exact ESO sources as needed (the structure stays the same).
+// of its sources.
+//
+// GROUP-WIDE RULE: every source listed here must actually apply the buff to the
+// whole group (the source's tooltip grants it to "you and your group members /
+// allies"), OR it must be an enemy DEBUFF (Breach, Brittle, Vulnerability, …),
+// which benefits the whole team no matter who applies it. Self-only buffs — the
+// ones each player maintains for themselves (e.g. personal Major Resolve from
+// Boundless Storm, a personal weapon/spell-power potion) — are intentionally NOT
+// tracked here, because slotting them on one player does not cover the group.
+//
+// CLASS-PASSIVE SOURCES: a few skill lines passively share a buff with the
+// group, so we treat the buff as covered if any player runs that line. These are
+// detected via `skillLines` (a subclassed player who slotted the line) AND
+// `classes` (a base, non-subclassed player of that class always has the line):
+//   - Green Balance  (Warden)        → group Minor Toughness
+//   - Draconic Power (Dragonknight)  → group Minor Brutality
+//   - Assassination  (Nightblade)    → group Minor Savagery
 const BUFFS = [
-  { value: "major_resolve", label: "Major Resolve", desc: "Increases Physical and Spell Resistance.",
-    sources: { skills: ["boundless_storm"] } },
-  { value: "minor_toughness", label: "Minor Toughness", desc: "Increases Max Health (Undaunted abilities slotted).",
-    sources: { skills: ["inner_rage", "energy_orb"] } },
-  { value: "major_brutality_sorcery", label: "Major Brutality and Sorcery", desc: "Increases Weapon and Spell Damage.",
-    sources: { skills: ["hurricane", "degeneration"], potions: ["weapon_power_potion", "spell_power_potion"] } },
-  { value: "minor_brutality_sorcery", label: "Minor Brutality or Minor Sorcery", desc: "Increases Weapon or Spell Damage.",
-    sources: { potions: ["weapon_power_potion", "spell_power_potion"] } },
-  { value: "minor_savagery_prophecy", label: "Minor Savagery or Prophecy", desc: "Increases Weapon or Spell Critical.",
-    sources: { skills: ["camouflaged_hunter", "inner_light", "barbed_trap"], potions: ["weapon_power_potion", "spell_power_potion"] } },
+  // Major Resolve has true group-wide providers (the Warden Frost Cloak line and
+  // the Mighty Glacier set apply it to "you and your grouped allies").
+  { value: "major_resolve", label: "Major Resolve", desc: "Increases group Physical and Spell Resistance.",
+    sources: { skills: ["frost_cloak", "expansive_frost_cloak", "ice_fortress", "mend_spirit"], gear: ["mighty_glacier"] } },
+  // Minor Toughness shared to the group by the Warden Green Balance passive.
+  { value: "minor_toughness", label: "Minor Toughness", desc: "Increases group Max Health by 10%.",
+    sources: { skillLines: ["green_balance"], classes: ["warden"] } },
+  // Major Brutality & Sorcery: only the Dragonknight Igneous Weapons line shares
+  // it with grouped allies; personal potions/Degeneration/Surge are self-only.
+  { value: "major_brutality_sorcery", label: "Major Brutality and Sorcery", desc: "Increases group Weapon and Spell Damage.",
+    sources: { skills: ["igneous_weapons", "molten_armaments", "molten_weapons"] } },
+  // Minor Brutality shared to the group by the Dragonknight Draconic Power passive.
+  { value: "minor_brutality_sorcery", label: "Minor Brutality", desc: "Increases group Weapon Damage.",
+    sources: { skillLines: ["draconic_power"], classes: ["dragonknight"] } },
+  // Minor Savagery shared to the group by the Nightblade Assassination passive.
+  { value: "minor_savagery_prophecy", label: "Minor Savagery", desc: "Increases group Weapon Critical.",
+    sources: { skillLines: ["assassination"], classes: ["nightblade"] } },
   { value: "major_berserk", label: "Major Berserk", desc: "Increases damage done by 10%.",
-    sources: { masteries: ["lead_from_the_front"] } },
+    sources: { masteries: ["lead_from_the_front"], skills: ["summon_storm_atronach", "summon_charged_atronach", "greater_storm_atronach"] } },
+  { value: "minor_berserk", label: "Minor Berserk", desc: "Increases group damage done by 5%.",
+    sources: { skills: ["combat_prayer"], gear: ["kinras_wrath"] } },
   { value: "major_slayer", label: "Major Slayer", desc: "Increases damage to Dungeon/Trial monsters.",
-    sources: { gear: ["master_architect", "roaring_opportunist"] } },
+    sources: { gear: ["master_architect", "roaring_opportunist", "perfected_roaring_opportunist", "war_machine"] } },
   { value: "major_courage", label: "Major Courage", desc: "Increases Weapon and Spell Damage.",
-    sources: { gear: ["perfected_olorime", "spell_power_cure"], masteries: ["bright_harbinger"] } },
+    sources: { gear: ["perfected_olorime", "vestment_of_olorime", "spell_power_cure"], skills: ["ferocious_roar"] } },
   { value: "minor_courage", label: "Minor Courage", desc: "Increases Weapon and Spell Damage.",
-    sources: { gear: ["spaulder_of_ruin", "ozezan_the_inferno"] } },
-  { value: "major_vulnerability", label: "Major Vulnerability", desc: "Increases the damage enemies take.",
-    sources: { gear: ["roar_of_alkosh"] } },
+    sources: { gear: ["claw_of_yolnahkriin", "perfected_claw_of_yolnahkriin", "magma_incarnate", "pangrit_denmother", "phoenix_moth_theurge", "crusader", "fledglings_nest"], skills: ["arcanists_domain", "reconstructive_domain", "zenas_empowering_disc"] } },
+  // Enemy debuff: applied to the boss by a Necromancer Colossus ultimate or the
+  // Umbral Edge set, so the whole group benefits.
+  { value: "major_vulnerability", label: "Major Vulnerability", desc: "Increases the damage the enemy takes by 10%.",
+    sources: { skills: ["glacial_colossus", "frozen_colossus", "pestilent_colossus"], gear: ["umbral_edge"] } },
+  // Enemy debuff: the Nightblade Cutthroat's Focus mastery makes a dodged
+  // attacker take 5% more damage (20s vs monsters), benefiting the whole group.
+  { value: "cutthroats_focus", label: "Cutthroat's Focus", desc: "Increases the enemy's damage taken by 5%.",
+    sources: { masteries: ["cutthroats_focus"] } },
   { value: "heat_shock", label: "Heat Shock", desc: "Increases the target's damage taken (from Magma Fist).",
     sources: { skills: ["magma_fist"] } },
-  { value: "minor_fei", label: "Minor Fortitude, Endurance, Intellect", desc: "Increases Health, Stamina, and Magicka Recovery.",
-    sources: { potions: ["tri_restoration_potion"] } },
-  { value: "minor_evasion", label: "Minor Evasion", desc: "Reduces damage taken from area attacks.",
-    sources: { skills: ["elude"] } },
+  // Minor Fortitude/Intellect/Endurance shared to allies by the Arcanist domains
+  // and the Templar Radiant Aura.
+  { value: "minor_fei", label: "Minor Fortitude, Endurance, Intellect", desc: "Increases group Health, Stamina, and Magicka Recovery.",
+    sources: { skills: ["arcanists_domain", "reconstructive_domain", "zenas_empowering_disc", "radiant_aura"] } },
+  { value: "minor_evasion", label: "Minor Evasion", desc: "Reduces group damage taken from area attacks.",
+    sources: { gear: ["abyssal_brace"] } },
+  // --- Group survival/support buffs (several only come from class masteries) ---
+  // Major Protection (−10% group damage taken): DK Lead From the Front mastery,
+  // the Warden Sleet Storm ultimate line, and supporting sets.
+  { value: "major_protection", label: "Major Protection", desc: "Reduces group damage taken by 10%.",
+    sources: { masteries: ["lead_from_the_front"], skills: ["sleet_storm", "permafrost", "glyphic_of_the_tides"], gear: ["hagravens_garden"] } },
+  // Major Vitality (+12% group healing received / shield strength): Arcanist
+  // Erudite's Rigor mastery and the Nightblade Soul Siphon ultimate.
+  { value: "major_vitality", label: "Major Vitality", desc: "Increases group healing received and shield strength.",
+    sources: { masteries: ["erudites_rigor"], skills: ["soul_siphon"] } },
+  // Major Heroism (group Ultimate generation): Warden Bountiful Harvest mastery
+  // plus the usual support sets.
+  { value: "major_heroism", label: "Major Heroism", desc: "Grants the group 3 Ultimate every 1.5s.",
+    sources: { masteries: ["bountiful_harvest"], gear: ["drakes_rush", "transformative_hope", "perfected_transformative_hope", "heroic_unity"] } },
+  // Bright Harbinger: unique +300 Weapon/Spell Damage to allies, only from the
+  // Templar Bright Harbinger mastery (upgrades Illuminate).
+  { value: "bright_harbinger", label: "Bright Harbinger", desc: "Grants allies +300 Weapon and Spell Damage.",
+    sources: { masteries: ["bright_harbinger"] } },
+  // Calculated Defense: unique +6% Weapon/Spell Damage to nearby group members,
+  // only from the Sorcerer Calculated Defense mastery (when its shield holds).
+  { value: "calculated_defense", label: "Calculated Defense", desc: "Grants nearby group members +6% Weapon and Spell Damage.",
+    sources: { masteries: ["calculated_defense"] } },
   { value: "powerful_assault", label: "Powerful Assault", desc: "Set: grants Weapon and Spell Damage to nearby allies.",
     sources: { gear: ["powerful_assault"] } },
   { value: "pillagers_profit", label: "Pillager's Profit", desc: "Set: grants resource recovery when an ally uses an Ultimate.",
@@ -726,14 +779,14 @@ const BUFFS = [
   { value: "pearlescent_ward", label: "Pearlescent Ward", desc: "Set: scaling Weapon and Spell Damage from worn Trial sets.",
     sources: { gear: ["pearlescent_ward"] } },
   { value: "touch_of_zen", label: "Touch of Z'en", desc: "Set: increases damage per damage-over-time effect on the target.",
-    sources: { gear: ["touch_of_zen"] } },
+    sources: { gear: ["z_ens_redress"] } },
   { value: "way_of_martial_knowledge", label: "Way of Martial Knowledge", desc: "Set: increases the target's damage taken from your next direct attack.",
     sources: { gear: ["way_of_martial_knowledge"] } },
   { value: "encratiss_behemoth", label: "Encratis's Behemoth", desc: "Monster set: Flame Damage debuff/buff swing.",
     sources: { gear: ["encratiss_behemoth"] } },
   { value: "symphony_of_blades", label: "Symphony of Blades", desc: "Monster set: resource sustain for low-resource allies.",
     sources: { gear: ["symphony_of_blades"] } },
-  { value: "ozezan_the_inferno", label: "Ozezan the Inferno", desc: "Monster set: Minor Courage + mitigation for you and your healer.",
+  { value: "ozezan_the_inferno", label: "Ozezan the Inferno", desc: "Monster set: grants healed allies Minor Vitality and Armor.",
     sources: { gear: ["ozezan_the_inferno"] } },
 ];
 
@@ -847,9 +900,20 @@ const CRIT_BASE = 50;
 // Group sources: anything provided to the whole team (raid buffs as well as
 // boss debuffs like Brittle/Catalyst). Detected anywhere on the team.
 const CRIT_GROUP_SOURCES = [
-  { value: "major_force", label: "Major Force", pct: 20, detect: { gear: ["saxhleel_champion"], skills: ["aggressive_horn"] } },
+  // Major Force (+20% crit dmg) shared with the whole group. Saxhleel Champion
+  // and Grisly Gourmet grant it to allies; Aggressive Horn and Light's Champion
+  // (skills) buff the group.
+  { value: "major_force", label: "Major Force", pct: 20, detect: { gear: ["saxhleel_champion", "perfected_saxhleel_champion", "grisly_gourmet"], skills: ["aggressive_horn", "lights_champion"], masteries: ["ink_scribes_verve"] } },
+  // Minor Force (+10% crit dmg) applied to group members by these sets (the
+  // wearer of Grave Inevitability gets Major Force instead, but its grouped
+  // allies get Minor Force). Velothi's self-only Minor Force stays in the self
+  // list and is deduped per-player when the team already provides this.
+  { value: "minor_force", label: "Minor Force", pct: 10, detect: { gear: ["twilight_remedy", "phoenix_moth_theurge", "grave_inevitability"] } },
   { value: "lucent_echoes", label: "Lucent Echoes", pct: 11, detect: { gear: ["lucent_echoes", "perfected_lucent_echoes"] } },
-  { value: "minor_brittle", label: "Minor Brittle", pct: 10, detect: { gear: ["baron_zaudrus"], skills: ["rune_of_the_colorless_pool"] } },
+  // Minor Brittle (+10% crit dmg taken) is an enemy debuff: Rune of the
+  // Colorless Pool and Glittering Goad both apply it to the target. (Baron
+  // Zaudrus was previously listed here but only grants Ultimate, not Brittle.)
+  { value: "minor_brittle", label: "Minor Brittle", pct: 10, detect: { gear: ["glittering_goad"], skills: ["rune_of_the_colorless_pool"] } },
   { value: "major_brittle", label: "Major Brittle", pct: 20, detect: { gear: ["nunatak"], masteries: ["tundras_maw"] } },
   // Elemental Catalyst applies 5% Critical Damage taken per distinct elemental
   // damage type (Flame/Frost/Shock) the wearer deals, up to 15% for all three.
@@ -1197,8 +1261,15 @@ const PEN_ARENA_ONE_PIECE = 1190; // 1pc bonus from an arena weapon.
 // Group/target sources (detected anywhere on the team). `detect` maps a category
 // (gear/skills/masteries/skillLines/classes) to candidate keys.
 const PEN_GROUP_SOURCES = [
-  { value: "major_breach", label: "Major Breach", pen: 5948, detect: { skills: ["pierce_armor"] } },
-  { value: "minor_breach", label: "Minor Breach", pen: 2974, detect: { skills: ["elemental_drain", "pierce_armor"] } },
+  // Major Breach (−5948 enemy Resistance) — applied to the target, so the whole
+  // group benefits. Provided by the Puncture line (Pierce Armor/Puncture/Ransack),
+  // the Elemental Drain line (Elemental Drain/Weakness to Elements/Elemental
+  // Susceptibility), and Crushing Weapon.
+  { value: "major_breach", label: "Major Breach", pen: 5948, detect: { skills: ["pierce_armor", "puncture", "ransack", "elemental_drain", "weakness_to_elements", "elemental_susceptibility", "crushing_weapon"] } },
+  // Minor Breach (−2974 enemy Resistance). Only Pierce Armor (of the Puncture
+  // morphs) also applies Minor Breach; Deep Fissure and Sunderflame apply it too.
+  // (Elemental Drain was previously here but grants MAJOR Breach, not Minor.)
+  { value: "minor_breach", label: "Minor Breach", pen: 2974, detect: { skills: ["pierce_armor", "deep_fissure", "sunderflame"] } },
   { value: "alkosh", label: "Roar of Alkosh", pen: 6000, detect: { gear: ["roar_of_alkosh"] } },
   { value: "crimson_oath", label: "Crimson Oath's Rive", pen: 3541, detect: { gear: ["crimson_oaths_rive"] } },
   { value: "tremorscale", label: "Tremorscale", pen: 2640, detect: { gear: ["tremorscale"] } },
