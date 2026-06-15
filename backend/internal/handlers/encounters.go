@@ -215,17 +215,21 @@ func (s *Server) handleDeleteEncounter(w http.ResponseWriter, r *http.Request) {
 }
 
 type loadoutPayload struct {
-	Slot        int      `json:"slot"`
-	Gear        []string `json:"gear"`
-	Skills      []string `json:"skills"`
-	Potions     []string `json:"potions"`
-	CPBlue      []string `json:"cp_blue"`
-	Weapons     []string `json:"weapons"`
-	Mundus      string   `json:"mundus"`
-	ArmorHeavy  int      `json:"armor_heavy"`
-	ArmorMedium int      `json:"armor_medium"`
-	ArmorLight  int      `json:"armor_light"`
-	PenExtra    []string `json:"pen_extra"`
+	Slot                    int      `json:"slot"`
+	Gear                    []string `json:"gear"`
+	Skills                  []string `json:"skills"`
+	Potions                 []string `json:"potions"`
+	CPBlue                  []string `json:"cp_blue"`
+	CritDmg                 []string `json:"crit_dmg"`
+	Mundus                  string   `json:"mundus"`
+	ArmorHeavy              int      `json:"armor_heavy"`
+	ArmorMedium             int      `json:"armor_medium"`
+	ArmorLight              int      `json:"armor_light"`
+	PenExtra                []string `json:"pen_extra"`
+	CatalystElements        int      `json:"catalyst_elements"`
+	WeaponDamage            int      `json:"weapon_damage"`
+	SplinteredSecretsSkills int      `json:"splintered_secrets_skills"`
+	ForceOfNatureStatus     int      `json:"force_of_nature_status"`
 }
 
 type saveLoadoutsRequest struct {
@@ -240,6 +244,58 @@ func clampArmor(n int) int {
 	}
 	if n > 7 {
 		return 7
+	}
+	return n
+}
+
+// clampCatalystElements bounds the Elemental Catalyst element count to 1..3
+// (Flame/Frost/Shock). A zero/unset value defaults to the full 3 so existing
+// builds keep the previous behavior.
+func clampCatalystElements(n int) int {
+	if n <= 0 {
+		return 3
+	}
+	if n > 3 {
+		return 3
+	}
+	return n
+}
+
+// clampWeaponDamage bounds the player's entered Weapon/Spell Damage to a sane
+// 0..20000 range (well above any achievable in-game value) for the penetration
+// calculator's Anthelmir's Construct scaling.
+func clampWeaponDamage(n int) int {
+	if n < 0 {
+		return 0
+	}
+	if n > 20000 {
+		return 20000
+	}
+	return n
+}
+
+// clampSplinteredSecretsSkills bounds the Arcanist Splintered Secrets skill
+// count to 0..5 (the passive caps at 5 slotted Herald of the Tome abilities).
+// A negative value falls back to 2, preserving the previous hard-coded default.
+func clampSplinteredSecretsSkills(n int) int {
+	if n < 0 {
+		return 2
+	}
+	if n > 5 {
+		return 5
+	}
+	return n
+}
+
+// clampForceOfNatureStatus bounds the Force of Nature negative-status-effect
+// count to 0..5 (the CP star caps at 5 effects). A negative value falls back to
+// 5 (the full bonus / default).
+func clampForceOfNatureStatus(n int) int {
+	if n < 0 {
+		return 5
+	}
+	if n > 5 {
+		return 5
 	}
 	return n
 }
@@ -286,9 +342,9 @@ func (s *Server) handleSaveLoadouts(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "invalid champion points list")
 			return
 		}
-		weapons, err := models.SanitizeLoadoutItems(p.Weapons)
+		critDmg, err := models.SanitizeLoadoutItems(p.CritDmg)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid weapons list")
+			writeError(w, http.StatusBadRequest, "invalid crit damage sources list")
 			return
 		}
 		mundus := strings.TrimSpace(p.Mundus)
@@ -303,11 +359,15 @@ func (s *Server) handleSaveLoadouts(w http.ResponseWriter, r *http.Request) {
 		}
 		loadouts = append(loadouts, models.Loadout{
 			Slot: p.Slot, Gear: gear, Skills: skills, Potions: potions,
-			CPBlue: cpBlue, Weapons: weapons, Mundus: mundus,
-			ArmorHeavy:  clampArmor(p.ArmorHeavy),
-			ArmorMedium: clampArmor(p.ArmorMedium),
-			ArmorLight:  clampArmor(p.ArmorLight),
-			PenExtra:    penExtra,
+			CPBlue: cpBlue, CritDmg: critDmg, Mundus: mundus,
+			ArmorHeavy:              clampArmor(p.ArmorHeavy),
+			ArmorMedium:             clampArmor(p.ArmorMedium),
+			ArmorLight:              clampArmor(p.ArmorLight),
+			PenExtra:                penExtra,
+			CatalystElements:        clampCatalystElements(p.CatalystElements),
+			WeaponDamage:            clampWeaponDamage(p.WeaponDamage),
+			SplinteredSecretsSkills: clampSplinteredSecretsSkills(p.SplinteredSecretsSkills),
+			ForceOfNatureStatus:     clampForceOfNatureStatus(p.ForceOfNatureStatus),
 		})
 	}
 

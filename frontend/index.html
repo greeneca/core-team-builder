@@ -216,18 +216,18 @@
       <div class="group-stat crit-card">
         <div class="buffs-summary">
           <div class="buffs-summary-main">
-            <h2 style="margin: 0;">Crit Damage<span class="info-indicator" tabindex="0" role="img" aria-label="Crit damage coverage: Critical damage caps at 125% total. 'Group' is provided to the whole team (including the 50% base); 'Target' is applied to the boss; 'Solo required' is what each player must supply from their own sources (mundus, CP, armor, weapon line, race, class passive, sets) to reach the cap. Each roster slot shows that player's total crit and whether it meets the cap. Click Details for the full breakdown." data-tip="Critical damage caps at 125% total. Group is provided to the whole team (incl. the 50% base); Target is applied to the boss; Solo required is what each player must supply themselves to reach the cap. Each roster slot shows its crit total. Click Details for the breakdown.">i</span></h2>
+            <h2 style="margin: 0;">Crit Damage<span class="info-indicator" tabindex="0" role="img" aria-label="Crit damage coverage: Critical damage caps at 125% total. 'Group' is provided to the whole team — raid buffs and boss debuffs alike (including the 50% base); 'Solo required' is what each player must supply from their own sources (mundus, CP, armor, weapon line, race, class passive, sets) to reach the cap. Each roster slot shows that player's total crit and whether it meets the cap. Click Details for the full breakdown." data-tip="Critical damage caps at 125% total. Group is provided to the whole team — raid buffs and boss debuffs (incl. the 50% base); Solo required is what each player must supply themselves to reach the cap. Each roster slot shows its crit total. Click Details for the breakdown.">i</span></h2>
           </div>
           <button id="crit-details-btn" class="btn btn--ghost btn--sm" type="button">Details</button>
         </div>
         <div class="crit-stats">
           <div class="crit-stat">
-            <span class="crit-stat-label">Group provided</span>
-            <span id="crit-group" class="crit-stat-value">0%</span>
+            <span class="crit-stat-label">Standard cap<span class="info-indicator" tabindex="0" role="img" aria-label="Standard crit cap: Critical Damage is capped at 125% for most builds. The Nightblade class mastery Above and Beyond raises that player's personal cap to 155% (+30%), so a Nightblade running it can exceed 125%. Per-player caps show in the Details breakdown." data-tip="Critical Damage caps at 125% for most builds. The Nightblade class mastery Above and Beyond raises that player's personal cap to 155% (+30%). Per-player caps show in Details.">i</span></span>
+            <span id="crit-cap" class="crit-stat-value">0%</span>
           </div>
           <div class="crit-stat">
-            <span class="crit-stat-label">Target applied</span>
-            <span id="crit-target" class="crit-stat-value">0%</span>
+            <span class="crit-stat-label">Group provided</span>
+            <span id="crit-group" class="crit-stat-value">0%</span>
           </div>
           <div class="crit-stat">
             <span class="crit-stat-label">Solo required</span>
@@ -389,9 +389,9 @@
   </main>
 
   <script src="js/api.js?v=77"></script>
-  <script src="js/gear-skills.js?v=77"></script>
-  <script src="js/data.js?v=77"></script>
+  <script src="js/gear-skills.js?v=79"></script>
+  <script src="js/data.js?v=80"></script>
   <script src="js/components.js?v=77"></script>
-  <script src="js/app.js?v=77"></script>
+  <script src="js/app.js?v=80"></script>
 </body>
 </html>

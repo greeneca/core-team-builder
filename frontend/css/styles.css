@@ -1349,7 +1349,16 @@ a.brand--home:hover {
   width: 3.5rem;
   text-align: center;
 }
-.crit-result { margin-left: auto; text-align: right; }
+/* Keep the crit damage + penetration readouts grouped and pinned to the right
+   edge of the crit setup row so crit damage always floats beside penetration,
+   even when the input fields above wrap to multiple lines. */
+.crit-results {
+  margin-left: auto;
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-4);
+}
+.crit-result { text-align: right; }
 .crit-label {
   font-size: var(--font-size-lg);
   font-weight: 700;

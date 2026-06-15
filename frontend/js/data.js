@@ -306,53 +306,53 @@ const SKILL_LINES = [{ value: "", label: "—" }].concat(
 // their own class.
 const MASTERIES_BY_CLASS = {
   arcanist: [
-    { value: "abyssal_emergence", label: "Abyssal Emergence", desc: "Dive deep into the abyss where power is yours to claim. Activating an Arcanist Ultimate immediately generates maximum Crux (3) and grants you 666 Weapon and Spell Damage for 15 seconds." },
-    { value: "fate_realigned", label: "Fate Realigned", desc: "Be the hand that guides the weave of fate. Upgrades rank 2 of Implacable Outcome to generate maximum Crux (3), up to once every 15 seconds. After this effect triggers you gain 300 Weapon and Spell Damage for 25 seconds." },
-    { value: "unbound_potential", label: "Unbound Potential", desc: "Surpass your limits in the fieldwork of battle. Upgrades rank 2 of Fated Fortune to also increase your damage done by 30% (halved against players) for the duration." },
-    { value: "erudites_rigor", label: "Erudite's Rigor", desc: "Master the archaic and forge new runes of conflict. Upgrades Fatewoven Armor to also grant 300 Magicka and Stamina when you take damage, increasing by 100 per Crux you have active. When this effect activates you also gain 1 Ultimate. This effect can occur once every 2 seconds." },
-    { value: "ink_scribes_verve", label: "Ink-Scribe's Verve", desc: "Illuminate body and mind with glimmering ink. While in combat, when you heal or overheal a total of 75,000 Health, you generate a Crux." },
+    { value: "abyssal_emergence", label: "Abyssal Emergence", desc: "Dive deep into the abyss where power is yours to claim. Activating an Arcanist Ultimate immediately generates maximum Crux and grants you 666 Weapon and Spell Damage for 15 seconds." },
+    { value: "fate_realigned", label: "Fate Realigned", desc: "Be the hand that guides the weave of fate. Upgrades rank 2 of Implacable Outcome to generate maximum Crux, up to once every 15 seconds. After this effect triggers you gain 300 Weapon and Spell Damage for 25 seconds." },
+    { value: "unbound_potential", label: "Unbound Potential", desc: "Surpass your limits in the fieldwork of battle. Upgrades rank 2 of Fated Fortune to also increase your damage done by 30%, halving against players, for the duration." },
+    { value: "erudites_rigor", label: "Erudite's Rigor", desc: "Master the archaic and forge new runes of conflict. Upgrades Fatewoven Armor to inflict Minor Cowardice on your attacker while granting Major Vitality to you and your group for 4 seconds. You gain 1 Ultimate for every Crux you have. These effects can occur once every 2 seconds." },
+    { value: "ink_scribes_verve", label: "Ink-Scribe's Verve", desc: "Illuminate body and mind with glimmering ink. While in combat, when you heal or overheal a total of 100000 Health, you generate a Crux and grant you and your group members Major Force for 10 seconds, increasing Critical Damage by 20%." },
   ],
   dragonknight: [
-    { value: "lead_from_the_front", label: "Lead From the Front", desc: "Let others be swept along in the wake of your flame. Activating rank 2 of The Storm Voice grants you and group members within 28 meters of you Major Berserk and Major Protection for 1 second per 15 Ultimate spent, increasing damage done and reducing damage taken by 10%." },
-    { value: "resolute_defense", label: "Resolute Defense", desc: "You are as unyielding as a mountain. Each second you remain Bracing (holding block), you increase the amount of damage you block by 6%, up to 5 times (30% total). Blocking damage has a 20% chance to restore 500 Stamina. This effect can occur once every block cost." },
-    { value: "wildfire_embers", label: "Wildfire Embers", desc: "Fire forged within can never be extinguished. Fan the flames. When your Dragonknight damage over time effects end, you apply Wildfire Embers to the target, dealing 2499 Flame Damage over 12 seconds. This effect stacks up to 12 times and increases in damage by 25% per stack." },
-    { value: "booming_voice", label: "Booming Voice", desc: "Let your voice echo across the peaks. Activating rank 2 of The Storm Voice now also grants 5 Health, Magicka and Stamina Recovery for every Ultimate spent for 10 seconds." },
-    { value: "inexorable_descent", label: "Inexorable Descent", desc: "Be as the landslide. Let nothing stop you. Improves your Landslide passive to increase the potency of your damage done, healing done and damage shield strength by 1% per stack." },
+    { value: "lead_from_the_front", label: "Lead From the Front", desc: "Let others be swept along in the wake of your flame. Activating rank 2 of The Storm Voice grants you and group members within 28 meters of you Major Berserk and Protection for 1 second per 15 Ultimate spent, increasing damage done and reducing damage taken by 10%." },
+    { value: "resolute_defense", label: "Resolute Defense", desc: "You are as unyielding as a mountain. Each second you remain Bracing, you increase the amount of damage you block by 6%, up to 5 times. Blocking damage has a 20% chance to restore 500 Stamina. This effect can occur once every block cost." },
+    { value: "wildfire_embers", label: "Wildfire Embers", desc: "Fire forged within can never be extinguished. Fan the flames. When your Dragonknight damage over time effects end, you apply Wildfire Embers to the target, dealing 1565 Flame Damage over 12 seconds. This effect stacks up to 12 times and increases in damage by 25% per stack." },
+    { value: "booming_voice", label: "Booming Voice", desc: "Let your voice echo across the peaks. Activating rank 2 of The Storm Voice now also grants 5 Health, Magicka, and Stamina Recovery for every Ultimate spent for 10 seconds after a delay of 15 seconds." },
+    { value: "inexorable_descent", label: "Inexorable Descent", desc: "Be as the landslide. Let nothing stop you. Improves your Landslide passive to increase the potency of your damage done, healing done, and damage shield strength by 1% per stack." },
   ],
   necromancer: [
-    { value: "nothing_wasted", label: "Nothing Wasted", desc: "As an abattoir of death, no remnants of life are wasted. Upgrades rank 2 of Corpse Consumption to also grant a stack of Nothing Wasted for 10 seconds, which increases your Max Health by 2% and Weapon and Spell Damage by 2% per stack, up to 10 times. Stacks decay three at a time instead of all at once." },
-    { value: "malevolent_promise", label: "Malevolent Promise", desc: "Death's knell is a familiar song. Share it with your enemies. Also upgrades rank 2 of Corpse Consumption to mark the closest non-player enemy to you with death's touch for 6 seconds, allowing you to use a corpse consuming ability on them. Consuming or replacing this effect triggers rank 2 of Death Gleaning. This effect can occur once every 2 seconds." },
-    { value: "cycle_unending", label: "Cycle Unending", desc: "The cycle of life and death continues: you will live, others will die. Upgrades rank 2 of Reusable Parts to grant Cycle Unending for 25 seconds, increasing your damage done by 1% for every 1% Health you have more than your target. The damage bonus caps at 25% (12% against players)." },
-    { value: "pound_of_flesh", label: "Pound of Flesh", desc: "Knock upon death's door and demand your due. When you take damage you have a 1% chance to heal 2745 Health and restore 5% of your missing Stamina, up to once per second. This chance increases by 1% for every missing Health percent you have and the healing is based off your Max Health." },
-    { value: "veils_forfeit", label: "Veil's Forfeit", desc: "Call souls back from an early grave. Only you may grant them release. While you are in combat, directly healing a target below 50% Health relinquishes them from death's clutches and allows you to use a corpse consuming ability against them within 10 seconds, up to once every second. Consuming or replacing this effect grants the target 2 Ultimate." },
+    { value: "nothing_wasted", label: "Nothing Wasted", desc: "As an abattoir of death, no remnants of life are wasted. Upgrades rank 2 of Corpse Consumption to also grant a stack of Nothing Wasted for 15 seconds, which increases your Max Health by 2% and Weapon and Spell Damage by 2% per stack, up to 10 times. Stacks decay three at a time instead of all at once." },
+    { value: "malevolent_promise", label: "Malevolent Promise", desc: "Death's knell is a familiar song. Share it with your enemies. Upgrades rank 2 of Corpse Consumption to mark the closest non-player enemy to you with death's touch for 6 seconds, allowing you to use a corpse consuming ability on them. Consuming or replacing this effect forcibly triggers rank 1 of Corpse Consumption's Ultimate generation and triggers rank 2 of Death Gleaning. This effect can occur once every 2 seconds." },
+    { value: "cycle_unending", label: "Cycle Unending", desc: "The cycle of life and death continues: you will live, others will die. Upgrades rank 2 of Reusable Parts to grant Cycle Unending for 25 seconds, increasing the potency of your damage done by 1% for every 1% Health you have more than your target. The damage bonus caps at 25%, or 10% against players." },
+    { value: "pound_of_flesh", label: "Pound of Flesh", desc: "Knock upon death's door and demand your due. When you take damage you have a 10% chance to heal 1600 Health and restore 5% of your missing Stamina, up to once per second. This chance increases by 1% for every missing Health percent you have and the healing is based off your Max Health." },
+    { value: "veils_forfeit", label: "Veil's Forfeit", desc: "Call souls back from an early grave. Only you may grant them release. While you are in combat, directly healing a target below 66% Health relinquishes them from death's clutches and allows you to use a corpse consuming ability against them within 10 seconds, up to once every second. Extends the duration of Major Vulnerability you apply by 50%." },
   ],
   nightblade: [
     { value: "nocturnal_inspiration", label: "Nocturnal Inspiration", desc: "The Night Mistress rewards those who strike without reservation. Upgrades rank 2 of Hemorrhage to have a chance to generate 2 Ultimate. This effect can occur once every 0.3 seconds and the chance is equal to your Weapon Critical chance." },
-    { value: "an_eye_for_exploitation", label: "An Eye for Exploitation", desc: "Every strike, every stab, is a step towards execution. Increases your Weapon and Spell Damage by up to 1250, based on your target's missing Health. Also reduces your damage taken by up to 12%, based on your attacker's missing Health." },
-    { value: "above_and_beyond", label: "Above and Beyond", desc: "An assassin is only as good as their reputation. Increases your Critical Damage and Healing by 15% (halved against players). Also increases your maximum Critical Damage and Healing cap by 25%, raising it from 125% to 150%." },
-    { value: "cutthroats_focus", label: "Cutthroat's Focus", desc: "This duel will be their last. For you, it's just another dance. Activating a Nightblade ability while Bracing (holding block) causes you to dodge attacks for 0.3 seconds. Whenever you dodge an attack, your attacker's psyche suffers, increasing their damage taken by 5% for 5 seconds." },
-    { value: "share_the_spoils", label: "Share the Spoils", desc: "Secrets and coin are tools as sharp as the daggers you wield. Upgrades rank 2 of Transfer to grant the closest 4 group members 250 Magicka and Stamina, 1 Ultimate and doubles the Ultimate you gain when it activates (4, up from 2)." },
+    { value: "an_eye_for_exploitation", label: "An Eye for Exploitation", desc: "Every strike, every stab, is a step towards execution. Increases your Weapon and Spell Damage by up to 2000, based on your target's missing Health. Reduces your damage taken by up to 20%, based on your attacker's missing Health. Both effects are halved against targets with Battle Spirit." },
+    { value: "above_and_beyond", label: "Above and Beyond", desc: "An assassin is only as good as their reputation. Increases your Critical Damage and Healing by 25%. This effect is reduced to 5% against targets with Battle Spirit. Increases your maximum Critical Damage and Healing by 30%." },
+    { value: "cutthroats_focus", label: "Cutthroat's Focus", desc: "This duel will be their last. For you, it's just another dance. Activating a Nightblade ability while bracing causes you to dodge attacks for 0.3 seconds. Whenever you dodge an attack, your attacker's psyche suffers, increasing their damage taken by 5% for 5 seconds, increasing to 20 seconds against monsters." },
+    { value: "share_the_spoils", label: "Share the Spoils", desc: "Secrets and coin are tools as sharp as the daggers you wield. Upgrades rank 2 of Transfer to grant group members 250 Magicka and Stamina, 2 Ultimate, and doubles the Ultimate you gain when it activates." },
   ],
   sorcerer: [
-    { value: "conservation_of_energy", label: "Conservation of Energy", desc: "Spellcasting is second nature to you. A skill honed by tireless study. Upgrades rank 2 of Blood Magic to work with any ability that has a cost, and restores 400 Magicka and 389 Stamina when it activates. Scales off your Max Magicka and Stamina. Cost-per-tick abilities are excluded." },
-    { value: "font_of_power", label: "Font of Power", desc: "Within you is a wellspring of near unlimited power. Upgrades rank 2 of Exploitation to work with any Sorcerer ability and increases your Weapon and Spell Damage by 11% for 10 seconds. Increases by 1% for every 1750 Max Magicka or Stamina you have, whichever is higher." },
-    { value: "static_reverberation", label: "Static Reverberation", desc: "The battlefield crackles with untapped potential. Make use of it. When you deal damage, you have a 1% chance for every 1% missing Health the target has to deal 747 Shock Damage, up to once every 0.2 seconds. The chance is divided by one plus every permanent pet you have active." },
-    { value: "calculated_defense", label: "Calculated Defense", desc: "Success is a certainty when nothing is left to chance. While beginning to use a Sorcerer ability or an ability with a cast time, you gain a damage shield for 0.5 seconds that can absorb 7127 damage. This effect is based off your Max Health. If the shield does not break, you and nearby group members gain 3% Weapon and Spell Damage for 20 seconds." },
-    { value: "sphere_of_influence", label: "Sphere of Influence", desc: "Magicka extends your reach, a benefit to those who fight beside you. Casting a damage shield on yourself or an ally grants 150 Health, Magicka and Stamina Recovery and an additional shield for 4 seconds that absorbs up to 3239 damage. The shield scales off the higher of your Max Health or Max Magicka and is capped at 25% of the target's Max Health." },
+    { value: "conservation_of_energy", label: "Conservation of Energy", desc: "Spellcasting is second nature to you. A skill honed by tireless study. Upgrades rank 2 of Blood Magic to work with all abilities with a cost, excluding cost per tick abilities, and restores 239 Magicka and 239 Stamina when it activates. This effect scales off your Max Magicka and Stamina." },
+    { value: "font_of_power", label: "Font of Power", desc: "Within you is a wellspring of near unlimited power. Upgrades rank 2 of Exploitation to work with any Sorcerer ability and increases your Weapon and Spell Damage by 6% for 10 seconds. The Weapon and Spell Damage increases by 1% for every 1750 Max Magicka or Stamina you have, whichever is higher." },
+    { value: "static_reverberation", label: "Static Reverberation", desc: "The battlefield crackles with untapped potential. Make use of it. When you deal damage, you have a 5% chance to deal 315 Shock Damage, up to once every 0.3 seconds. The chance increases by 1% for every 1% missing Health the target has. The chance is divided by 1 plus every permanent pet you have active." },
+    { value: "calculated_defense", label: "Calculated Defense", desc: "Success is a certainty when nothing is left to chance. While beginning to use a Sorcerer ability or an ability with a cast time, you gain a damage shield for 0.5 seconds that can absorb 5280 damage. This effect is based off your Max Health. If the shield does not break, you and nearby group members gain 6% Weapon and Spell Damage for 20 seconds." },
+    { value: "sphere_of_influence", label: "Sphere of Influence", desc: "Magicka extends your reach, a benefit to those who fight beside you. Casting a damage shield on yourself or an ally grants an additional shield that absorbs up to 2400 damage for 4 seconds and 225 Health, Magicka, and Stamina Recovery for 12 seconds. The shield scales off the higher of your Max Health or Max Magicka, and is capped at 25% of the target's Max Health." },
   ],
   templar: [
-    { value: "bastion_of_light", label: "Bastion of Light", desc: "Light consecrates the ground on which you tread. Sacred Ground is now also applied while you are in your own Nova and Spear Shards, and while Radial Sweep and Solar Barrage are active. While Sacred Ground is active, you heal for 1498 Health every 1 second. If you are at full Health after being healed from this effect while in combat, you also gain 2 Ultimate." },
-    { value: "devout_guardian", label: "Devout Guardian", desc: "Radiant is the shield that pushes back the dark. While Sacred Ground is active, you gain a damage shield for 6 seconds, up to once every 6 seconds. The shield absorbs up to 3747 damage and provides 300 Health, Magicka and Stamina Recovery while active. If the shield breaks, you gain 10 Ultimate." },
-    { value: "bright_harbinger", label: "Bright Harbinger", desc: "Light's banner instills hope. You are its bearer. Upgrades rank 2 of Illuminate to also grant Bright Harbinger for the duration, which grants 300 Weapon and Spell Damage to allies and doubles for you (600)." },
-    { value: "judgments_brand", label: "Judgment's Brand", desc: "Judgement follows in the wake of your radiance. When rank 2 of Burning Light deals damage, your Templar abilities gain 1250 damage done for 3.1 seconds. Halved against players (625)." },
-    { value: "steadfast_candescence", label: "Steadfast Candescence", desc: "Your conviction is unwavering. Light gives no quarter. Sacred Ground now activates and refreshes itself while Bracing (holding block). Increases the amount of damage you can block by 20% while stationary." },
+    { value: "bastion_of_light", label: "Bastion of Light", desc: "Light consecrates the ground on which you tread. Sacred Ground is now applied while you are in your own Nova and Spear Shards, and while Radial Sweep and Solar Barrage are active. While Sacred Ground is active, you heal for 1280 Health every 1 second. If you are at full Health after being healed from this effect while in combat, you also gain 2 Ultimate." },
+    { value: "devout_guardian", label: "Devout Guardian", desc: "Radiant is the shield that pushes back the dark. While Sacred Ground is active, you gain a damage shield for 6 seconds, up to once every 6 seconds. The shield absorbs up to 3200 damage and provides 300 Health, Magicka, and Stamina Recovery while active. If the shield breaks, you gain 10 Ultimate." },
+    { value: "bright_harbinger", label: "Bright Harbinger", desc: "Light's banner instills hope. You are its bearer. Upgrades rank 2 of Illuminate to also grant Bright Harbinger for the duration, which grants 300 Weapon and Spell Damage to allies and doubles for you." },
+    { value: "judgments_brand", label: "Judgment's Brand", desc: "Judgement follows in the wake of your radiance. When rank 2 of Burning Light deals damage, your Templar abilities gain 1400 damage done for 3.1 seconds. This bonus is halved against players." },
+    { value: "steadfast_candescence", label: "Steadfast Candescence", desc: "Your conviction is unwavering. Light gives no quarter. Sacred Ground now activates and refreshes itself while Bracing. Increases the amount of damage you can block by 20% while stationary." },
   ],
   warden: [
     { value: "tundras_maw", label: "Tundra's Maw", desc: "Expose your enemies to unrelenting cold. Applying Chill to an enemy also applies Major Brittle for 2 seconds, increasing their Critical Damage taken by 20%." },
-    { value: "wild_adaptation", label: "Wild Adaptation", desc: "The battlefield is your grove. Tend to it. Gain 333 Weapon and Spell Damage for each status effect on your target, up to a maximum of 1665 (5 status effects). This can also apply when targeting friendly players." },
+    { value: "wild_adaptation", label: "Wild Adaptation", desc: "The battlefield is your grove. Tend to it. Gain 333 Weapon and Spell Damage for each status effect on your target, up to a maximum of 1665." },
     { value: "glacial_obstinance", label: "Glacial Obstinance", desc: "Tap into the wellspring of permafrost's resolve. Upgrades Bond with Nature to also activate when casting Winter's Embrace abilities and to grant 15% Weapon and Spell Damage for 10 seconds if you are at full Health after the heal." },
-    { value: "green_keepers_hide", label: "Green-Keeper's Hide", desc: "The twisting of seasons has tempered your will. Reduce your damage taken by 3% for every status effect active on your attacker, up to a maximum of 15% (5 status effects)." },
-    { value: "bountiful_harvest", label: "Bountiful Harvest", desc: "Share in the spoils of nature's abundance. Upgrades rank 2 of Nature's Gift to grant the healed target Major Heroism for 4.5 seconds and an additional 250 Magicka and Stamina." },
+    { value: "green_keepers_hide", label: "Green-Keeper's Hide", desc: "The twisting of seasons has tempered your will. Reduce your damage taken by 3% for every status effect active on your attacker, up to a maximum of 15%." },
+    { value: "bountiful_harvest", label: "Bountiful Harvest", desc: "Share in the spoils of nature's abundance. Upgrades rank 2 of Nature's Gift to grant you and your group members Major Heroism for 3 seconds and an additional 125 Magicka and Stamina, up to once every 2 seconds." },
   ],
 };
 
@@ -501,21 +501,19 @@ const POTIONS = POTION_GROUPS.flatMap((g) =>
   g.potions.map((p) => ({ ...p, group: g.group }))
 );
 
-// --- Crit-damage inputs: weapon lines, mundus, blue (Warfare) CP ---
+// --- Crit-damage inputs: crit-damage sources, mundus, blue (Warfare) CP ---
 //
 // These are the per-encounter, per-player inputs the crit calculator needs that
-// aren't otherwise tracked. `critPct` (when present) is the Critical Damage the
-// source contributes; the crit model below reads it.
+// aren't otherwise tracked. `critPct` is the Critical Damage the source
+// contributes; the crit model below reads it.
 
-// Weapon lines a player can run (one per bar). Only Dual Wield and Two-Handed
-// carry a Critical Damage passive; the rest are listed so the picker is useful.
-const WEAPON_LINES = [
-  { value: "dual_wield", label: "Dual Wield", critPct: 12, desc: "Twin Blade and Blunt passive: increases Critical Damage by 12% while a Dual Wield weapon is equipped." },
-  { value: "two_handed", label: "Two-Handed", critPct: 16, desc: "Heavy Weapons passive: increases Critical Damage by 16% while a Two-Handed weapon is equipped." },
-  { value: "one_hand_and_shield", label: "One Hand and Shield", critPct: 0, desc: "Defensive weapon line. No Critical Damage passive." },
-  { value: "bow", label: "Bow", critPct: 0, desc: "Ranged weapon line. No Critical Damage passive." },
-  { value: "destruction_staff", label: "Destruction Staff", critPct: 0, desc: "Magicka damage weapon line. No Critical Damage passive." },
-  { value: "restoration_staff", label: "Restoration Staff", critPct: 0, desc: "Healing weapon line. No Critical Damage passive." },
+// Crit-damage sources a player can run. Currently the two weapon-line passives
+// that grant Critical Damage; only the highest applies (the active damage bar).
+// Stored per encounter per slot under the `crit_dmg` loadout key.
+const CRIT_DMG_SOURCES = [
+  { value: "two_handed", label: "Heavy Weapons (Two-Handed)", critPct: 16, desc: "Two-Handed \"Heavy Weapons\" passive: increases Critical Damage by 16% while a Two-Handed weapon is equipped." },
+  { value: "dual_wield_single", label: "Twin Blade and Blunt (Single Axe)", critPct: 6, desc: "Dual Wield \"Twin Blade and Blunt\" passive: increases Critical Damage by 6% with one one-handed weapon equipped." },
+  { value: "dual_wield_double", label: "Twin Blade and Blunt (Double Axe)", critPct: 12, desc: "Dual Wield \"Twin Blade and Blunt\" passive: increases Critical Damage by 12% with two one-handed weapons equipped." },
 ];
 
 // Mundus stones (single-select per player per encounter). Only The Shadow
@@ -549,18 +547,19 @@ const BLUE_CP = [
   { value: "thaumaturge", label: "Thaumaturge", desc: "Increases your damage-over-time damage." },
   { value: "wrathful_strikes", label: "Wrathful Strikes", desc: "Increases your Weapon and Spell Damage with direct-damage attacks." },
   { value: "piercing", label: "Piercing", desc: "Increases your Offensive Penetration." },
+  { value: "force_of_nature", label: "Force of Nature", desc: "Increases your Offensive Penetration by 660 for each negative status effect on the enemy, up to a maximum of 5 (3300)." },
 ];
 
 // Flat lists / lookups for the new inputs.
-const WEAPON_BY_KEY = Object.fromEntries(WEAPON_LINES.map((w) => [w.value, w]));
+const CRIT_DMG_BY_KEY = Object.fromEntries(CRIT_DMG_SOURCES.map((w) => [w.value, w]));
 const MUNDUS_BY_KEY = Object.fromEntries(MUNDUS_STONES.map((m) => [m.value, m]));
 const BLUE_CP_BY_KEY = Object.fromEntries(BLUE_CP.map((c) => [c.value, c]));
-const WEAPON_BY_LABEL = Object.fromEntries(WEAPON_LINES.map((w) => [w.label.toLowerCase(), w]));
+const CRIT_DMG_BY_LABEL = Object.fromEntries(CRIT_DMG_SOURCES.map((w) => [w.label.toLowerCase(), w]));
 const BLUE_CP_BY_LABEL = Object.fromEntries(BLUE_CP.map((c) => [c.label.toLowerCase(), c]));
 
-function weaponLabel(key) { const w = WEAPON_BY_KEY[key]; return w ? w.label : key; }
-function weaponDesc(key) { const w = WEAPON_BY_KEY[key]; return w && w.desc ? w.desc : ""; }
-function weaponByLabel(label) { return WEAPON_BY_LABEL[String(label || "").trim().toLowerCase()] || null; }
+function critDmgLabel(key) { const w = CRIT_DMG_BY_KEY[key]; return w ? w.label : key; }
+function critDmgDesc(key) { const w = CRIT_DMG_BY_KEY[key]; return w && w.desc ? w.desc : ""; }
+function critDmgByLabel(label) { return CRIT_DMG_BY_LABEL[String(label || "").trim().toLowerCase()] || null; }
 function cpBlueLabel(key) { const c = BLUE_CP_BY_KEY[key]; return c ? c.label : key; }
 function cpBlueDesc(key) { const c = BLUE_CP_BY_KEY[key]; return c && c.desc ? c.desc : ""; }
 function cpBlueByLabel(label) { return BLUE_CP_BY_LABEL[String(label || "").trim().toLowerCase()] || null; }
@@ -574,9 +573,15 @@ function mundusDesc(key) { const m = MUNDUS_BY_KEY[key]; return m && m.desc ? m.
 // by the penetration calculator and stored per encounter per slot (`pen_extra`).
 const PEN_EXTRA_SOURCES = [
   { value: "crusher", label: "Crusher (enchant)", pen: 2108, bucket: "group", desc: "Crusher weapon enchant: applies a stacking Physical & Spell Resistance debuff to the target. Benefits the whole group." },
-  { value: "sharpened", label: "Sharpened (weapon trait)", pen: 1638, bucket: "self", desc: "Sharpened weapon trait: increases your Offensive Penetration (both weapons, gold quality)." },
-  { value: "mace_maul", label: "Mace / Maul", pen: 1487, bucket: "self", desc: "Mace (1H) or Maul (2H) weapon: ignores a portion of the target's Resistance." },
-  { value: "set_piece_bonuses", label: "Set-piece bonuses", pen: 1487, bucket: "self", desc: "Flat Offensive Penetration from set 2–4 piece bonuses not otherwise modeled." },
+  { value: "sharpened", label: "Sharpened (single)", pen: 1638, bucket: "self", desc: "One Sharpened weapon (gold quality): increases your Offensive Penetration by 1638." },
+  { value: "sharpened_double", label: "Sharpened (double)", pen: 3276, bucket: "self", desc: "Two Sharpened weapons (gold quality), e.g. dual wield or both bars: increases your Offensive Penetration by 3276." },
+  { value: "arena_one_piece", label: "Arena weapon (1pc)", pen: 1190, bucket: "self", desc: "Flat Offensive Penetration from an arena weapon's 1pc bonus. Only add this if the arena weapon isn't already selected in gear (an equipped Arena Weapons set is auto-counted)." },
+  { value: "mace_maul", label: "Mace (single)", pen: 1487, bucket: "self", desc: "One Mace (1H) or Maul (2H) weapon: ignores a portion of the target's Resistance." },
+  { value: "mace_maul_double", label: "Mace / Maul (double)", pen: 2974, bucket: "self", desc: "Two Maces (1H) or Mauls (2H), e.g. dual wield or both bars: ignores twice the Resistance of a single weapon." },
+  // `maxStack` lets a self source be added more than once (each stack adds `pen`).
+  // Set-piece flat-pen bonuses commonly come from several different sets at once,
+  // so this can be stacked up to 5 times (stored as repeated keys in `pen_extra`).
+  { value: "set_piece_bonuses", label: "Set-piece bonuses", pen: 1487, bucket: "self", maxStack: 5, desc: "Flat Offensive Penetration from set 2–4 piece bonuses not otherwise modeled. Add up to 5 times to stack multiple sets." },
 ];
 
 const PEN_EXTRA_BY_KEY = Object.fromEntries(PEN_EXTRA_SOURCES.map((p) => [p.value, p]));
@@ -584,6 +589,16 @@ const PEN_EXTRA_BY_LABEL = Object.fromEntries(PEN_EXTRA_SOURCES.map((p) => [p.la
 function penExtraLabel(key) { const p = PEN_EXTRA_BY_KEY[key]; return p ? p.label : key; }
 function penExtraDesc(key) { const p = PEN_EXTRA_BY_KEY[key]; return p && p.desc ? p.desc : ""; }
 function penExtraByLabel(label) { return PEN_EXTRA_BY_LABEL[String(label || "").trim().toLowerCase()] || null; }
+function penExtraMaxStack(key) { const p = PEN_EXTRA_BY_KEY[key]; return p && p.maxStack ? p.maxStack : 1; }
+
+// Count occurrences of each key in an array (used for stackable pen sources that
+// are stored as repeated keys, e.g. set_piece_bonuses).
+function countKeys(arr) {
+  return (arr || []).reduce((acc, k) => {
+    acc[k] = (acc[k] || 0) + 1;
+    return acc;
+  }, {});
+}
 
 // --- Lookup helpers ---
 const GEAR_BY_KEY = Object.fromEntries(GEAR_SETS.map((g) => [g.value, g]));
@@ -647,18 +662,19 @@ function potionByLabel(label) {
 const GEAR_GROUPS = GEAR_SET_GROUPS.map((g) => ({ group: g.group, items: g.sets }));
 const SKILL_SELECT_GROUPS = SKILL_GROUPS.map((g) => ({ group: g.group, items: g.skills }));
 const POTION_SELECT_GROUPS = POTION_GROUPS.map((g) => ({ group: g.group, items: g.potions }));
-const WEAPON_SELECT_GROUPS = [{ group: null, items: WEAPON_LINES }];
+const CRIT_DMG_SELECT_GROUPS = [{ group: null, items: CRIT_DMG_SOURCES }];
 const BLUE_CP_SELECT_GROUPS = [{ group: null, items: BLUE_CP }];
 const PEN_EXTRA_SELECT_GROUPS = [{ group: null, items: PEN_EXTRA_SOURCES }];
 
 // Master tables keyed by loadout type, so UI code can stay generic. cp_blue and
-// weapons reuse the same chip/searchable-select machinery as gear/skills.
+// the crit-damage sources reuse the same chip/searchable-select machinery as
+// gear/skills. The crit-damage sources are stored under the `crit_dmg` key.
 const LOADOUT_TYPES = {
   gear: { items: GEAR_SETS, groups: GEAR_GROUPS, byLabel: gearByLabel, label: gearLabel, desc: gearDesc, addPlaceholder: "Search gear set…" },
   skills: { items: SKILLS, groups: SKILL_SELECT_GROUPS, byLabel: skillByLabel, label: skillLabel, desc: skillDesc, addPlaceholder: "Search skill…" },
   potions: { items: POTIONS, groups: POTION_SELECT_GROUPS, byLabel: potionByLabel, label: potionLabel, desc: potionDesc, addPlaceholder: "Search potion…" },
   cp_blue: { items: BLUE_CP, groups: BLUE_CP_SELECT_GROUPS, byLabel: cpBlueByLabel, label: cpBlueLabel, desc: cpBlueDesc, addPlaceholder: "Search blue CP star…" },
-  weapons: { items: WEAPON_LINES, groups: WEAPON_SELECT_GROUPS, byLabel: weaponByLabel, label: weaponLabel, desc: weaponDesc, addPlaceholder: "Add weapon line…" },
+  crit_dmg: { items: CRIT_DMG_SOURCES, groups: CRIT_DMG_SELECT_GROUPS, byLabel: critDmgByLabel, label: critDmgLabel, desc: critDmgDesc, addPlaceholder: "Add crit damage source…" },
   pen_extra: { items: PEN_EXTRA_SOURCES, groups: PEN_EXTRA_SELECT_GROUPS, byLabel: penExtraByLabel, label: penExtraLabel, desc: penExtraDesc, addPlaceholder: "Add penetration source…" },
 };
 
@@ -815,53 +831,137 @@ function computeBuffCoverage(players, loadoutBySlot) {
 // --- Crit damage: coverage calculator ---
 //
 // ESO critical damage caps at CRIT_CAP% total. Base is CRIT_BASE% (everyone),
-// modelled as a group source. Crit comes from three buckets:
-//   - group  : a buff that benefits the whole group (any one player provides it)
-//   - target : a debuff on the boss (any one player applies it → all benefit)
-//   - self   : only that player (gear, mundus, CP, armor, weapon line, race,
-//              class passive)
-// Per player: effective crit = group + target + self; they "meet" the cap when
-// that reaches CRIT_CAP. "Solo required" = CRIT_CAP - group - target (what each
-// player must supply from their own sources). Source keys map to the existing
-// master data; a few (Minor Force, Minor Brittle) are best-guess placeholders
-// and are one-line edits here.
+// modelled as a group source. Crit comes from two buckets:
+//   - group : anything that benefits the whole team — raid buffs and boss
+//             debuffs alike (any one player provides/applies it → all benefit)
+//   - self  : only that player (gear, mundus, CP, armor, crit-damage source,
+//             race, class passive)
+// Per player: effective crit = group + self; they "meet" the cap when that
+// reaches CRIT_CAP. "Solo required" = CRIT_CAP - group (what each player must
+// supply from their own sources). Source keys map to the existing master data;
+// a few (Minor Force, Minor Brittle) are best-guess placeholders and are
+// one-line edits here.
 const CRIT_CAP = 125;
 const CRIT_BASE = 50;
 
-// Group sources (detected anywhere on the team).
+// Group sources: anything provided to the whole team (raid buffs as well as
+// boss debuffs like Brittle/Catalyst). Detected anywhere on the team.
 const CRIT_GROUP_SOURCES = [
   { value: "major_force", label: "Major Force", pct: 20, detect: { gear: ["saxhleel_champion"], skills: ["aggressive_horn"] } },
-  { value: "lucent_echoes", label: "Lucent Echoes", pct: 11, detect: { gear: ["lucent_echoes"] } },
-];
-
-// Target sources (debuffs on the boss; detected anywhere on the team).
-const CRIT_TARGET_SOURCES = [
+  { value: "lucent_echoes", label: "Lucent Echoes", pct: 11, detect: { gear: ["lucent_echoes", "perfected_lucent_echoes"] } },
   { value: "minor_brittle", label: "Minor Brittle", pct: 10, detect: { gear: ["baron_zaudrus"], skills: ["rune_of_the_colorless_pool"] } },
   { value: "major_brittle", label: "Major Brittle", pct: 20, detect: { gear: ["nunatak"], masteries: ["tundras_maw"] } },
-  { value: "elemental_catalyst", label: "Elemental Catalyst", pct: 15, detect: { gear: ["elemental_catalyst"] } },
+  // Elemental Catalyst applies 5% Critical Damage taken per distinct elemental
+  // damage type (Flame/Frost/Shock) the wearer deals, up to 15% for all three.
+  // `perElement` tells computeCritCoverage to scale the pct by the wearer's
+  // catalystElements count (1-3) instead of using a flat value, so a build that
+  // only runs 1 or 2 damage types is modelled correctly.
+  { value: "elemental_catalyst", label: "Elemental Catalyst", perElement: true, detect: { gear: ["elemental_catalyst"] } },
 ];
 
-// Self sources (per player). `type` selects the detection rule:
-//   mundus | cp | gear | race | classPassive (class for non-subclassed; the
-//   linked skill line for subclassed). Medium-armor Dexterity and the weapon-
-//   line passive are handled specially in playerSelfCrit (per-piece / MAX).
+// Critical Damage taken granted by each Elemental Catalyst weakness stack.
+const ELEMENTAL_CATALYST_PER_ELEMENT = 5;
+
+// clampCatalystElements(v): normalize a stored catalyst_elements value to the
+// valid 1-3 range. Anything missing/invalid (including 0) falls back to 3 so a
+// loadout without the field set behaves like the previous flat 15% bonus.
+function clampCatalystElements(v) {
+  const n = parseInt(v, 10);
+  if (!Number.isFinite(n) || n < 1) return 3;
+  return Math.min(3, n);
+}
+
+// Offensive Penetration the Arcanist "Splintered Secrets" passive grants per
+// slotted Herald of the Tome ability (caps at 5 abilities = 6200).
+const SPLINTERED_SECRETS_PER_SKILL = 1240;
+const SPLINTERED_SECRETS_MAX_SKILLS = 5;
+const SPLINTERED_SECRETS_DEFAULT_SKILLS = 2;
+
+// clampSplinteredSecretsSkills(v): normalize a stored splintered_secrets_skills
+// value to 0-5. Anything missing/invalid/negative falls back to 2 so a loadout
+// without the field set behaves like the previous flat 2480 bonus.
+function clampSplinteredSecretsSkills(v) {
+  const n = parseInt(v, 10);
+  if (!Number.isFinite(n) || n < 0) return SPLINTERED_SECRETS_DEFAULT_SKILLS;
+  return Math.min(SPLINTERED_SECRETS_MAX_SKILLS, n);
+}
+
+// Offensive Penetration the "Force of Nature" Warfare CP star grants per
+// negative status effect on the enemy (caps at 5 effects = 3300).
+const FORCE_OF_NATURE_PER_STATUS = 660;
+const FORCE_OF_NATURE_MAX_STATUS = 5;
+
+// clampForceOfNatureStatus(v): normalize a stored force_of_nature_status value
+// to 0-5. Anything missing/invalid/negative falls back to 5 (the full bonus).
+function clampForceOfNatureStatus(v) {
+  const n = parseInt(v, 10);
+  if (!Number.isFinite(n) || n < 0) return FORCE_OF_NATURE_MAX_STATUS;
+  return Math.min(FORCE_OF_NATURE_MAX_STATUS, n);
+}
+
+// Self sources (per player). Like group/target sources, each entry has a
+// `detect` map of category → candidate keys, so a single buff can be detected
+// multiple ways (e.g. gear OR a class passive). Supported categories:
+//   gear | skills | masteries | skillLines | cp | mundus | race | classes |
+//   classPassive (an array of { class, line }: matches `class` for a
+//   non-subclassed player, or `line` for a subclassed one).
+// A buff may appear in both the group source list and here; if the team already
+// provides it, the self copy is skipped so it isn't double-counted (dedup is by
+// `value`). Medium-armor Dexterity, the crit-damage source passives, and the
+// Warden's Advanced Species passive are handled specially in playerSelfCrit
+// (per-piece / MAX / per-slotted-Animal-Companion-skill).
 const CRIT_SELF_SOURCES = [
-  { value: "minor_force", label: "Minor Force (Velothi)", pct: 10, type: "gear", key: "velothi_ur_mages_amulet" },
-  { value: "the_shadow", label: "The Shadow Mundus", pct: 18, type: "mundus", key: "the_shadow" },
-  { value: "backstabber", label: "Backstabber", pct: 15, type: "cp", key: "backstabber" },
-  { value: "fighting_finesse", label: "Fighting Finesse", pct: 10, type: "cp", key: "fighting_finesse" },
-  { value: "harpooners_wading_kilt", label: "Harpooner's Wading Kilt", pct: 10, type: "gear", key: "harpooners_wading_kilt" },
-  { value: "sul_xans_torment", label: "Sul-Xan's Torment", pct: 12, type: "gear", key: "sul_xans_torment" },
-  { value: "feline_ambush", label: "Feline Ambush (Khajiit)", pct: 12, type: "race", key: "khajiit" },
-  { value: "hemorrhage", label: "Hemorrhage (Nightblade)", pct: 10, type: "classPassive", class: "nightblade", line: "assassination" },
-  { value: "piercing_spear", label: "Piercing Spear (Templar)", pct: 10, type: "classPassive", class: "templar", line: "aedric_spear" },
-  { value: "glacial_presence", label: "Glacial Presence (Warden)", pct: 10, type: "classPassive", class: "warden", line: "winters_embrace" },
-  { value: "fated_fortune", label: "Fated Fortune (Arcanist)", pct: 12, type: "classPassive", class: "arcanist", line: "herald_of_the_tome" },
+  { value: "minor_force", label: "Minor Force (Velothi)", pct: 10, detect: { gear: ["velothi_ur_mages_amulet"] } },
+  { value: "the_shadow", label: "The Shadow Mundus", pct: 18, detect: { mundus: ["the_shadow"] } },
+  { value: "backstabber", label: "Backstabber", pct: 15, detect: { cp: ["backstabber"] } },
+  { value: "fighting_finesse", label: "Fighting Finesse", pct: 10, detect: { cp: ["fighting_finesse"] } },
+  { value: "harpooners_wading_kilt", label: "Harpooner's Wading Kilt", pct: 10, detect: { gear: ["harpooners_wading_kilt"] } },
+  { value: "sul_xans_torment", label: "Sul-Xan's Torment", pct: 12, detect: { gear: ["sul_xans_torment"] } },
+  { value: "feline_ambush", label: "Feline Ambush (Khajiit)", pct: 12, detect: { race: ["khajiit"] } },
+  { value: "hemorrhage", label: "Hemorrhage (Nightblade)", pct: 10, detect: { classPassive: [{ class: "nightblade", line: "assassination" }] } },
+  { value: "piercing_spear", label: "Piercing Spear (Templar)", pct: 10, detect: { classPassive: [{ class: "templar", line: "aedric_spear" }] } },
+  { value: "glacial_presence", label: "Glacial Presence (Warden)", pct: 10, detect: { classPassive: [{ class: "warden", line: "winters_embrace" }] } },
+  { value: "fated_fortune", label: "Fated Fortune (Arcanist)", pct: 12, detect: { classPassive: [{ class: "arcanist", line: "herald_of_the_tome" }] } },
+  // Above and Beyond is a non-subclassed Nightblade class mastery. The PvE value
+  // (25%) applies in trials; the "reduced to 5% against Battle Spirit" clause is
+  // PvP-only. It also raises the player's max crit cap (see CRIT_CAP_BONUS_SOURCES).
+  { value: "above_and_beyond", label: "Above and Beyond (Nightblade)", pct: 25, detect: { masteries: ["above_and_beyond"] } },
+  // Crit-damage gear sets. Order's Wrath and Back-Alley Gourmand give a flat
+  // bonus (Back-Alley requires an active food buff — effectively always up in
+  // PvE). True-Sworn Fury and Mora Scribe's Thesis scale with combat/buff state;
+  // we model their baselines (True-Sworn's unscaled 4%; Mora Scribe's at its 12%
+  // Minor-Buff cap). Both regular and Perfected Mora Scribe's Thesis grant the
+  // same crit bonus. Malacath's Band of Brutality is a net negative — it trades
+  // 50% Critical Damage for raw damage — so its pct is negative and lowers the
+  // player's total. All five are one-line value edits if the assumptions change.
+  { value: "orders_wrath", label: "Order's Wrath", pct: 8, detect: { gear: ["orders_wrath"] } },
+  { value: "back_alley_gourmand", label: "Back-Alley Gourmand (food)", pct: 13, detect: { gear: ["back_alley_gourmand"] } },
+  { value: "true_sworn_fury", label: "True-Sworn Fury", pct: 4, detect: { gear: ["true_sworn_fury"] } },
+  { value: "mora_scribes_thesis", label: "Mora Scribe's Thesis (12 Minor Buffs)", pct: 12, detect: { gear: ["mora_scribes_thesis", "perfected_mora_scribes_thesis"] } },
+  { value: "malacaths_band_of_brutality", label: "Malacath's Band of Brutality", pct: -50, detect: { gear: ["malacaths_band_of_brutality"] } },
+];
+
+// Crit-cap bonuses: sources that raise a single player's maximum Critical Damage
+// above CRIT_CAP. Above and Beyond grants +30% to the personal cap (125 → 155),
+// detected the same way as its self source. Applied in playerCritCap.
+const CRIT_CAP_BONUS_SOURCES = [
+  { value: "above_and_beyond", label: "Above and Beyond (Nightblade)", pct: 30, detect: { masteries: ["above_and_beyond"] } },
 ];
 
 // CRIT_MEDIUM_PER_PIECE: Critical Damage from the Medium Armor Dexterity passive
 // per equipped medium piece (6 pieces = 12%, matching the reference table).
 const CRIT_MEDIUM_PER_PIECE = 2;
+
+// Warden's Advanced Species (Animal Companions passive): +5% Critical Damage for
+// each slotted Animal Companion ability. This scales with the player's bar, so
+// it can't be a flat CRIT_SELF_SOURCES entry; it's counted in playerSelfCrit by
+// matching slotted skills against the Animal Companions line. Slotting those
+// skills already requires the line (base Warden or subclassed), so the count
+// itself is the gate — no separate class/line check is needed.
+const ADVANCED_SPECIES_PER_SKILL = 5;
+const ANIMAL_COMPANION_SKILLS = new Set(
+  SKILLS.filter((s) => s.group === "Warden · Animal Companions").map((s) => s.value)
+);
 
 // playerCritContext(player, loadout): the per-player inputs the calc reads.
 // Build keys honor subclassing (subclassed → skill lines; otherwise masteries).
@@ -872,9 +972,12 @@ function playerCritContext(player, loadout) {
     gear: new Set(lo.gear || []),
     skills: new Set(lo.skills || []),
     cpBlue: new Set(lo.cp_blue || []),
-    weapons: new Set(lo.weapons || []),
+    critDmg: new Set(lo.crit_dmg || []),
     mundus: lo.mundus || "",
     armorMedium: Number(lo.armor_medium) || 0,
+    // Elemental Catalyst element count (1-3); defaults to 3 (full 15%) when unset
+    // so existing loadouts keep the previous behavior. Clamped to a valid count.
+    catalystElements: clampCatalystElements(lo.catalyst_elements),
     race: player.race || "",
     isSubclassed: !!player.subclassed,
     class: player.class || "",
@@ -893,21 +996,51 @@ function playerCritContext(player, loadout) {
   return ctx;
 }
 
+// ctxDetectHit(c, cat, keys): does a single player's context satisfy one
+// detection category? Returns the matched key (truthy) or null. Shared by the
+// group/target (team-wide) and self (per-player) detection so a `detect` map
+// behaves identically everywhere. Categories:
+//   gear/skills/masteries/skillLines/cp → Set membership;
+//   classes/race/mundus → scalar equality against the candidate list;
+//   classPassive → array of { class, line }: `line` for a subclassed player,
+//   otherwise `class`.
+function ctxDetectHit(c, cat, keys) {
+  if (cat === "classes") return c.class && keys.includes(c.class) ? c.class : null;
+  if (cat === "race") return c.race && keys.includes(c.race) ? c.race : null;
+  if (cat === "mundus") return c.mundus && keys.includes(c.mundus) ? c.mundus : null;
+  if (cat === "classPassive") {
+    for (const k of keys) {
+      const ok = c.isSubclassed ? c.skillLines.has(k.line) : c.class === k.class;
+      if (ok) return c.isSubclassed ? k.line : k.class;
+    }
+    return null;
+  }
+  let have;
+  if (cat === "gear") have = c.gear;
+  else if (cat === "skills") have = c.skills;
+  else if (cat === "masteries") have = c.masteries;
+  else if (cat === "skillLines") have = c.skillLines;
+  else if (cat === "cp") have = c.cpBlue;
+  else return null;
+  return keys.find((k) => have.has(k)) || null;
+}
+
+// ctxMatchesDetect(c, detect): true if the player satisfies the source any way
+// it can be applied (any category, any candidate key).
+function ctxMatchesDetect(c, detect) {
+  for (const [cat, keys] of Object.entries(detect || {})) {
+    if (ctxDetectHit(c, cat, keys)) return true;
+  }
+  return false;
+}
+
 // critSourceProviders(contexts, detect): which players satisfy a group/target
-// source. `detect` maps a category (gear/skills/masteries/skillLines/classes)
-// to candidate keys.
+// source. `detect` maps a category to candidate keys (see ctxDetectHit).
 function critSourceProviders(contexts, detect) {
   const providers = [];
   contexts.forEach((c) => {
     for (const [cat, keys] of Object.entries(detect)) {
-      let have;
-      if (cat === "gear") have = c.gear;
-      else if (cat === "skills") have = c.skills;
-      else if (cat === "masteries") have = c.masteries;
-      else if (cat === "skillLines") have = c.skillLines;
-      else if (cat === "classes") have = new Set(c.class ? [c.class] : []);
-      else continue;
-      const hit = keys.find((k) => have.has(k));
+      const hit = ctxDetectHit(c, cat, keys);
       if (hit) {
         providers.push({ slot: c.slot, category: cat, key: hit });
         break;
@@ -917,21 +1050,20 @@ function critSourceProviders(contexts, detect) {
   return providers;
 }
 
-// playerSelfCrit(ctx): the Critical Damage a single player supplies, with a
-// labelled breakdown. Weapon line uses MAX (only the active bar applies).
-function playerSelfCrit(ctx) {
+// playerSelfCrit(ctx, provided): the Critical Damage a single player supplies,
+// with a labelled breakdown. `provided` is a Set of buff `value`s already
+// counted team-wide (group/target); self sources sharing one of those values
+// are skipped so the same buff isn't double-counted. Duplicate self entries for
+// one buff are also collapsed. Weapon line uses MAX (only the active bar applies).
+function playerSelfCrit(ctx, provided) {
+  const skip = provided || new Set();
+  const counted = new Set();
   const sources = [];
   let total = 0;
   CRIT_SELF_SOURCES.forEach((s) => {
-    let present = false;
-    if (s.type === "mundus") present = ctx.mundus === s.key;
-    else if (s.type === "cp") present = ctx.cpBlue.has(s.key);
-    else if (s.type === "gear") present = ctx.gear.has(s.key);
-    else if (s.type === "race") present = ctx.race === s.key;
-    else if (s.type === "classPassive") {
-      present = ctx.isSubclassed ? ctx.skillLines.has(s.line) : ctx.class === s.class;
-    }
-    if (present) {
+    if (skip.has(s.value) || counted.has(s.value)) return;
+    if (ctxMatchesDetect(ctx, s.detect)) {
+      counted.add(s.value);
       sources.push({ label: s.label, pct: s.pct });
       total += s.pct;
     }
@@ -943,65 +1075,96 @@ function playerSelfCrit(ctx) {
     total += pct;
   }
 
-  let weaponMax = 0;
-  let weaponName = "";
-  ctx.weapons.forEach((w) => {
-    const cfg = WEAPON_BY_KEY[w];
-    if (cfg && (cfg.critPct || 0) > weaponMax) {
-      weaponMax = cfg.critPct;
-      weaponName = cfg.label;
+  let animalCompanions = 0;
+  ctx.skills.forEach((k) => {
+    if (ANIMAL_COMPANION_SKILLS.has(k)) animalCompanions += 1;
+  });
+  if (animalCompanions > 0) {
+    const pct = animalCompanions * ADVANCED_SPECIES_PER_SKILL;
+    sources.push({ label: `Advanced Species (${animalCompanions}x Animal Companion)`, pct });
+    total += pct;
+  }
+
+  let critDmgMax = 0;
+  let critDmgName = "";
+  ctx.critDmg.forEach((w) => {
+    const cfg = CRIT_DMG_BY_KEY[w];
+    if (cfg && (cfg.critPct || 0) > critDmgMax) {
+      critDmgMax = cfg.critPct;
+      critDmgName = cfg.label;
     }
   });
-  if (weaponMax > 0) {
-    sources.push({ label: `${weaponName} passive`, pct: weaponMax });
-    total += weaponMax;
+  if (critDmgMax > 0) {
+    sources.push({ label: critDmgName, pct: critDmgMax });
+    total += critDmgMax;
   }
 
   return { total, sources };
 }
 
+// playerCritCap(ctx): the player's maximum Critical Damage. Defaults to
+// CRIT_CAP; cap-raising sources (e.g. Above and Beyond's +30%) add on top.
+function playerCritCap(ctx) {
+  let cap = CRIT_CAP;
+  CRIT_CAP_BONUS_SOURCES.forEach((s) => {
+    if (ctxMatchesDetect(ctx, s.detect)) cap += s.pct;
+  });
+  return cap;
+}
+
 // computeCritCoverage(players, loadoutBySlot): evaluate the roster + the
-// selected encounter. Returns the group/target totals, the solo requirement,
-// the detected group/target sources (with providers), and per-player results
-// ({ slot, self, total, met, deficit, sources }).
+// selected encounter. Returns the group total (team buffs + boss debuffs), the
+// solo requirement, the detected group sources (with providers), and per-player
+// results ({ slot, self, total, met, deficit, sources }).
 function computeCritCoverage(players, loadoutBySlot) {
   const contexts = (players || []).map((p) =>
     playerCritContext(p, (loadoutBySlot && loadoutBySlot[p.slot]) || {})
   );
 
+  // Buff values provided team-wide. A self source sharing one of these is
+  // skipped per player so a buff present in both buckets isn't double-counted.
+  const provided = new Set();
+
   let group = CRIT_BASE;
   const groupSources = [];
   CRIT_GROUP_SOURCES.forEach((s) => {
     const providers = critSourceProviders(contexts, s.detect);
-    if (providers.length) {
-      group += s.pct;
-      groupSources.push({ value: s.value, label: s.label, pct: s.pct, providers });
+    if (!providers.length) return;
+    let pct = s.pct;
+    let label = s.label;
+    if (s.perElement) {
+      // Elemental Catalyst scales with how many elemental damage types the
+      // wearer applies. With multiple wearers, the highest count wins (the boss
+      // accrues the union of their weakness stacks).
+      const elements = Math.max(
+        ...providers.map((p) => {
+          const ctx = contexts.find((c) => c.slot === p.slot);
+          return ctx ? ctx.catalystElements : 3;
+        })
+      );
+      pct = elements * ELEMENTAL_CATALYST_PER_ELEMENT;
+      label = `${s.label} (${elements}x element${elements === 1 ? "" : "s"})`;
     }
+    group += pct;
+    provided.add(s.value);
+    groupSources.push({ value: s.value, label, pct, providers });
   });
 
-  let target = 0;
-  const targetSources = [];
-  CRIT_TARGET_SOURCES.forEach((s) => {
-    const providers = critSourceProviders(contexts, s.detect);
-    if (providers.length) {
-      target += s.pct;
-      targetSources.push({ value: s.value, label: s.label, pct: s.pct, providers });
-    }
-  });
-
-  const soloRequired = Math.max(0, CRIT_CAP - group - target);
+  const soloRequired = Math.max(0, CRIT_CAP - group);
 
   const playerResults = contexts.map((ctx) => {
-    const self = playerSelfCrit(ctx);
-    const total = group + target + self.total;
-    const met = total >= CRIT_CAP;
+    const self = playerSelfCrit(ctx, provided);
+    const total = group + self.total;
+    const cap = playerCritCap(ctx);
+    const met = total >= cap;
     return {
       slot: ctx.slot,
       self: self.total,
       sources: self.sources,
       total,
+      cap,
       met,
-      deficit: met ? 0 : CRIT_CAP - total,
+      deficit: met ? 0 : cap - total,
     };
   });
 
@@ -1009,10 +1172,8 @@ function computeCritCoverage(players, loadoutBySlot) {
     cap: CRIT_CAP,
     base: CRIT_BASE,
     group,
-    target,
     soloRequired,
     groupSources,
-    targetSources,
     players: playerResults,
   };
 }
@@ -1027,8 +1188,8 @@ function computeCritCoverage(players, loadoutBySlot) {
 //   - self  : only that player (CP, light armor, mundus, race, class passive,
 //             sets, and the free-form `pen_extra` flat sources)
 // Per player: total = group + self; they "meet" it when total >= PEN_TARGET.
-// "Self required" = PEN_TARGET - group. Several group keys (Breaches, Runic
-// Sunder, Dismember) are best-guess placeholders — one-line edits here.
+// "Self required" = PEN_TARGET - group. Several keys (Breaches, Runic Sunder)
+// are best-guess placeholders — one-line edits here.
 const PEN_TARGET = 18200;
 const PEN_LIGHT_PER_PIECE = 939; // Light Armor (Concentration) penetration per light piece.
 const PEN_ARENA_ONE_PIECE = 1190; // 1pc bonus from an arena weapon.
@@ -1043,17 +1204,39 @@ const PEN_GROUP_SOURCES = [
   { value: "tremorscale", label: "Tremorscale", pen: 2640, detect: { gear: ["tremorscale"] } },
   { value: "runic_sunder", label: "Runic Sunder", pen: 2200, detect: { skills: ["runic_sunder"] } },
   { value: "crystal_weapon", label: "Crystal Weapon", pen: 1000, detect: { skills: ["crystal_weapon"] } },
-  { value: "dismember", label: "Dismember", pen: 3271, detect: { skills: ["dismember"] } },
+  // Anthelmir's Construct reduces the target's Armor (a team-wide pen debuff)
+  // by an amount that scales off the wearer's higher Weapon/Spell Damage.
+  // `perWeaponDamage` tells computePenCoverage to derive the value from the
+  // wearer's entered weapon damage (× ANTHELMIR_PEN_PER_WD) instead of a flat
+  // `pen`. With multiple wearers the highest contribution wins.
+  { value: "anthelmirs_construct", label: "Anthelmir's Construct", perWeaponDamage: true, detect: { gear: ["anthelmirs_construct"] } },
 ];
+
+// Anthelmir's Construct armor reduction per point of (higher) Weapon/Spell
+// Damage. The set's base tooltip is 400 Armor and explicitly scales off Weapon/
+// Spell Damage, but ZOS doesn't publish the coefficient — this is a best-guess
+// placeholder (≈0.5 → ~2000 pen at 4000 WD). One-line edit to tune once the
+// exact scaling is confirmed.
+const ANTHELMIR_PEN_PER_WD = 0.5;
 
 // Self sources (per player). `type` ∈ cp | gear | mundus | race | classPassive
 // (class for non-subclassed; the linked skill line for subclassed). Light armor,
 // arena 1pc, and self-bucket `pen_extra` are handled specially in playerSelfPen.
+// A source with `scaled` contributes `scaled.per × count`, where `count` is the
+// per-loadout value in `ctx[scaled.ctxKey]` (clamped on input). `scaled.unit`
+// labels the count in the breakdown. Sources without `scaled` add a flat `pen`.
 const PEN_SELF_SOURCES = [
   { value: "piercing", label: "Piercing (CP)", pen: 700, type: "cp", key: "piercing" },
+  { value: "force_of_nature", label: "Force of Nature (CP)", type: "cp", key: "force_of_nature", scaled: { per: FORCE_OF_NATURE_PER_STATUS, ctxKey: "forceOfNatureStatus", unit: "status effect" } },
   { value: "velothi", label: "Velothi Ur-Mage's Amulet", pen: 1650, type: "gear", key: "velothi_ur_mages_amulet" },
   { value: "the_lover", label: "The Lover Mundus", pen: 2744, type: "mundus", key: "the_lover" },
-  { value: "splintered_secrets", label: "Splintered Secrets (Arcanist)", pen: 2480, type: "classPassive", class: "arcanist", line: "herald_of_the_tome" },
+  // Splintered Secrets scales with the number of slotted Herald of the Tome
+  // abilities (1240 each), read from the loadout.
+  { value: "splintered_secrets", label: "Splintered Secrets (Arcanist)", type: "classPassive", class: "arcanist", line: "herald_of_the_tome", scaled: { per: SPLINTERED_SECRETS_PER_SKILL, ctxKey: "splinteredSecretsSkills", unit: "skill" } },
+  // Dismember is a Necromancer Grave Lord passive, so it's a self source: it
+  // applies to a pure (non-subclassed) Necromancer, or to a subclassed player
+  // who has slotted the Grave Lord skill line.
+  { value: "dismember", label: "Dismember (Necromancer)", pen: 3271, type: "classPassive", class: "necromancer", line: "grave_lord" },
   { value: "wood_elf", label: "Hunter's Eye (Wood Elf)", pen: 950, type: "race", key: "bosmer" },
 ];
 
@@ -1066,8 +1249,15 @@ function playerPenContext(player, loadout) {
     skills: new Set(lo.skills || []),
     cpBlue: new Set(lo.cp_blue || []),
     penExtra: new Set(lo.pen_extra || []),
+    penExtraCounts: countKeys(lo.pen_extra || []),
     mundus: lo.mundus || "",
     armorLight: Number(lo.armor_light) || 0,
+    // Higher of Weapon/Spell Damage; drives Anthelmir's Construct's pen scaling.
+    weaponDamage: Math.max(0, Number(lo.weapon_damage) || 0),
+    // Slotted Herald of the Tome abilities; scales Splintered Secrets pen.
+    splinteredSecretsSkills: clampSplinteredSecretsSkills(lo.splintered_secrets_skills),
+    // Negative status effects on the enemy; scales Force of Nature CP pen.
+    forceOfNatureStatus: clampForceOfNatureStatus(lo.force_of_nature_status),
     race: player.race || "",
     isSubclassed: !!player.subclassed,
     class: player.class || "",
@@ -1100,10 +1290,19 @@ function playerSelfPen(ctx) {
     else if (s.type === "classPassive") {
       present = ctx.isSubclassed ? ctx.skillLines.has(s.line) : ctx.class === s.class;
     }
-    if (present) {
-      sources.push({ label: s.label, pen: s.pen });
-      total += s.pen;
+    if (!present) return;
+    // `scaled` sources (Splintered Secrets, Force of Nature) multiply a per-unit
+    // pen by a per-loadout count; everything else is a flat contribution.
+    if (s.scaled) {
+      const n = ctx[s.scaled.ctxKey] || 0;
+      if (n <= 0) return;
+      const pen = s.scaled.per * n;
+      sources.push({ label: `${s.label} (${n} ${s.scaled.unit}${n === 1 ? "" : "s"})`, pen });
+      total += pen;
+      return;
     }
+    sources.push({ label: s.label, pen: s.pen });
+    total += s.pen;
   });
 
   if (ctx.armorLight > 0) {
@@ -1119,10 +1318,13 @@ function playerSelfPen(ctx) {
   }
 
   PEN_EXTRA_SOURCES.forEach((s) => {
-    if (s.bucket === "self" && ctx.penExtra.has(s.value)) {
-      sources.push({ label: s.label, pen: s.pen });
-      total += s.pen;
-    }
+    if (s.bucket !== "self") return;
+    const cap = s.maxStack || 1;
+    const stacks = Math.min(ctx.penExtraCounts[s.value] || 0, cap);
+    if (stacks <= 0) return;
+    const pen = s.pen * stacks;
+    sources.push({ label: stacks > 1 ? `${s.label} ×${stacks}` : s.label, pen });
+    total += pen;
   });
 
   return { total, sources };
@@ -1141,9 +1343,24 @@ function computePenCoverage(players, loadoutBySlot) {
   const groupSources = [];
   PEN_GROUP_SOURCES.forEach((s) => {
     const providers = critSourceProviders(contexts, s.detect);
-    if (providers.length) {
-      group += s.pen;
-      groupSources.push({ value: s.value, label: s.label, pen: s.pen, providers });
+    if (!providers.length) return;
+    let pen = s.pen;
+    let label = s.label;
+    if (s.perWeaponDamage) {
+      // Scale off the highest weapon damage among wearers (the strongest axe
+      // debuff is what lands on the boss).
+      const wd = Math.max(
+        ...providers.map((p) => {
+          const ctx = contexts.find((c) => c.slot === p.slot);
+          return ctx ? ctx.weaponDamage : 0;
+        })
+      );
+      pen = Math.round(wd * ANTHELMIR_PEN_PER_WD);
+      label = `${s.label} (${pen} from ${wd} WD)`;
+    }
+    if (pen > 0) {
+      group += pen;
+      groupSources.push({ value: s.value, label, pen, providers });
     }
   });
   // Group-bucket pen_extra (e.g. Crusher): counts once if any player runs it.

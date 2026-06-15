@@ -268,21 +268,25 @@ apply (drawn from the player's class) and the skill lines are blanked.
 | skills       | text[]   | ordered list of skill keys (default `{}`)   |
 | potions      | text[]   | ordered list of potion keys (default `{}`); `011_loadout_potions.sql` |
 | cp_blue      | text[]   | slotted blue (Warfare) CP star keys (default `{}`); `012_loadout_crit.sql` |
-| weapons      | text[]   | equipped weapon-line keys (default `{}`); `012_loadout_crit.sql` |
+| crit_dmg     | text[]   | crit-damage source keys, i.e. crit weapon-line passives (default `{}`); `012_loadout_crit.sql` (added as `weapons`), renamed by `022_loadout_crit_dmg_rename.sql` |
 | mundus       | text     | mundus stone key (default `''`); `012_loadout_crit.sql` |
 | armor_heavy/medium/light | smallint | armor-piece counts 0–7 (default `0`); `012_loadout_crit.sql` |
 | pen_extra    | text[]   | flat penetration source keys (default `{}`); `014_loadout_pen_extra.sql` |
+| catalyst_elements | integer | Elemental Catalyst damage types applied 1–3 (default `3`); `023_loadout_catalyst_elements.sql` |
+| weapon_damage | integer | higher of Weapon/Spell Damage for Anthelmir's Construct pen (default `0`); `024_loadout_weapon_damage.sql` |
+| splintered_secrets_skills | integer | slotted Herald of the Tome abilities 0–2 for Splintered Secrets pen (default `2`); `025_loadout_splintered_secrets_skills.sql` |
+| force_of_nature_status | integer | negative status effects on enemy 0–5 for Force of Nature CP pen (default `5`); `026_loadout_force_of_nature_status.sql` |
 
 Every team has at least one encounter (`Default`), created with the team and
 backfilled for existing teams. Encounter names are validated against
 `ValidEncounterNames` and must be **unique per team** and all from a **single
 trial** (plus the always-allowed `General` group) — see
 `ValidateEncounterSelection`, with a unique index on `encounters(team_id, name)`
-as a DB backstop. gear/skill/potion/cp_blue/weapons/pen_extra items are free-form
+as a DB backstop. gear/skill/potion/cp_blue/crit_dmg/pen_extra items are free-form
 (sanitized, not allow-listed); mundus is a trimmed string and the armor counts
 are clamped to 0–7 — the searchable options + tooltips live in the frontend
 master data (`frontend/js/data.js`). The crit-input columns
-(`cp_blue`/`weapons`/`mundus`/armor) feed the client-side crit-damage calculator
+(`cp_blue`/`crit_dmg`/`mundus`/armor) feed the client-side crit-damage calculator
 (see `docs/AGENT_CONTEXT.md` "Crit damage model"); `pen_extra` plus those reused
 inputs feed the penetration calculator (see "Penetration model"); `players.race`
 (`013_player_race.sql`) is the roster-level input both also read.

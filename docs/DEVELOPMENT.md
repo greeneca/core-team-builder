@@ -309,22 +309,31 @@ alongside one trial). Violations return `400`.
       "skills": ["pragmatic_fatecarver"],
       "potions": ["spell_power_potion"],
       "cp_blue": ["fighting_finesse", "backstabber"],
-      "weapons": ["dual_wield"],
+      "crit_dmg": ["dual_wield_double"],
       "mundus": "the_shadow",
       "armor_heavy": 0, "armor_medium": 5, "armor_light": 2,
-      "pen_extra": ["sharpened"]
+      "pen_extra": ["sharpened"],
+      "catalyst_elements": 3, "weapon_damage": 0,
+      "splintered_secrets_skills": 2, "force_of_nature_status": 5
     }
   ]
 }
 ```
 
-- `gear`/`skills`/`potions`/`cp_blue`/`weapons`/`pen_extra` are ordered,
+- `gear`/`skills`/`potions`/`cp_blue`/`crit_dmg`/`pen_extra` are ordered,
   free-form key lists (the UI constrains choices to the master data in
   `frontend/js/data.js`). The backend sanitizes them (trim, drop empties, ≤100
-  chars each, ≤30 items) but does not allow-list the keys.
+  chars each, ≤30 items) but does not allow-list the keys. Stackable `pen_extra`
+  sources (e.g. `set_piece_bonuses`, up to 5) are stored as the key repeated once
+  per stack — duplicates are intentional and summed by the penetration calculator.
 - `mundus` is a trimmed string (≤100 chars); `armor_heavy/medium/light` are
-  integers clamped to `0–7`.
-- The crit/penetration inputs (`cp_blue`, `weapons`, `mundus`, armor counts,
+  integers clamped to `0–7`. `catalyst_elements` clamps to `1–3` (default 3),
+  `weapon_damage` to `0–20000`, `splintered_secrets_skills` to `0–2`
+  (default 2) — the Arcanist Splintered Secrets passive's slotted Herald of the
+  Tome ability count (1240 pen each) — and `force_of_nature_status` to `0–5`
+  (default 5) — negative status effects on the enemy for the Force of Nature
+  blue CP star (660 pen each).
+- The crit/penetration inputs (`cp_blue`, `crit_dmg`, `mundus`, armor counts,
   `pen_extra`) feed the client-side crit and penetration calculators — see
   `docs/AGENT_CONTEXT.md` "Crit damage model" / "Penetration model".
 - `slot` must be 1–12; an invalid slot or item returns `400`.

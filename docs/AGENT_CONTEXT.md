@@ -161,7 +161,7 @@ column; the `User` JSON model hides it (`json:"-"`).
   - **Copy from slot**: each slot (editors only) has a **"Copy from…"** dropdown
     that pulls another slot's build + per-encounter loadout **into** this slot —
     everything **except** name and discord handle (role/class/race/subclass +
-    active build + gear/skills/potions/CP/weapons/pen sources/mundus/armor). It
+    active build + gear/skills/potions/CP/crit dmg/pen sources/mundus/armor). It
     reads the live DOM (so unsaved edits copy too) and saves the team + the
     current encounter (`copyPlayerToSlot` in `app.js`). Loadout copies only the
     selected encounter.
@@ -260,9 +260,10 @@ column; the `User` JSON model hides it (`json:"-"`).
   `POTIONS` in `data.js`).
 - **Crit inputs on the loadout** (`012_loadout_crit.sql`): each `(encounter,
   slot)` loadout also carries `cp_blue TEXT[]` (slotted blue/Warfare CP),
-  `weapons TEXT[]` (weapon lines), `mundus TEXT`, and `armor_heavy/medium/light
-  SMALLINT` (0–7). `cp_blue`/`weapons` reuse the chip machinery
-  (`LOADOUT_TYPES.cp_blue`/`.weapons`); mundus is a `<select>` and armor are
+  `crit_dmg TEXT[]` (crit-damage source passives; added as `weapons`, renamed by
+  `022_loadout_crit_dmg_rename.sql`), `mundus TEXT`, and `armor_heavy/medium/light
+  SMALLINT` (0–7). `cp_blue`/`crit_dmg` reuse the chip machinery
+  (`LOADOUT_TYPES.cp_blue`/`.crit_dmg`); mundus is a `<select>` and armor are
   number steppers. These feed the crit calculator (see "Crit damage model").
   `players.race` (`013_player_race.sql`, validated by `models.ValidRace`) is the
   roster-level crit input.
@@ -272,7 +273,7 @@ column; the `User` JSON model hides it (`json:"-"`).
   flat penetration sources that aren't otherwise derivable (Crusher enchant,
   Sharpened trait, Mace/Maul, generic set-piece bonuses). These plus reused
   inputs feed the penetration calculator (see "Penetration model").
-- **Loadout items** (gear sets, skills, potions, cp_blue, weapons, pen_extra): stored as keys; the backend does **not**
+- **Loadout items** (gear sets, skills, potions, cp_blue, crit_dmg, pen_extra): stored as keys; the backend does **not**
   validate them against a master list (free-form, defensively sanitized via
   `SanitizeLoadoutItems`: trimmed, non-empty, ≤100 chars, ≤30 items). The
   searchable dropdowns, labels, and gear tooltips live entirely in the frontend
@@ -418,30 +419,36 @@ column; the `User` JSON model hides it (`json:"-"`).
 
 - **What it is**: a per-encounter critical-damage calculator shown below the
   Buffs card. Critical damage caps at **125% total** (`CRIT_CAP`); the **50%**
-  base (`CRIT_BASE`) is modelled as a group source.
+  base (`CRIT_BASE`) is modelled as a group source. A few sources raise an
+  individual player's cap above 125 — `CRIT_CAP_BONUS_SOURCES` (e.g. Above and
+  Beyond's +30%, 125 → 155), applied per player via `playerCritCap(ctx)`.
 - **Three buckets**: `group` (whole team — any one player providing it counts),
   `target` (a debuff on the boss — any one player applies it), and `self` (only
   that player). Per player, effective crit = `group + target + self`; they meet
-  the cap when that reaches 125. **Solo required** = `125 - group - target`.
+  their own cap when that reaches it (125, or higher with a cap bonus). **Solo
+  required** = `125 - group - target` (the standard cap; cap-bonus players need
+  more from their own sources to re-cap).
 - **No backend math**: like buffs, this is frontend reference data + a computed
   view. The only persisted inputs are the per-encounter crit columns on
-  `encounter_loadouts` (cp_blue/weapons/mundus/armor) and `players.race`.
+  `encounter_loadouts` (cp_blue/crit_dmg/mundus/armor) and `players.race`.
 - **Data** (`frontend/js/data.js`): `CRIT_GROUP_SOURCES`, `CRIT_TARGET_SOURCES`
   (each `{value,label,pct,detect}` where `detect` maps a category to keys), and
   `CRIT_SELF_SOURCES` (each `{label,pct,type,...}`; `type` ∈
   `mundus|cp|gear|race|classPassive`). Medium-armor Dexterity is
-  `CRIT_MEDIUM_PER_PIECE` (2%) × medium pieces; weapon-line crit takes the MAX of
-  selected lines (one active bar). Several source keys (Minor Force, Minor
+  `CRIT_MEDIUM_PER_PIECE` (2%) × medium pieces; crit-damage sources
+  (`CRIT_DMG_SOURCES`, the crit weapon-line passives) take the MAX of selected
+  entries (one active bar). Several source keys (Minor Force, Minor
   Brittle) are **placeholders** — one-line edits.
 - **Rule** (`computeCritCoverage(players, loadoutBySlot)`): class-passive
   detection honors subclassing (non-subclassed → `class`; subclassed → the linked
   `skill_line_*`). Returns `{ cap, base, group, target, soloRequired,
-  groupSources, targetSources, players:[{slot, self, total, met, deficit,
-  sources}] }`.
+  groupSources, targetSources, players:[{slot, self, total, cap, met, deficit,
+  sources}] }` — `cap` is the team-wide base, each player's `cap` is their
+  effective max (≥ base).
 - **UI** (`app.js`/`index.html`): a **Crit Damage** card shows group/target/solo
   stats with a `Details` button (`#crit-modal` lists detected group/target
   sources + each player's breakdown). Each roster slot has crit inputs (Blue CP +
-  Weapons chip columns, Mundus select, H/M/L armor steppers) and a `.crit-label`
+  Crit Dmg sources chip columns, Mundus select, H/M/L armor steppers) and a `.crit-label`
   showing that player's total with a met/unmet indicator. `refreshCritCoverage()`
   repaints live (same trigger points as `refreshBuffCoverage()`, plus mundus/
   armor/race changes).
@@ -462,9 +469,16 @@ column; the `User` JSON model hides it (`json:"-"`).
   the only new persisted input is `pen_extra` on `encounter_loadouts`.
 - **Data** (`frontend/js/data.js`): `PEN_GROUP_SOURCES` (each
   `{value,label,pen,detect}`), `PEN_SELF_SOURCES` (each `{label,pen,type,...}`;
-  `type` ∈ `cp|gear|mundus|race|classPassive`), `PEN_EXTRA_SOURCES` (the
+  `type` ∈ `cp|gear|mundus|race|classPassive`; an optional `scaled`
+  `{per,ctxKey,unit}` multiplies a per-unit pen by a per-loadout count instead of
+  a flat `pen` — `splintered_secrets` uses `splinteredSecretsSkills`
+  (`splintered_secrets_skills`, 0–2, default 2 = 2480), `force_of_nature` uses
+  `forceOfNatureStatus` (`force_of_nature_status`, 0–5, default 5 = 3300)),
+  `PEN_EXTRA_SOURCES` (the
   `pen_extra` chip options, each `{value,label,pen,bucket}` where `bucket` ∈
-  `self|group`). Light armor is `PEN_LIGHT_PER_PIECE` (939) × light pieces; arena
+  `self|group`; an optional `maxStack` (e.g. `set_piece_bonuses` = 5) lets a self
+  source be added multiple times, stored as the key repeated once per stack and
+  summed in the calculator). Light armor is `PEN_LIGHT_PER_PIECE` (939) × light pieces; arena
   1pc is detected from any equipped gear in the `Arena Weapons` group. Several
   group keys (Major/Minor Breach, Runic Sunder, Dismember) are **placeholders** —
   one-line edits.
@@ -476,7 +490,11 @@ column; the `User` JSON model hides it (`json:"-"`).
   stats with a `Details` button (`#pen-modal`). Each roster slot has a `pen_extra`
   chip column and a penetration label with a met/unmet indicator.
   `refreshPenCoverage()` repaints live (same trigger points as
-  `refreshCritCoverage()`).
+  `refreshCritCoverage()`). Conditional per-slot crit/pen inputs are shown only
+  when relevant: `catalyst_elements` (Elemental Catalyst equipped),
+  `weapon_damage` (Anthelmir's Construct equipped),
+  `splintered_secrets_skills` (player has Herald of the Tome — `slotHasHeraldOfTome`),
+  and `force_of_nature_status` (the Force of Nature blue CP chip is slotted).
 
 ## Request flow
 

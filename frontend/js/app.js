@@ -1118,8 +1118,8 @@
     if (gear.length) parts.push(`Gear: ${gear.join(", ")}`);
     const skills = (lo.skills || []).map(skillLabel);
     if (skills.length) parts.push(`Skills: ${skills.join(", ")}`);
-    const weapons = (lo.weapons || []).map(weaponLabel);
-    if (weapons.length) parts.push(`Weapons: ${weapons.join(", ")}`);
+    const critDmg = (lo.crit_dmg || []).map(critDmgLabel);
+    if (critDmg.length) parts.push(`Crit dmg: ${critDmg.join(", ")}`);
     if (lo.mundus) parts.push(`Mundus: ${mundusLabel(lo.mundus)}`);
     const potions = (lo.potions || []).map(potionLabel);
     if (potions.length) parts.push(`Potions: ${potions.join(", ")}`);
@@ -1130,7 +1130,17 @@
     if (lo.armor_medium) armor.push(`${lo.armor_medium}M`);
     if (lo.armor_light) armor.push(`${lo.armor_light}L`);
     if (armor.length) parts.push(`Armor: ${armor.join("/")}`);
-    const pen = (lo.pen_extra || []).map(penExtraLabel);
+    // pen_extra may contain repeated keys for stackable sources; collapse them
+    // into a single "Label ×N" entry, preserving first-seen order.
+    const penCounts = countKeys(lo.pen_extra || []);
+    const penSeen = new Set();
+    const pen = [];
+    (lo.pen_extra || []).forEach((key) => {
+      if (penSeen.has(key)) return;
+      penSeen.add(key);
+      const n = penCounts[key];
+      pen.push(n > 1 ? `${penExtraLabel(key)} ×${n}` : penExtraLabel(key));
+    });
     if (pen.length) parts.push(`Pen: ${pen.join(", ")}`);
     return parts;
   }
@@ -1509,8 +1519,8 @@
                 <label>Blue CP</label>
                 <div class="chip-list" data-list></div>
               </div>
-              <div class="loadout-col" data-type="weapons">
-                <label>Weapons</label>
+              <div class="loadout-col" data-type="crit_dmg">
+                <label>Crit Dmg sources</label>
                 <div class="chip-list" data-list></div>
               </div>
               <div class="loadout-col" data-type="pen_extra">
@@ -1531,13 +1541,49 @@
                   <input class="input armor-count" type="number" min="0" max="7" data-crit-field="armor_light" aria-label="Light armor pieces" />
                 </div>
               </div>
-              <div class="crit-field crit-result">
-                <label>Crit damage</label>
-                <span class="crit-label" data-crit-label>—</span>
+              <div class="crit-field crit-catalyst is-hidden" data-catalyst-field>
+                <label>Catalyst dmg types</label>
+                <select class="input" data-crit-field="catalyst_elements" aria-label="Elemental Catalyst damage types applied">
+                  <option value="3">3 — Flame/Frost/Shock (15%)</option>
+                  <option value="2">2 elements (10%)</option>
+                  <option value="1">1 element (5%)</option>
+                </select>
               </div>
-              <div class="crit-field crit-result">
-                <label>Penetration</label>
-                <span class="crit-label" data-pen-label>—</span>
+              <div class="crit-field crit-weapon-dmg is-hidden" data-weapon-dmg-field>
+                <label>Weapon damage</label>
+                <input class="input" type="number" min="0" max="20000" step="1" data-crit-field="weapon_damage" aria-label="Higher of Weapon or Spell Damage (for Anthelmir's Construct penetration)" />
+              </div>
+              <div class="crit-field crit-splintered is-hidden" data-splintered-field>
+                <label>Splintered skills</label>
+                <select class="input" data-crit-field="splintered_secrets_skills" aria-label="Herald of the Tome abilities slotted for Splintered Secrets penetration">
+                  <option value="5">5 skills (6200)</option>
+                  <option value="4">4 skills (4960)</option>
+                  <option value="3">3 skills (3720)</option>
+                  <option value="2">2 skills (2480)</option>
+                  <option value="1">1 skill (1240)</option>
+                  <option value="0">0 skills (0)</option>
+                </select>
+              </div>
+              <div class="crit-field crit-force-nature is-hidden" data-force-nature-field>
+                <label>Status effects</label>
+                <select class="input" data-crit-field="force_of_nature_status" aria-label="Negative status effects on the enemy for Force of Nature penetration">
+                  <option value="5">5 effects (3300)</option>
+                  <option value="4">4 effects (2640)</option>
+                  <option value="3">3 effects (1980)</option>
+                  <option value="2">2 effects (1320)</option>
+                  <option value="1">1 effect (660)</option>
+                  <option value="0">0 effects (0)</option>
+                </select>
+              </div>
+              <div class="crit-results">
+                <div class="crit-field crit-result">
+                  <label>Crit damage</label>
+                  <span class="crit-label" data-crit-label>—</span>
+                </div>
+                <div class="crit-field crit-result">
+                  <label>Penetration</label>
+                  <span class="crit-label" data-pen-label>—</span>
+                </div>
               </div>
             </div>
           </div>
@@ -1688,7 +1734,7 @@
 
   // Copy everything from one roster slot to another EXCEPT name + discord handle:
   // role/class/race/subclass + the active build (skill lines or masteries) and
-  // the full per-encounter loadout (gear/skills/potions/CP/weapons/pen sources,
+  // the full per-encounter loadout (gear/skills/potions/CP/crit dmg/pen sources,
   // mundus, armor counts). Operates on the live DOM (so unsaved edits are
   // included), then persists both the team and the encounter.
   function copyPlayerToSlot(srcSlot, dstSlot) {
@@ -1726,11 +1772,13 @@
       const srcChips = srcSlot.querySelectorAll(
         `[data-loadout] .loadout-col[data-type="${type}"] .chip`
       );
-      srcChips.forEach((chip) => addChip(dstList, type, chip.dataset.value, true));
+      srcChips.forEach((chip) =>
+        addChip(dstList, type, chip.dataset.value, true, Number(chip.dataset.count) || 1)
+      );
     });
 
-    // Crit/pen setup fields (mundus + armor counts).
-    ["mundus", "armor_heavy", "armor_medium", "armor_light"].forEach((f) => {
+    // Crit/pen setup fields (mundus + armor counts + catalyst element count + weapon damage).
+    ["mundus", "armor_heavy", "armor_medium", "armor_light", "catalyst_elements", "weapon_damage", "splintered_secrets_skills", "force_of_nature_status"].forEach((f) => {
       const s = srcSlot.querySelector(`[data-crit-field="${f}"]`);
       const d = dstSlot.querySelector(`[data-crit-field="${f}"]`);
       if (s && d) d.value = s.value;
@@ -1777,6 +1825,14 @@
           const input = critEl.querySelector(`[data-crit-field="${f}"]`);
           if (input) input.value = Number(lo[f]) || 0;
         });
+        const catSel = critEl.querySelector('[data-crit-field="catalyst_elements"]');
+        if (catSel) catSel.value = String(clampCatalystElements(lo.catalyst_elements));
+        const wdInput = critEl.querySelector('[data-crit-field="weapon_damage"]');
+        if (wdInput) wdInput.value = Number(lo.weapon_damage) || 0;
+        const ssSel = critEl.querySelector('[data-crit-field="splintered_secrets_skills"]');
+        if (ssSel) ssSel.value = String(clampSplinteredSecretsSkills(lo.splintered_secrets_skills));
+        const fonSel = critEl.querySelector('[data-crit-field="force_of_nature_status"]');
+        if (fonSel) fonSel.value = String(clampForceOfNatureStatus(lo.force_of_nature_status));
       }
     });
 
@@ -2026,21 +2082,50 @@
     }
   });
 
-  // Create a removable chip for one loadout item.
-  function addChip(listEl, type, key, editable) {
+  // Maximum number of times a loadout item may be stacked in one list. Only
+  // certain pen sources (set-piece bonuses) are stackable; everything else is 1.
+  function chipMaxStack(type, key) {
+    if (type === "pen_extra") return penExtraMaxStack(key);
+    return 1;
+  }
+
+  // Sync a chip's visible label and tooltip with its current stack count,
+  // appending "×N" once it stacks beyond one.
+  function updateChipCountLabel(chip, type) {
+    const cfg = LOADOUT_TYPES[type];
+    const key = chip.dataset.value;
+    const count = Math.max(1, Number(chip.dataset.count) || 1);
+    const labelEl = chip.querySelector(".chip-label");
+    if (labelEl) labelEl.textContent = count > 1 ? `${cfg.label(key)} ×${count}` : cfg.label(key);
+  }
+
+  // Create a removable chip for one loadout item (stackable items pass a count).
+  function addChip(listEl, type, key, editable, count) {
     if (!key) return;
-    // Avoid duplicates within the same list.
-    if (listEl.querySelector(`.chip[data-value="${escapeAttr(key)}"]`)) return;
+    const maxStack = chipMaxStack(type, key);
+    const existing = listEl.querySelector(`.chip[data-value="${escapeAttr(key)}"]`);
+    // Duplicates either increment a stackable chip (up to its cap) or are ignored.
+    if (existing) {
+      if (maxStack > 1) {
+        const cur = Math.max(1, Number(existing.dataset.count) || 1);
+        const next = Math.min(maxStack, cur + Math.max(1, count || 1));
+        existing.dataset.count = String(next);
+        updateChipCountLabel(existing, type);
+      }
+      return;
+    }
 
     const cfg = LOADOUT_TYPES[type];
     const chip = document.createElement("span");
     chip.className = "chip";
     chip.dataset.value = key;
+    chip.dataset.count = String(Math.min(maxStack, Math.max(1, count || 1)));
     // Show the gear set description on hover (same floating tooltip the picker
     // options use; see initTooltips in components.js).
     const desc = cfg.desc(key);
     if (desc) chip.dataset.tip = desc;
-    chip.innerHTML = `<span class="chip-label">${escapeAttr(cfg.label(key))}</span>`;
+    chip.innerHTML = `<span class="chip-label"></span>`;
+    updateChipCountLabel(chip, type);
     if (editable) {
       const remove = document.createElement("button");
       remove.type = "button";
@@ -2080,12 +2165,17 @@
   // Collect each player's loadout (gear/skills chips) from the roster slots.
   function collectLoadouts() {
     return Array.from(el("roster").querySelectorAll(".player-slot")).map((slot) => {
+      // Stackable chips (e.g. set-piece pen bonuses) are persisted as their key
+      // repeated once per stack, so the calculator can sum them.
       const read = (type) =>
         Array.from(
           slot
             .querySelector(`[data-loadout] .loadout-col[data-type="${type}"] .chip-list`)
             .querySelectorAll(".chip")
-        ).map((c) => c.dataset.value);
+        ).flatMap((c) => {
+          const count = Math.max(1, Number(c.dataset.count) || 1);
+          return Array.from({ length: count }, () => c.dataset.value);
+        });
       const critEl = slot.querySelector("[data-crit]");
       const critVal = (f) => {
         const e = critEl ? critEl.querySelector(`[data-crit-field="${f}"]`) : null;
@@ -2102,12 +2192,20 @@
         skills: read("skills"),
         potions: read("potions"),
         cp_blue: read("cp_blue"),
-        weapons: read("weapons"),
+        crit_dmg: read("crit_dmg"),
         pen_extra: read("pen_extra"),
         mundus: critVal("mundus"),
         armor_heavy: armor("armor_heavy"),
         armor_medium: armor("armor_medium"),
         armor_light: armor("armor_light"),
+        catalyst_elements: clampCatalystElements(critVal("catalyst_elements")),
+        weapon_damage: (() => {
+          const v = parseInt(critVal("weapon_damage"), 10);
+          if (!Number.isFinite(v)) return 0;
+          return Math.max(0, Math.min(20000, v));
+        })(),
+        splintered_secrets_skills: clampSplinteredSecretsSkills(critVal("splintered_secrets_skills")),
+        force_of_nature_status: clampForceOfNatureStatus(critVal("force_of_nature_status")),
       };
     });
   }
@@ -2278,7 +2376,7 @@
 
   // --- Crit damage coverage ---
   // Like buffs, crit is computed live from the current DOM (roster build + the
-  // selected encounter's gear/skills/CP/weapons/mundus/armor) so it survives
+  // selected encounter's gear/skills/CP/crit dmg/mundus/armor) so it survives
   // autosaves. The card shows group/target/solo-required; each roster slot gets a
   // crit-damage label + met/unmet indicator against the cap.
   let lastCritCoverage = null;
@@ -2291,8 +2389,8 @@
     const cov = computeCritCoverage(collectPlayers(), currentLoadoutBySlot());
     lastCritCoverage = cov;
 
+    el("crit-cap").textContent = `${cov.cap}%`;
     el("crit-group").textContent = `${cov.group}%`;
-    el("crit-target").textContent = `${cov.target}%`;
     el("crit-required").textContent = `${cov.soloRequired}%`;
 
     const bySlot = {};
@@ -2300,6 +2398,16 @@
       bySlot[p.slot] = p;
     });
     el("roster").querySelectorAll(".player-slot").forEach((slot) => {
+      // The catalyst element selector only matters when Elemental Catalyst is
+      // equipped; show it only then so it doesn't clutter every slot.
+      const catField = slot.querySelector("[data-catalyst-field]");
+      if (catField) {
+        const hasCatalyst = !!slot.querySelector(
+          '[data-loadout] .loadout-col[data-type="gear"] .chip[data-value="elemental_catalyst"]'
+        );
+        catField.classList.toggle("is-hidden", !hasCatalyst);
+      }
+
       const label = slot.querySelector("[data-crit-label]");
       if (!label) return;
       const r = bySlot[Number(slot.dataset.slot)];
@@ -2310,22 +2418,23 @@
       label.textContent = `${r.total}%`;
       label.classList.toggle("is-met", r.met);
       label.classList.toggle("is-unmet", !r.met);
-      const breakdown = `self ${r.self}% + group ${cov.group}% + target ${cov.target}%`;
+      const breakdown = `self ${r.self}% + group ${cov.group}%`;
+      const cap = r.cap != null ? r.cap : cov.cap;
       label.dataset.tip = r.met
-        ? `Meets the ${cov.cap}% cap (${breakdown}).`
-        : `${r.deficit}% under the ${cov.cap}% cap (${breakdown}).`;
+        ? `Meets the ${cap}% cap (${breakdown}).`
+        : `${r.deficit}% under the ${cap}% cap (${breakdown}).`;
     });
 
     if (!el("crit-modal").classList.contains("is-hidden")) renderCritModal();
   }
 
-  // Render the group/target source breakdown + per-player breakdown into the
-  // crit details modal.
+  // Render the group source breakdown + per-player breakdown into the crit
+  // details modal.
   function renderCritModal() {
     const cov =
       lastCritCoverage || computeCritCoverage(collectPlayers(), currentLoadoutBySlot());
     el("crit-modal-sub").textContent =
-      `Cap ${cov.cap}% · Group ${cov.group}% · Target ${cov.target}% · Each player needs ${cov.soloRequired}% of their own` +
+      `Cap ${cov.cap}% · Group ${cov.group}% · Each player needs ${cov.soloRequired}% of their own` +
       (currentEncounter ? ` · ${currentEncounter.name}` : "");
 
     const provs = (sources) =>
@@ -2344,10 +2453,6 @@
       <div class="buff-row is-met">
         <div class="buff-row-head"><span class="buff-name">Group provided (${cov.group}%)</span></div>
         <div class="buff-providers"><span class="buff-provider">Base +${cov.base}%</span>${provs(cov.groupSources)}</div>
-      </div>
-      <div class="buff-row is-met">
-        <div class="buff-row-head"><span class="buff-name">Target applied (${cov.target}%)</span></div>
-        <div class="buff-providers">${provs(cov.targetSources)}</div>
       </div>`;
 
     const list = el("crit-modal-list");
@@ -2360,10 +2465,11 @@
             .map((s) => `<span class="buff-provider">${escapeAttr(s.label)} +${s.pct}%</span>`)
             .join("")
         : `<span class="text-muted">No self sources</span>`;
+      const capNote = p.cap != null && p.cap !== cov.cap ? ` / ${p.cap}% cap` : "";
       row.innerHTML = `
         <div class="buff-row-head">
           <span class="buff-status" aria-hidden="true">${p.met ? "✓" : "✗"}</span>
-          <span class="buff-name">P${p.slot} — ${p.total}%${p.met ? "" : ` (−${p.deficit}%)`}</span>
+          <span class="buff-name">P${p.slot} — ${p.total}%${capNote}${p.met ? "" : ` (−${p.deficit}%)`}</span>
         </div>
         <div class="buff-providers">${selfParts}</div>`;
       list.appendChild(row);
@@ -2396,6 +2502,21 @@
   // with a met/unmet indicator against the target resistance.
   let lastPenCoverage = null;
 
+  // Whether a roster slot has the Arcanist Herald of the Tome skill line: a
+  // subclassed player with it slotted, or a pure Arcanist. Mirrors the
+  // splintered_secrets pen source detection (see playerSelfPen in data.js).
+  function slotHasHeraldOfTome(slot) {
+    const sub = slot.querySelector('[data-field="subclassed"]');
+    if (sub && sub.checked) {
+      return [1, 2, 3].some((n) => {
+        const s = slot.querySelector(`[data-field="skill_line_${n}"]`);
+        return s && s.value === "herald_of_the_tome";
+      });
+    }
+    const cls = slot.querySelector('[data-field="class"]');
+    return !!cls && cls.value === "arcanist";
+  }
+
   function refreshPenCoverage() {
     const groupEl = el("pen-group");
     if (!groupEl || !currentTeam || detailView.classList.contains("is-hidden")) return;
@@ -2413,6 +2534,34 @@
       bySlot[p.slot] = p;
     });
     el("roster").querySelectorAll(".player-slot").forEach((slot) => {
+      // The weapon-damage input only matters for Anthelmir's Construct's pen
+      // scaling; show it only when that set is equipped.
+      const wdField = slot.querySelector("[data-weapon-dmg-field]");
+      if (wdField) {
+        const hasAnthelmir = !!slot.querySelector(
+          '[data-loadout] .loadout-col[data-type="gear"] .chip[data-value="anthelmirs_construct"]'
+        );
+        wdField.classList.toggle("is-hidden", !hasAnthelmir);
+      }
+
+      // The Splintered Secrets skill count only matters when the player has the
+      // Herald of the Tome skill line (subclassed) or is an Arcanist; show it
+      // only then, mirroring the splintered_secrets pen source's detection.
+      const ssField = slot.querySelector("[data-splintered-field]");
+      if (ssField) {
+        ssField.classList.toggle("is-hidden", !slotHasHeraldOfTome(slot));
+      }
+
+      // The Force of Nature status-effect count only matters when that Warfare
+      // CP star is slotted; show it only when the cp_blue chip is present.
+      const fonField = slot.querySelector("[data-force-nature-field]");
+      if (fonField) {
+        const hasForceOfNature = !!slot.querySelector(
+          '[data-loadout] .loadout-col[data-type="cp_blue"] .chip[data-value="force_of_nature"]'
+        );
+        fonField.classList.toggle("is-hidden", !hasForceOfNature);
+      }
+
       const label = slot.querySelector("[data-pen-label]");
       if (!label) return;
       const r = bySlot[Number(slot.dataset.slot)];

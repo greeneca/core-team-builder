@@ -121,7 +121,7 @@ func ValidateEncounterSelection(existing []string, candidate string) error {
 }
 
 // Loadout is a single player's gear, skills, potions, and crit-damage inputs
-// for one encounter. CPBlue/Weapons/Mundus and the armor counts feed the
+// for one encounter. CPBlue/CritDmg/Mundus and the armor counts feed the
 // client-side crit-damage calculator; they are stored per encounter per slot.
 type Loadout struct {
 	Slot        int      `json:"slot"`
@@ -129,12 +129,27 @@ type Loadout struct {
 	Skills      []string `json:"skills"`
 	Potions     []string `json:"potions"`
 	CPBlue      []string `json:"cp_blue"`
-	Weapons     []string `json:"weapons"`
+	CritDmg     []string `json:"crit_dmg"`
 	Mundus      string   `json:"mundus"`
 	ArmorHeavy  int      `json:"armor_heavy"`
 	ArmorMedium int      `json:"armor_medium"`
 	ArmorLight  int      `json:"armor_light"`
 	PenExtra    []string `json:"pen_extra"`
+	// CatalystElements is how many distinct elemental damage types (1-3) the
+	// Elemental Catalyst wearer applies; feeds the client-side crit calculator
+	// (5% Critical Damage taken per element). Defaults to 3 (full bonus).
+	CatalystElements int `json:"catalyst_elements"`
+	// WeaponDamage is the player's higher of Weapon/Spell Damage; feeds the
+	// penetration calculator for sets that scale off it (Anthelmir's Construct).
+	WeaponDamage int `json:"weapon_damage"`
+	// SplinteredSecretsSkills is how many Herald of the Tome abilities (0-5) are
+	// slotted for the Arcanist "Splintered Secrets" passive; feeds the
+	// penetration calculator (1240 Offensive Penetration each). Defaults to 2.
+	SplinteredSecretsSkills int `json:"splintered_secrets_skills"`
+	// ForceOfNatureStatus is how many negative status effects (0-5) are on the
+	// enemy for the "Force of Nature" Warfare CP star; feeds the penetration
+	// calculator (660 Offensive Penetration each). Defaults to 5 (full bonus).
+	ForceOfNatureStatus int `json:"force_of_nature_status"`
 }
 
 // Encounter is a named fight within a team, with a per-player loadout list.
@@ -220,8 +235,8 @@ func copyEncountersTx(ctx context.Context, tx pgx.Tx, srcTeamID, dstTeamID int64
 		}
 		// Copy the 12 loadout rows (gear + skills + potions + crit inputs) slot-for-slot.
 		if _, err := tx.Exec(ctx,
-			`INSERT INTO encounter_loadouts (encounter_id, slot, gear, skills, potions, cp_blue, weapons, mundus, armor_heavy, armor_medium, armor_light, pen_extra)
-			 SELECT $1, slot, gear, skills, potions, cp_blue, weapons, mundus, armor_heavy, armor_medium, armor_light, pen_extra FROM encounter_loadouts WHERE encounter_id = $2`,
+			`INSERT INTO encounter_loadouts (encounter_id, slot, gear, skills, potions, cp_blue, crit_dmg, mundus, armor_heavy, armor_medium, armor_light, pen_extra, catalyst_elements, weapon_damage, splintered_secrets_skills, force_of_nature_status)
+			 SELECT $1, slot, gear, skills, potions, cp_blue, crit_dmg, mundus, armor_heavy, armor_medium, armor_light, pen_extra, catalyst_elements, weapon_damage, splintered_secrets_skills, force_of_nature_status FROM encounter_loadouts WHERE encounter_id = $2`,
 			newID, src.id,
 		); err != nil {
 			return err
@@ -295,9 +310,12 @@ func (s *EncounterStore) Create(ctx context.Context, teamID int64, name string, 
 		if _, err := tx.Exec(ctx,
 			`UPDATE encounter_loadouts dst
 			 SET gear = src.gear, skills = src.skills, potions = src.potions,
-			     cp_blue = src.cp_blue, weapons = src.weapons, mundus = src.mundus,
+			     cp_blue = src.cp_blue, crit_dmg = src.crit_dmg, mundus = src.mundus,
 			     armor_heavy = src.armor_heavy, armor_medium = src.armor_medium, armor_light = src.armor_light,
-			     pen_extra = src.pen_extra
+			     pen_extra = src.pen_extra, catalyst_elements = src.catalyst_elements,
+			     weapon_damage = src.weapon_damage,
+			     splintered_secrets_skills = src.splintered_secrets_skills,
+			     force_of_nature_status = src.force_of_nature_status
 			 FROM encounter_loadouts src
 			 JOIN encounters e ON e.id = src.encounter_id
 			 WHERE dst.encounter_id = $1
@@ -333,7 +351,7 @@ func (s *EncounterStore) Get(ctx context.Context, encounterID int64) (*Encounter
 	}
 
 	const lq = `
-		SELECT slot, gear, skills, potions, cp_blue, weapons, mundus, armor_heavy, armor_medium, armor_light, pen_extra
+		SELECT slot, gear, skills, potions, cp_blue, crit_dmg, mundus, armor_heavy, armor_medium, armor_light, pen_extra, catalyst_elements, weapon_damage, splintered_secrets_skills, force_of_nature_status
 		FROM encounter_loadouts WHERE encounter_id = $1 ORDER BY slot`
 	rows, err := s.pool.Query(ctx, lq, encounterID)
 	if err != nil {
@@ -344,7 +362,7 @@ func (s *EncounterStore) Get(ctx context.Context, encounterID int64) (*Encounter
 		var l Loadout
 		if err := rows.Scan(
 			&l.Slot, &l.Gear, &l.Skills, &l.Potions,
-			&l.CPBlue, &l.Weapons, &l.Mundus, &l.ArmorHeavy, &l.ArmorMedium, &l.ArmorLight, &l.PenExtra,
+			&l.CPBlue, &l.CritDmg, &l.Mundus, &l.ArmorHeavy, &l.ArmorMedium, &l.ArmorLight, &l.PenExtra, &l.CatalystElements, &l.WeaponDamage, &l.SplinteredSecretsSkills, &l.ForceOfNatureStatus,
 		); err != nil {
 			return nil, err
 		}
@@ -389,13 +407,17 @@ func (s *EncounterStore) SaveLoadouts(ctx context.Context, encounterID int64, lo
 
 	const q = `
 		UPDATE encounter_loadouts
-		SET gear = $1, skills = $2, potions = $3, cp_blue = $4, weapons = $5,
-		    mundus = $6, armor_heavy = $7, armor_medium = $8, armor_light = $9, pen_extra = $10
-		WHERE encounter_id = $11 AND slot = $12`
+		SET gear = $1, skills = $2, potions = $3, cp_blue = $4, crit_dmg = $5,
+		    mundus = $6, armor_heavy = $7, armor_medium = $8, armor_light = $9, pen_extra = $10,
+		    catalyst_elements = $11, weapon_damage = $12, splintered_secrets_skills = $13,
+		    force_of_nature_status = $14
+		WHERE encounter_id = $15 AND slot = $16`
 	for _, l := range loadouts {
 		if _, err := tx.Exec(ctx, q,
-			l.Gear, l.Skills, l.Potions, l.CPBlue, l.Weapons,
+			l.Gear, l.Skills, l.Potions, l.CPBlue, l.CritDmg,
 			l.Mundus, l.ArmorHeavy, l.ArmorMedium, l.ArmorLight, l.PenExtra,
+			l.CatalystElements, l.WeaponDamage, l.SplinteredSecretsSkills,
+			l.ForceOfNatureStatus,
 			encounterID, l.Slot,
 		); err != nil {
 			return err
