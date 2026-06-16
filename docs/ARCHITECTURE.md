@@ -212,8 +212,8 @@ rows. Managed via `PasswordResetStore`.
 | schedule_time  | varchar(5)        | `"HH:MM"` 24h **in UTC**, `''` when unset  |
 | team_timezones | text[]            | extra IANA zones to display the time in (default `{}`) |
 | encounters_enabled | boolean       | surface multi-encounter UI; default `false`; `017_team_encounters_enabled.sql` |
-| signup_note    | text              | condensed-list footer (default `''`); `018_team_signup_note.sql` |
-| detailed_header| text              | detailed-post header (default `''`); `019_team_detailed_header.sql` |
+| post_footer    | text              | Discord bot `/coreteam post` footer (default `''`); `018_team_signup_note.sql` → `029_team_bot_footers.sql` |
+| dm_footer      | text              | Discord bot build-details DM footer (default `''`); `019_team_detailed_header.sql` → `029_team_bot_footers.sql` |
 | created_at     | timestamptz       | default `now()`                            |
 | updated_at     | timestamptz       | auto-updated via trigger                   |
 
@@ -222,8 +222,9 @@ The trial schedule lives on `teams` (`004_team_schedule.sql`,
 each viewer's current timezone in the browser; the old per-team
 `schedule_timezone` column was removed in `010_drop_schedule_timezone.sql`.
 `encounters_enabled` gates the multi-encounter UI (off → only the first encounter
-shows); `signup_note` / `detailed_header` are free-form text for the Discord
-signup export (see `docs/AGENT_CONTEXT.md` "Discord signup export").
+shows); `post_footer` / `dm_footer` are free-form footers the Discord bot appends
+to its `/coreteam post` overview and its build-details DM respectively (see
+`docs/AGENT_CONTEXT.md` "Discord bot footers").
 
 ### `team_members` (sharing)
 

@@ -88,16 +88,16 @@ type Team struct {
 	// EncountersEnabled controls whether the team uses multiple encounters. When
 	// false the UI hides the encounters section and shows only the first one.
 	EncountersEnabled bool `json:"encounters_enabled"`
-	// SignupNote is a free-form footer appended to the condensed Discord signup
-	// list. Editable from the team detail page.
-	SignupNote string `json:"signup_note"`
-	// DetailedHeader is a free-form header prepended to the detailed Discord
-	// signup post. Editable from the team detail page.
-	DetailedHeader string       `json:"detailed_header"`
-	CreatedAt      time.Time    `json:"created_at"`
-	UpdatedAt      time.Time    `json:"updated_at"`
-	Players        []Player     `json:"players,omitempty"`
-	Members        []TeamMember `json:"members,omitempty"`
+	// PostFooter is a free-form footer the Discord bot appends to its /coreteam
+	// post overview. Editable from the team detail page.
+	PostFooter string `json:"post_footer"`
+	// DMFooter is a free-form footer the Discord bot appends to the "Get My Build
+	// Details" direct message. Editable from the team detail page.
+	DMFooter  string       `json:"dm_footer"`
+	CreatedAt time.Time    `json:"created_at"`
+	UpdatedAt time.Time    `json:"updated_at"`
+	Players   []Player     `json:"players,omitempty"`
+	Members   []TeamMember `json:"members,omitempty"`
 }
 
 // TeamStore provides data access for teams, their members, and players.
@@ -130,12 +130,12 @@ func (s *TeamStore) Create(ctx context.Context, ownerID int64, name string, copy
 	if copyFromTeamID != 0 {
 		// Copy the source team's schedule onto the new team.
 		const insertTeamCopy = `
-			INSERT INTO teams (name, owner_id, schedule_days, schedule_time, team_timezones, encounters_enabled, signup_note, detailed_header)
-			SELECT $1, $2, schedule_days, schedule_time, team_timezones, encounters_enabled, signup_note, detailed_header
+			INSERT INTO teams (name, owner_id, schedule_days, schedule_time, team_timezones, encounters_enabled, post_footer, dm_footer)
+			SELECT $1, $2, schedule_days, schedule_time, team_timezones, encounters_enabled, post_footer, dm_footer
 			FROM teams WHERE id = $3
-			RETURNING id, name, owner_id, schedule_days, schedule_time, team_timezones, encounters_enabled, signup_note, detailed_header, created_at, updated_at`
+			RETURNING id, name, owner_id, schedule_days, schedule_time, team_timezones, encounters_enabled, post_footer, dm_footer, created_at, updated_at`
 		if err := tx.QueryRow(ctx, insertTeamCopy, name, ownerID, copyFromTeamID).Scan(
-			&team.ID, &team.Name, &team.OwnerID, &team.ScheduleDays, &team.ScheduleTime, &team.TeamTimezones, &team.EncountersEnabled, &team.SignupNote, &team.DetailedHeader, &team.CreatedAt, &team.UpdatedAt,
+			&team.ID, &team.Name, &team.OwnerID, &team.ScheduleDays, &team.ScheduleTime, &team.TeamTimezones, &team.EncountersEnabled, &team.PostFooter, &team.DMFooter, &team.CreatedAt, &team.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -143,9 +143,9 @@ func (s *TeamStore) Create(ctx context.Context, ownerID int64, name string, copy
 		const insertTeam = `
 			INSERT INTO teams (name, owner_id)
 			VALUES ($1, $2)
-			RETURNING id, name, owner_id, schedule_days, schedule_time, team_timezones, encounters_enabled, signup_note, detailed_header, created_at, updated_at`
+			RETURNING id, name, owner_id, schedule_days, schedule_time, team_timezones, encounters_enabled, post_footer, dm_footer, created_at, updated_at`
 		if err := tx.QueryRow(ctx, insertTeam, name, ownerID).Scan(
-			&team.ID, &team.Name, &team.OwnerID, &team.ScheduleDays, &team.ScheduleTime, &team.TeamTimezones, &team.EncountersEnabled, &team.SignupNote, &team.DetailedHeader, &team.CreatedAt, &team.UpdatedAt,
+			&team.ID, &team.Name, &team.OwnerID, &team.ScheduleDays, &team.ScheduleTime, &team.TeamTimezones, &team.EncountersEnabled, &team.PostFooter, &team.DMFooter, &team.CreatedAt, &team.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -208,7 +208,7 @@ func (s *TeamStore) CountOwned(ctx context.Context, ownerID int64) (int, error) 
 // most recently updated first. Players and members are not populated here.
 func (s *TeamStore) ListForUser(ctx context.Context, userID int64) ([]Team, error) {
 	const q = `
-		SELECT t.id, t.name, t.owner_id, t.schedule_days, t.schedule_time, t.team_timezones, t.encounters_enabled, t.signup_note, t.detailed_header, t.created_at, t.updated_at
+		SELECT t.id, t.name, t.owner_id, t.schedule_days, t.schedule_time, t.team_timezones, t.encounters_enabled, t.post_footer, t.dm_footer, t.created_at, t.updated_at
 		FROM teams t
 		JOIN team_members m ON m.team_id = t.id
 		WHERE m.user_id = $1
@@ -223,7 +223,7 @@ func (s *TeamStore) ListForUser(ctx context.Context, userID int64) ([]Team, erro
 	teams := []Team{}
 	for rows.Next() {
 		var t Team
-		if err := rows.Scan(&t.ID, &t.Name, &t.OwnerID, &t.ScheduleDays, &t.ScheduleTime, &t.TeamTimezones, &t.EncountersEnabled, &t.SignupNote, &t.DetailedHeader, &t.CreatedAt, &t.UpdatedAt); err != nil {
+		if err := rows.Scan(&t.ID, &t.Name, &t.OwnerID, &t.ScheduleDays, &t.ScheduleTime, &t.TeamTimezones, &t.EncountersEnabled, &t.PostFooter, &t.DMFooter, &t.CreatedAt, &t.UpdatedAt); err != nil {
 			return nil, err
 		}
 		teams = append(teams, t)
@@ -235,10 +235,10 @@ func (s *TeamStore) ListForUser(ctx context.Context, userID int64) ([]Team, erro
 func (s *TeamStore) Get(ctx context.Context, teamID int64) (*Team, error) {
 	team := &Team{}
 	const teamQ = `
-		SELECT id, name, owner_id, schedule_days, schedule_time, team_timezones, encounters_enabled, signup_note, detailed_header, created_at, updated_at
+		SELECT id, name, owner_id, schedule_days, schedule_time, team_timezones, encounters_enabled, post_footer, dm_footer, created_at, updated_at
 		FROM teams WHERE id = $1`
 	err := s.pool.QueryRow(ctx, teamQ, teamID).Scan(
-		&team.ID, &team.Name, &team.OwnerID, &team.ScheduleDays, &team.ScheduleTime, &team.TeamTimezones, &team.EncountersEnabled, &team.SignupNote, &team.DetailedHeader, &team.CreatedAt, &team.UpdatedAt,
+		&team.ID, &team.Name, &team.OwnerID, &team.ScheduleDays, &team.ScheduleTime, &team.TeamTimezones, &team.EncountersEnabled, &team.PostFooter, &team.DMFooter, &team.CreatedAt, &team.UpdatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrTeamNotFound
@@ -310,7 +310,7 @@ func (s *TeamStore) Access(ctx context.Context, teamID, userID int64) (found boo
 // the detailed-post header, and (when players is non-nil) the roster, all within
 // a single transaction. Each player in players must have a valid Slot
 // (1..TeamSize); slots not present are left unchanged.
-func (s *TeamStore) Save(ctx context.Context, teamID int64, name string, days []string, scheduleTime string, teamTimezones []string, encountersEnabled bool, signupNote string, detailedHeader string, players []Player) error {
+func (s *TeamStore) Save(ctx context.Context, teamID int64, name string, days []string, scheduleTime string, teamTimezones []string, encountersEnabled bool, postFooter string, dmFooter string, players []Player) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -319,9 +319,9 @@ func (s *TeamStore) Save(ctx context.Context, teamID int64, name string, days []
 
 	const updateTeam = `
 		UPDATE teams
-		SET name = $1, schedule_days = $2, schedule_time = $3, team_timezones = $4, encounters_enabled = $5, signup_note = $6, detailed_header = $7
+		SET name = $1, schedule_days = $2, schedule_time = $3, team_timezones = $4, encounters_enabled = $5, post_footer = $6, dm_footer = $7
 		WHERE id = $8`
-	if _, err := tx.Exec(ctx, updateTeam, name, days, scheduleTime, teamTimezones, encountersEnabled, signupNote, detailedHeader, teamID); err != nil {
+	if _, err := tx.Exec(ctx, updateTeam, name, days, scheduleTime, teamTimezones, encountersEnabled, postFooter, dmFooter, teamID); err != nil {
 		return err
 	}
 

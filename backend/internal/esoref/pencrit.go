@@ -19,6 +19,7 @@ type ClassPassive struct {
 type DetectMap struct {
 	Gear         []string
 	Skills       []string
+	Potions      []string
 	Masteries    []string
 	SkillLines   []string
 	CP           []string
@@ -59,4 +60,15 @@ type PenExtraSource struct {
 	Pen      int
 	Bucket   string
 	MaxStack int
+}
+
+// Buff is one tracked group buff. SelfBuff marks a personal Major/Minor buff a
+// player can maintain for themselves; Detect lists the group-wide sources that
+// cover it for the whole team. The Discord bot lists self-buffs whose Detect
+// matches no team member under a "Self Buffs" field.
+type Buff struct {
+	Value    string
+	Label    string
+	SelfBuff bool
+	Detect   DetectMap
 }

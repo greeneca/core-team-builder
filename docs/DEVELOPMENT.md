@@ -197,7 +197,7 @@ Mutating endpoints return the full refreshed team (with `players` and `members`)
 | `GET /api/teams`                           | member   | List teams you own or that are shared with you (`{ "teams": [...] }`). |
 | `POST /api/teams`                          | any user | Create a team `{ "name": "...", "copy_from"?: <teamID> }` → `201`. Without `copy_from`: 12 empty slots + a `Default` encounter. With `copy_from` (a team you can access): copies its schedule, roster, and encounters/loadouts (never its sharing). |
 | `GET /api/teams/{id}`                      | viewer+  | Get one team with `players` + `members`. |
-| `PUT /api/teams/{id}`                      | editor+  | Save everything: `{ name, schedule_days, schedule_time, team_timezones, encounters_enabled, signup_note, detailed_header, players }`. |
+| `PUT /api/teams/{id}`                      | editor+  | Save everything: `{ name, schedule_days, schedule_time, team_timezones, encounters_enabled, post_footer, dm_footer, players }`. |
 | `DELETE /api/teams/{id}`                   | owner    | Delete the team (cascades).          |
 | `POST /api/teams/{id}/share`              | owner    | Share/update role `{ "username": "...", "role": "viewer"\|"editor" }` (role defaults to `editor`; upsert). |
 | `DELETE /api/teams/{id}/members/{userID}` | owner    | Revoke a member's access.            |
@@ -215,8 +215,8 @@ in `docs/AGENT_CONTEXT.md`):
   "schedule_time": "00:00",
   "team_timezones": ["America/New_York", "Europe/London"],
   "encounters_enabled": false,
-  "signup_note": "Voice: Discord. Loot: need-before-greed.",
-  "detailed_header": "Trial sign-ups for this week — react to confirm.",
+  "post_footer": "Voice: Discord. Loot: need-before-greed.",
+  "dm_footer": "Double-check your CP and potions before the run.",
   "players": [
     {
       "slot": 1, "name": "Aedric", "discord_handle": "aedric#1234",
@@ -240,11 +240,10 @@ in `docs/AGENT_CONTEXT.md`):
   plus a searchable add-picker on the team page (default `[]`).
 - `encounters_enabled` (bool, default `false`) toggles whether the UI surfaces
   the multi-encounter section; the team always keeps ≥1 encounter regardless.
-- `signup_note` / `detailed_header` are free-form text (≤2000 runes each,
-  trailing whitespace trimmed; over-length returns `400`) used by the Discord
-  signup export — `signup_note` is the condensed-list footer, `detailed_header`
-  the detailed-post header. The export itself is generated client-side (no
-  endpoint).
+- `post_footer` / `dm_footer` are free-form text (≤2000 runes each, trailing
+  whitespace trimmed; over-length returns `400`) the Discord bot appends to its
+  output — `post_footer` to the `/coreteam post` overview, `dm_footer` to the
+  "Get My Build Details" DM.
 - `players` is optional; omitted slots are left unchanged. Invalid slot/role/
   class/skill-line/mastery returns `400` and the whole save is rolled back.
 

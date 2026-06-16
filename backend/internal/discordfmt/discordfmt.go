@@ -2,9 +2,9 @@
 // channel "overview" (roster grouped by role with abbreviated gear) and a
 // per-player "detail" block (full build + per-encounter loadout) sent as a DM.
 //
-// These are Go ports of the frontend formatters in frontend/js/app.js
-// (formatCondensed / formatDetailed / loadoutDetailParts / buildText) and use
-// the code-generated labels in internal/esoref. Keep the two in rough sync.
+// These formatters use the code-generated labels in internal/esoref (sourced
+// from the frontend's single-source data). The web app no longer renders these
+// posts itself — the Discord bot is the only consumer.
 package discordfmt
 
 import (
@@ -23,11 +23,16 @@ import (
 // in a single boxed embed:
 //   - title:       the team name.
 //   - description: a dynamic next-run timestamp (shown in each viewer's own
-//     timezone), the roster grouped by role inside a monospace box, any
-//     groupings, and the signup note.
-//   - footer:      the self-required penetration and crit damage (what each
-//     player must bring after the team's group buffs).
-func BuildPost(team *models.Team, primary *models.Encounter, groupings []models.Grouping) (title, description, footer string) {
+//     timezone), the roster grouped by role as Markdown lines, any groupings,
+//     and the post footer.
+//
+// marks carries each responding player's RSVP status keyed by slot
+// (models.RSVPYes / models.RSVPNo); a ✅ or ❌ icon is rendered beside that
+// player's name in the roster. Players without an entry show a neutral ▫️.
+//
+// The self-required penetration/crit and missing self-buffs now live in the
+// per-player build-details DM (see PlayerDetail), not on this post.
+func BuildPost(team *models.Team, primary *models.Encounter, groupings []models.Grouping, marks map[int]string) (title, description string) {
 	title = team.Name
 
 	var L []string
@@ -40,33 +45,33 @@ func BuildPost(team *models.Team, primary *models.Encounter, groupings []models.
 		L = append(L, "\U0001F5D3\uFE0F  "+s)
 	}
 
-	// Roster as a monospace code block so columns line up inside the embed box.
-	if table := rosterTable(team, primary); table != "" {
+	// Roster grouped by role. Rendered as Markdown (not a code block) so each
+	// player's RSVP status shows as a ✅/❌/▫️ icon beside their name.
+	if rl := rosterLines(team, primary, marks); len(rl) > 0 {
 		if len(L) > 0 {
 			L = append(L, "")
 		}
-		L = append(L, "```")
-		L = append(L, table)
-		L = append(L, "```")
+		L = append(L, rl...)
 	}
 
 	if gl := formatGroupings(team, groupings); len(gl) > 0 {
 		L = append(L, "")
 		L = append(L, gl...)
 	}
-	if note := strings.TrimSpace(team.SignupNote); note != "" {
+	if footer := strings.TrimSpace(team.PostFooter); footer != "" {
 		L = append(L, "")
-		L = append(L, note)
+		L = append(L, footer)
 	}
 	description = strings.TrimSpace(strings.Join(L, "\n"))
-	footer = selfRequiredFooter(team, primary)
-	return title, description, footer
+	return title, description
 }
 
-// rosterTable renders the roster grouped by role (Tank, Healer, Support DPS,
-// DPS, then any "Other") into aligned monospace rows: slot, who, class, and
-// abbreviated gear from the primary encounter. Returns "" when no players.
-func rosterTable(team *models.Team, primary *models.Encounter) string {
+// rosterLines renders the roster grouped by role (Tank, Healer, Support DPS,
+// DPS, then any "Other") as Markdown lines. Each player is one line prefixed by
+// an RSVP icon (✅ coming / ❌ not coming / ▫️ no response) followed by slot,
+// name, class, and abbreviated gear from the primary encounter. Returns nil when
+// there are no players.
+func rosterLines(team *models.Team, primary *models.Encounter, marks map[int]string) []string {
 	bySlot := map[int]models.Loadout{}
 	if primary != nil {
 		for _, lo := range primary.Loadouts {
@@ -76,25 +81,23 @@ func rosterTable(team *models.Team, primary *models.Encounter) string {
 
 	players := sortedPlayers(team)
 	if len(players) == 0 {
-		return ""
+		return nil
 	}
-	type row struct{ role, slot, who, cls, gear string }
+	type row struct {
+		role, line string
+	}
 	rows := make([]row, 0, len(players))
 	for _, p := range players {
+		parts := []string{
+			fmt.Sprintf("%d.", p.Slot),
+			who(p),
+			classOrDash(p.Class),
+			gearAbbrevList(bySlot[p.Slot].Gear),
+		}
 		rows = append(rows, row{
 			role: p.Role,
-			slot: fmt.Sprintf("%d.", p.Slot),
-			who:  who(p),
-			cls:  classOrDash(p.Class),
-			gear: gearAbbrevList(bySlot[p.Slot].Gear),
+			line: rsvpIcon(marks[p.Slot]) + " " + strings.Join(parts, " · "),
 		})
-	}
-
-	wSlot, wWho, wCls := 0, 0, 0
-	for _, r := range rows {
-		wSlot = max(wSlot, len(r.slot))
-		wWho = max(wWho, len(r.who))
-		wCls = max(wCls, len(r.cls))
 	}
 
 	order := []struct{ label, value string }{
@@ -129,34 +132,49 @@ func rosterTable(team *models.Team, primary *models.Encounter) string {
 			L = append(L, "")
 		}
 		first = false
-		L = append(L, "── "+g.label+" ──")
+		L = append(L, "__"+g.label+"__")
 		for _, r := range grp {
-			L = append(L, fmt.Sprintf("%s %s  %s  %s",
-				padEnd(r.slot, wSlot), padEnd(r.who, wWho), padEnd(r.cls, wCls), r.gear))
+			L = append(L, r.line)
 		}
 	}
-	return strings.Join(L, "\n")
+	return L
 }
 
-// PlayerDetail builds the detailed DM for a single player. It is formatted for
-// easy reading: a title, then sections (Player, Class & Race, Build, and one per
-// encounter) where every data type sits on its own line under an underlined
-// header (Discord `__header__`).
-func PlayerDetail(team *models.Team, p models.Player, encounters []models.Encounter) string {
+// rsvpIcon maps an RSVP status to the emoji shown beside a player's name.
+// Unknown/no response renders as a neutral marker.
+func rsvpIcon(status string) string {
+	switch status {
+	case models.RSVPYes:
+		return "\u2705" // ✅
+	case models.RSVPNo:
+		return "\u274C" // ❌
+	default:
+		return "\u25AB\uFE0F" // ▫️
+	}
+}
+
+// PlayerDetail builds the detailed DM for a single player, split into embed-ready
+// parts (title + description) so the bot can wrap it in a boxed embed. The
+// description reads top-to-bottom: Player, Class & Race, Build, one section per
+// encounter, then a Requirements section (self-required pen/crit and any self
+// buffs). Every data type sits on its own line under an underlined header
+// (Discord `__header__`). When there is only one encounter its name header is
+// omitted, since it is redundant.
+func PlayerDetail(team *models.Team, p models.Player, encounters []models.Encounter) (title, description string) {
 	name := p.Name
 	if name == "" {
 		name = fmt.Sprintf("Slot %d", p.Slot)
 	}
+	title = fmt.Sprintf("%s — Your Build Details", team.Name)
 
 	var L []string
-	L = append(L, fmt.Sprintf("**%s — Your Build Details**", team.Name))
 
 	// Player.
 	who := fmt.Sprintf("%d. %s — %s", p.Slot, name, esoref.RoleLabel(p.Role))
 	if tag := discordTag(p.DiscordHandle); tag != "" {
 		who += " · " + tag
 	}
-	L = append(L, "", "__Player__", who)
+	L = append(L, "__Player__", who)
 
 	// Class & Race.
 	L = append(L, "", "__Class & Race__", fmt.Sprintf("%s · %s", esoref.ClassLabel(p.Class), esoref.RaceLabel(p.Race)))
@@ -164,9 +182,14 @@ func PlayerDetail(team *models.Team, p models.Player, encounters []models.Encoun
 	// Build (subclass lines or masteries).
 	L = append(L, "", "__Build__", buildText(p))
 
-	// One section per encounter, each data type on its own underlined line.
+	// One section per encounter, each data type on its own underlined line. A
+	// single encounter needs no name header.
+	singleEncounter := len(encounters) == 1
 	for _, enc := range encounters {
-		L = append(L, "", fmt.Sprintf("**%s**", enc.Name))
+		L = append(L, "")
+		if !singleEncounter {
+			L = append(L, fmt.Sprintf("**%s**", enc.Name))
+		}
 		lo, ok := loadoutForSlot(enc, p.Slot)
 		var fields []labelledField
 		if ok {
@@ -180,7 +203,29 @@ func PlayerDetail(team *models.Team, p models.Player, encounters []models.Encoun
 			L = append(L, "__"+f.header+"__", f.value)
 		}
 	}
-	return strings.TrimSpace(strings.Join(L, "\n"))
+
+	// Requirements (bottom): team-wide targets after group buffs (what each
+	// player must bring on their own) plus any self buffs the team does not cover
+	// group-wide. Computed from the primary (first) encounter, matching the post.
+	var primary *models.Encounter
+	if len(encounters) > 0 {
+		primary = &encounters[0]
+	}
+	pen, crit := selfRequired(team, primary)
+	L = append(L, "", "**Requirements**")
+	L = append(L, "__Personal Stats (before group buffs)__",
+		fmt.Sprintf("Penetration %s", commaInt(pen)),
+		fmt.Sprintf("Crit damage %d%%", crit))
+	if missing := missingSelfBuffs(team, primary); len(missing) > 0 {
+		L = append(L, "__Self Buffs__", strings.Join(missing, ", "))
+	}
+
+	// Optional team-wide footer (e.g. raid lead, voice channel, reminders).
+	if footer := strings.TrimSpace(team.DMFooter); footer != "" {
+		L = append(L, "", footer)
+	}
+	description = strings.TrimSpace(strings.Join(L, "\n"))
+	return title, description
 }
 
 // --- helpers (ported from app.js) ---
@@ -362,8 +407,8 @@ func exportSlotName(team *models.Team, slot int) string {
 	return fmt.Sprintf("Slot %d", slot)
 }
 
-// formatGroupings mirrors the JS helper: a section listing each grouping's
-// numbered groups and assigned players. Returns nil when there are none.
+// formatGroupings renders a section listing each grouping's numbered groups and
+// assigned players. Returns nil when there are none.
 func formatGroupings(team *models.Team, groupings []models.Grouping) []string {
 	if len(groupings) == 0 {
 		return nil
@@ -459,13 +504,6 @@ func nextRunUnix(days []string, hhmm string) (int64, bool) {
 	return 0, false
 }
 
-func padEnd(s string, n int) string {
-	if len(s) >= n {
-		return s
-	}
-	return s + strings.Repeat(" ", n-len(s))
-}
-
 // --- Self-required penetration / crit damage ---
 //
 // Ports the GROUP-source half of computePenCoverage / computeCritCoverage in
@@ -478,6 +516,7 @@ type pcContext struct {
 	slot             int
 	gear             map[string]bool
 	skills           map[string]bool
+	potions          map[string]bool
 	masteries        map[string]bool
 	skillLines       map[string]bool
 	cpBlue           map[string]bool
@@ -495,6 +534,7 @@ func newPCContext(p models.Player, lo models.Loadout) pcContext {
 		slot:             p.Slot,
 		gear:             toSet(lo.Gear),
 		skills:           toSet(lo.Skills),
+		potions:          toSet(lo.Potions),
 		cpBlue:           toSet(lo.CPBlue),
 		penExtra:         toSet(lo.PenExtra),
 		mundus:           lo.Mundus,
@@ -554,8 +594,8 @@ func anySet(have map[string]bool, keys []string) bool {
 // detectHit reports whether a player satisfies a detection map any way it can be
 // applied (any category, any candidate key).
 func detectHit(c pcContext, d esoref.DetectMap) bool {
-	if anySet(c.gear, d.Gear) || anySet(c.skills, d.Skills) || anySet(c.masteries, d.Masteries) ||
-		anySet(c.skillLines, d.SkillLines) || anySet(c.cpBlue, d.CP) {
+	if anySet(c.gear, d.Gear) || anySet(c.skills, d.Skills) || anySet(c.potions, d.Potions) ||
+		anySet(c.masteries, d.Masteries) || anySet(c.skillLines, d.SkillLines) || anySet(c.cpBlue, d.CP) {
 		return true
 	}
 	for _, k := range d.Classes {
@@ -675,11 +715,37 @@ func selfRequired(team *models.Team, primary *models.Encounter) (penReq, critReq
 	return penReq, critReq
 }
 
-// selfRequiredFooter is the embed footer summarizing the self-required figures.
-func selfRequiredFooter(team *models.Team, primary *models.Encounter) string {
-	pen, crit := selfRequired(team, primary)
-	return fmt.Sprintf("Self-required (after group buffs) — Penetration %s · Crit damage %d%%",
-		commaInt(pen), crit)
+// missingSelfBuffs returns the labels of self-providable buffs (selfBuff=true)
+// that no team member supplies group-wide, so each player must bring them on
+// their own. Group coverage is checked against the primary encounter's loadouts.
+func missingSelfBuffs(team *models.Team, primary *models.Encounter) []string {
+	bySlot := map[int]models.Loadout{}
+	if primary != nil {
+		for _, lo := range primary.Loadouts {
+			bySlot[lo.Slot] = lo
+		}
+	}
+	contexts := make([]pcContext, 0, len(team.Players))
+	for _, p := range team.Players {
+		contexts = append(contexts, newPCContext(p, bySlot[p.Slot]))
+	}
+	var missing []string
+	for _, b := range esoref.Buffs {
+		if !b.SelfBuff {
+			continue
+		}
+		covered := false
+		for _, c := range contexts {
+			if detectHit(c, b.Detect) {
+				covered = true
+				break
+			}
+		}
+		if !covered {
+			missing = append(missing, b.Label)
+		}
+	}
+	return missing
 }
 
 // commaInt formats an integer with thousands separators (e.g. 18200 -> 18,200).

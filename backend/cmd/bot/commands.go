@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log"
 	"strconv"
 	"strings"
@@ -23,15 +22,10 @@ type bot struct {
 	discord    *models.DiscordStore
 }
 
-// discordMessageLimit is Discord's hard cap on a message's content length.
-const discordMessageLimit = 2000
-
 // Discord embed limits (and the post's accent color, Discord blurple).
 const (
 	embedTitleLimit       = 256
 	embedDescriptionLimit = 4096
-	embedFooterLimit      = 2048
-	embedFieldValueLimit  = 1024
 	embedColor            = 0x5865F2
 )
 
@@ -397,16 +391,11 @@ func (b *bot) handlePost(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		return
 	}
 
-	title, desc, footer := discordfmt.BuildPost(team, primary, gr)
 	// Render as an embed so the post is wrapped in a tidy box (colored bar +
-	// border), the schedule renders as a per-viewer dynamic timestamp, and the
-	// self-required pen/crit sit in the footer.
-	embed := &discordgo.MessageEmbed{
-		Title:       truncate(title, embedTitleLimit),
-		Description: truncate(desc, embedDescriptionLimit),
-		Color:       embedColor,
-		Footer:      &discordgo.MessageEmbedFooter{Text: truncate(footer, embedFooterLimit)},
-	}
+	// border) and the schedule renders as a per-viewer dynamic timestamp. The
+	// self-required pen/crit moved to the per-player build-details DM. A fresh
+	// post has no RSVPs yet, so no status marks are shown.
+	embed := buildPostEmbed(team, primary, gr, nil)
 	err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
@@ -416,6 +405,18 @@ func (b *bot) handlePost(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	})
 	if err != nil {
 		log.Printf("post: respond: %v", err)
+	}
+}
+
+// buildPostEmbed assembles the channel-post embed from team data and the current
+// RSVPs. Each responding roster member gets a ✅/❌ icon beside their name in the
+// roster. Pass nil rsvps for the initial post.
+func buildPostEmbed(team *models.Team, primary *models.Encounter, gr []models.Grouping, rsvps []models.RSVP) *discordgo.MessageEmbed {
+	title, desc := discordfmt.BuildPost(team, primary, gr, rsvpMarks(team, rsvps))
+	return &discordgo.MessageEmbed{
+		Title:       truncate(title, embedTitleLimit),
+		Description: truncate(desc, embedDescriptionLimit),
+		Color:       embedColor,
 	}
 }
 
@@ -451,18 +452,24 @@ func (b *bot) handleRSVP(s *discordgo.Session, i *discordgo.InteractionCreate, s
 		return
 	}
 
-	// Preserve the original embed; swap in a fresh Attendance field. Falls back
-	// to a minimal embed if the message somehow has none.
-	var embed discordgo.MessageEmbed
-	if len(i.Message.Embeds) > 0 {
-		embed = *i.Message.Embeds[0]
+	// Rebuild the post from current team data so each responder's ✅/❌ lands
+	// beside their name in the roster. Fall back to keeping the existing embed if
+	// the team can no longer be loaded (the RSVP is still saved).
+	embed, err := b.rsvpEmbed(ctx, i, rsvps)
+	if err != nil {
+		log.Printf("rsvp: rebuild post: %v", err)
+		if len(i.Message.Embeds) > 0 {
+			embed = i.Message.Embeds[0]
+		} else {
+			ephemeral(s, i, "Saved your RSVP, but couldn't refresh the post.")
+			return
+		}
 	}
-	embed.Fields = []*discordgo.MessageEmbedField{attendanceField(rsvps)}
 
 	err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseUpdateMessage,
 		Data: &discordgo.InteractionResponseData{
-			Embeds:     []*discordgo.MessageEmbed{&embed},
+			Embeds:     []*discordgo.MessageEmbed{embed},
 			Components: postComponents(),
 		},
 	})
@@ -471,33 +478,38 @@ func (b *bot) handleRSVP(s *discordgo.Session, i *discordgo.InteractionCreate, s
 	}
 }
 
-// attendanceField renders the Coming / Not coming lists (as mentions) into a
-// single embed field for the post.
-func attendanceField(rsvps []models.RSVP) *discordgo.MessageEmbedField {
-	var yes, no []string
+// rsvpEmbed reloads the team bound to the post's channel and re-renders the full
+// post embed with the current RSVPs (so marks appear beside names).
+func (b *bot) rsvpEmbed(ctx context.Context, i *discordgo.InteractionCreate, rsvps []models.RSVP) (*discordgo.MessageEmbed, error) {
+	teamID, err := b.discord.GetChannelTeam(ctx, i.ChannelID)
+	if err != nil {
+		return nil, err
+	}
+	team, _, primary, gr, err := b.loadTeamData(ctx, teamID)
+	if err != nil {
+		return nil, err
+	}
+	return buildPostEmbed(team, primary, gr, rsvps), nil
+}
+
+// rsvpMarks matches each RSVP to a roster slot (by Discord ID/handle) and
+// returns a slot -> status map for rendering the inline ✅/❌ icons. Responders
+// who can't be matched to a slot are simply omitted (no separate list is shown).
+func rsvpMarks(team *models.Team, rsvps []models.RSVP) map[int]string {
+	marks := map[int]string{}
+	if team == nil {
+		return marks
+	}
 	for _, r := range rsvps {
-		mention := "<@" + r.DiscordUserID + ">"
-		switch r.Status {
-		case models.RSVPYes:
-			yes = append(yes, mention)
-		case models.RSVPNo:
-			no = append(no, mention)
+		if r.Status != models.RSVPYes && r.Status != models.RSVPNo {
+			continue
+		}
+		u := &discordgo.User{ID: r.DiscordUserID, Username: r.DiscordUsername, GlobalName: r.DiscordUsername}
+		if p, ok := matchPlayer(team, u); ok {
+			marks[p.Slot] = r.Status
 		}
 	}
-	yesLine := "—"
-	if len(yes) > 0 {
-		yesLine = strings.Join(yes, " ")
-	}
-	noLine := "—"
-	if len(no) > 0 {
-		noLine = strings.Join(no, " ")
-	}
-	value := fmt.Sprintf("✅ Coming (%d): %s\n❌ Not coming (%d): %s", len(yes), yesLine, len(no), noLine)
-	return &discordgo.MessageEmbedField{
-		Name:   "Attendance",
-		Value:  truncate(value, embedFieldValueLimit),
-		Inline: false,
-	}
+	return marks
 }
 
 // --- Get my details button ---
@@ -536,15 +548,31 @@ func (b *bot) handleGetMyDetails(s *discordgo.Session, i *discordgo.InteractionC
 		return
 	}
 
-	detail := truncate(discordfmt.PlayerDetail(team, player, encs), discordMessageLimit)
+	title, desc := discordfmt.PlayerDetail(team, player, encs)
+	embed := &discordgo.MessageEmbed{
+		Title:       truncate(title, embedTitleLimit),
+		Description: truncate(desc, embedDescriptionLimit),
+		Color:       embedColor,
+	}
 	if dm, err := s.UserChannelCreate(user.ID); err == nil {
-		if _, err := s.ChannelMessageSend(dm.ID, detail); err == nil {
+		if _, err := s.ChannelMessageSendEmbed(dm.ID, embed); err == nil {
 			ephemeral(s, i, "Sent your trial details via DM.")
 			return
 		}
 	}
-	// DMs likely closed — fall back to an ephemeral reply only the user sees.
-	ephemeral(s, i, "I couldn't DM you (your DMs may be closed). Here are your details:\n\n"+detail)
+	// DMs likely closed — fall back to an ephemeral reply (boxed embed) only the
+	// user sees.
+	err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Flags:   discordgo.MessageFlagsEphemeral,
+			Content: "I couldn't DM you (your DMs may be closed). Here are your details:",
+			Embeds:  []*discordgo.MessageEmbed{embed},
+		},
+	})
+	if err != nil {
+		log.Printf("details: ephemeral fallback: %v", err)
+	}
 }
 
 // --- /coreteam status & unset ---

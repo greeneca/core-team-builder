@@ -14,8 +14,9 @@ discord handle, role, ESO class, and a per-player build (either a subclassed set
 of 3 skill lines or 2 class masteries). Teams also have **encounters** (Default,
 Trash, or a trial boss), each holding a per-player gear/skills loadout, and
 **groupings** (named sets of numbered groups for mechanics, e.g. ice cages or
-slayer stacks). A team can also export a **Discord signup** (a detailed post or a
-condensed list) to the clipboard. The UI autosaves changes (no Save buttons).
+slayer stacks). A team can set two **Discord bot footers** (free-form text the
+bot appends to its `/coreteam post` overview and its build-details DM). The UI
+autosaves changes (no Save buttons).
 
 ## Stack at a glance
 
@@ -197,21 +198,17 @@ column; the `User` JSON model hides it (`json:"-"`).
   selector are hidden and only the first encounter is shown; the team still keeps
   ≥1 encounter in the DB. An editor opts in per team via the topbar/section
   toggle.
-- **Discord signup export** (`018_team_signup_note.sql`,
-  `019_team_detailed_header.sql`): each team carries `signup_note TEXT` (footer
-  appended to the **condensed** list) and `detailed_header TEXT` (header
-  prepended to the **detailed** post), both free-form (default `''`, ≤2000 runes,
-  validated in the team handler). The team page "Discord signup" controls
-  generate clipboard text: **Copy detailed post** (each player's full build +
-  per-encounter gear/skills, with `detailed_header` on top) and **Copy condensed
-  list** (a short roster with the schedule, tagged Discord handles, role, class,
-  abbreviated gear, with `signup_note` at the bottom). Both export the team's
-  groupings too. The formatters (`formatDetailed` / `formatCondensed` /
-  `formatGroupings` / `generateDiscord` in `app.js`) are frontend-only — no
-  export endpoint.
+- **Discord bot footers** (`018_team_signup_note.sql`,
+  `019_team_detailed_header.sql`, renamed by `029_team_bot_footers.sql`): each
+  team carries `post_footer TEXT` (appended to the bot's `/coreteam post`
+  overview) and `dm_footer TEXT` (appended to the "Get My Build Details" DM),
+  both free-form (default `''`, ≤2000 runes, validated in the team handler) and
+  edited from the "Discord bot footers" controls on the team page. The footers
+  are consumed by the bot only (`discordfmt.BuildPost` / `discordfmt.PlayerDetail`);
+  the old web-app clipboard export (detailed post / condensed list) was removed.
 - **Save-all**: `PUT /api/teams/{id}` is the single "save everything" call —
   body is `{ name, schedule_days, schedule_time, team_timezones,
-  encounters_enabled, signup_note, detailed_header, players: [{slot,name,discord_handle,role,class,subclassed,skill_line_1..3,mastery_1..2}] }`
+  encounters_enabled, post_footer, dm_footer, players: [{slot,name,discord_handle,role,class,subclassed,skill_line_1..3,mastery_1..2}] }`
   and the backend (`TeamStore.Save`) updates team meta + roster in one
   transaction (there is no per-player save endpoint). `schedule_time` is sent in
   UTC (the UI converts from the viewer's current zone,
@@ -372,7 +369,7 @@ column; the `User` JSON model hides it (`json:"-"`).
   on its own debounce (`scheduleGroupingSave` / `saveGroupingNow`); structural
   edits (add/remove player, change group count) re-render while name edits save
   without re-rendering to preserve focus. `renderGroupings` reads the live roster
-  for slot labels. Groupings are also included in the Discord export.
+  for slot labels. Groupings are also included in the Discord bot's post overview.
 
 ## Discord bot (current)
 
@@ -389,22 +386,33 @@ column; the `User` JSON model hides it (`json:"-"`).
   - `post` — posts the team's **overview** as a boxed embed: title (team name),
     a single dynamic schedule timestamp (`<t:unix:F>`/`<t:unix:R>`, shown in each
     viewer's own timezone — no more per-tz list), the roster grouped by role with
-    abbreviated gear inside a monospace box, groupings, and a footer with the
-    **self-required penetration and crit damage**. Carries three buttons:
+    abbreviated gear (Markdown lines, one player each, RSVP icon beside the name),
+    and groupings. Carries three buttons:
     **✅ Coming**, **❌ Not coming** (RSVP), and **Get My Build Details**. Built by
     `discordfmt.BuildPost`; the bot wraps the parts in the embed and attaches the
     buttons via `postComponents()`.
   - `status` / `unset` — show / remove the channel's team binding.
   - **Get My Build Details** button (`get_my_details`) → matches the presser to a
     roster slot (by Discord ID/mention in `players.discord_handle`, else
-    case-insensitive username/global name) and DMs them their build, formatted
-    with underlined per-data-type headers (`discordfmt.PlayerDetail`); falls back
-    to an ephemeral reply if DMs are closed.
+    case-insensitive username/global name) and DMs them their build as a **boxed
+    embed** (title + description) with underlined per-data-type headers
+    (`discordfmt.PlayerDetail` returns `(title, description)`); falls back to an
+    ephemeral embed if DMs are closed. Order: Player, Class & Race, Build, then one
+    section per encounter (the encounter-name header is omitted when there's only
+    one), and finally a **Requirements** section holding **Self-Required (after
+    group buffs)** (penetration + crit damage) and, when the team doesn't cover
+    them group-wide, a **Self Buffs** list of the self-providable Major/Minor buffs
+    each player must bring themselves (`BUFFS` entries flagged `selfBuff: true` in
+    `data.js`).
   - **✅ Coming / ❌ Not coming** buttons → record the presser's attendance for
     that specific post (`discord_rsvps`, keyed by message ID), then edit the post
-    in place (`InteractionResponseUpdateMessage`) to refresh the **Attendance**
-    embed field (Coming / Not coming lists as mentions). A user has one RSVP per
-    post; pressing the other button switches it. Re-posting starts a fresh tally.
+    in place (`InteractionResponseUpdateMessage`). The post is fully re-rendered
+    so each responder's status shows as a **✅/❌ icon beside their name** in the
+    roster (matched to a slot by Discord ID/handle; no-response shows ▫️). The
+    roster is plain Markdown (not a code block) so the icons render; there is no
+    separate Attendance list, and responders who don't match a roster slot are
+    omitted. A user has one RSVP per post; pressing the other button switches it.
+    Re-posting starts a fresh tally.
 - **Account linking**: `users.discord_user_id` (unique) / `discord_username` link
   an app account to a Discord identity. The web UI ("Link Discord" topbar button,
   `#discord-modal`) calls `POST /api/discord/link-code` to mint a short,
@@ -419,16 +427,17 @@ column; the `User` JSON model hides it (`json:"-"`).
   `(message_id, discord_user_id)` with a `'yes'`/`'no'` status
   (`DiscordStore.SetRSVP`/`ListRSVPs`).
 - **Label data (codegen)**: the bot formats posts using
-  `backend/internal/discordfmt` (Go ports of the JS `formatCondensed` /
-  `formatDetailed` formatters + the GROUP-source half of `computePenCoverage` /
-  `computeCritCoverage` for the self-required footer), which reads
+  `backend/internal/discordfmt` (`BuildPost` for the overview embed + `PlayerDetail`
+  for the build-details DM, plus the GROUP-source half of `computePenCoverage` /
+  `computeCritCoverage` for the DM's self-required pen/crit and the missing
+  self-buffs list), which reads
   labels/abbreviations and the crit/pen coverage tables from
   `backend/internal/esoref`. `esoref/data_gen.go` is **code-generated** from the
   frontend's single-source data (`frontend/js/gear-skills.js` + `data.js`) by
   `tools/gen-esoref/gen.js` — it emits the label maps plus the structured
-  `CritGroupSources` / `PenGroupSources` / `PenExtraSources` tables and the
-  `CritCap` / `CritBase` / `PenTarget` / … constants (types are hand-written in
-  `esoref/pencrit.go`). Run `node tools/gen-esoref/gen.js` (or `go generate
+  `CritGroupSources` / `PenGroupSources` / `PenExtraSources` / `Buffs` tables and
+  the `CritCap` / `CritBase` / `PenTarget` / … constants (types are hand-written
+  in `esoref/pencrit.go`). Run `node tools/gen-esoref/gen.js` (or `go generate
   ./internal/esoref`) whenever that frontend data changes, then commit the result.
 - **Config**: `DISCORD_BOT_TOKEN` (required to run the bot), optional
   `DISCORD_APP_ID` and `DISCORD_GUILD_ID` (set the guild ID for instant,
@@ -460,12 +469,14 @@ column; the `User` JSON model hides it (`json:"-"`).
   The only persisted change buffs required is the per-encounter `potions` loadout
   (above). Coverage is recomputed client-side from data already in memory.
 - **Data** (`frontend/js/data.js`): `BUFFS` is an array of
-  `{ value, label, desc, sources }` where `sources` maps a category to providing
-  keys: `gear`, `skills`, `potions` (per-encounter loadout) and `masteries`,
-  `classes`, `skillLines` (roster build). The seeded source keys are **sensible
-  placeholders** — adjust them to the exact ESO sources without changing the
-  shape. Keys reference the existing master data (gear sets, skills, potions,
-  class masteries/classes/skill lines).
+  `{ value, label, desc, sources, selfBuff? }` where `sources` maps a category to
+  providing keys: `gear`, `skills`, `potions` (per-encounter loadout) and
+  `masteries`, `classes`, `skillLines` (roster build). The seeded source keys are
+  **sensible placeholders** — adjust them to the exact ESO sources without
+  changing the shape. Keys reference the existing master data (gear sets, skills,
+  potions, class masteries/classes/skill lines). The optional `selfBuff: true`
+  flag marks a personal Major/Minor buff a player can self-maintain; the Discord
+  bot lists self-buffs the team doesn't cover group-wide in the build-details DM.
 - **Coverage rule** (`computeBuffCoverage(players, loadoutBySlot)` in `data.js`):
   a buff is **met** if at least one player provides at least one of its sources.
   Build sources honor subclassing — a `subclassed` player contributes their
@@ -625,10 +636,9 @@ node tools/gen-esoref/gen.js       # regenerate Go label data from frontend JS
 - [x] Encounters: per-team named fights with per-player gear/skill loadouts
       (+ per-team encounters-enabled toggle).
 - [x] Groupings: per-team named sets of numbered groups (e.g. ice cages).
-- [x] Discord signup export (detailed post / condensed list).
 - [x] Admin users + user management (list/add/remove/promote) + registration toggle.
 - [x] Discord bot: `/coreteam` post overview + DM per-player details, account
-      linking, channel→team binding (`backend/cmd/bot`).
+      linking, channel→team binding, per-team post/DM footers (`backend/cmd/bot`).
 - [x] Rate limiting on auth endpoints (at the nginx edge; see `docs/DEPLOYMENT.md`).
 - [ ] Expand the gear-set/skill/boss seed data to full ESO coverage.
 - [ ] Tests (handlers, auth, models).

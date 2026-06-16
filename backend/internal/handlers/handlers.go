@@ -28,10 +28,10 @@ const (
 	maxEncountersPerTeam = 10
 	// maxTeamTimezones caps the team's extra display-timezone list.
 	maxTeamTimezones = 20
-	// maxSignupNoteLen caps the free-form Discord signup footer (in runes).
-	maxSignupNoteLen = 2000
-	// maxDetailedHeaderLen caps the free-form detailed-post header (in runes).
-	maxDetailedHeaderLen = 2000
+	// maxPostFooterLen caps the free-form Discord bot post footer (in runes).
+	maxPostFooterLen = 2000
+	// maxDMFooterLen caps the free-form Discord bot DM footer (in runes).
+	maxDMFooterLen = 2000
 	// maxGroupingsPerTeam caps how many groupings a team may hold.
 	maxGroupingsPerTeam = 10
 	// maxGroupingNameLen caps a grouping's name (in runes).

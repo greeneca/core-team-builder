@@ -635,8 +635,8 @@ function gearByLabel(label) {
 // loaded before this file; gearAbbrev below consumes that global.
 
 // gearAbbrev(key): the curated abbreviation for a gear set, or an auto-generated
-// acronym from its label as a fallback (e.g. "Pillar of Nirn" -> "PN"). Used by
-// the condensed Discord export.
+// acronym from its label as a fallback (e.g. "Pillar of Nirn" -> "PN"). Mirrored
+// in Go (esoref.Abbrev) for the Discord bot's abbreviated gear.
 function gearAbbrev(key) {
   if (GEAR_ABBREVIATIONS[key]) return GEAR_ABBREVIATIONS[key];
   const label = gearLabel(key).replace(/\(.*?\)/g, "").trim();
@@ -718,27 +718,32 @@ const LOADOUT_TYPES = {
 //   - Green Balance  (Warden)        → group Minor Toughness
 //   - Draconic Power (Dragonknight)  → group Minor Brutality
 //   - Assassination  (Nightblade)    → group Minor Savagery
+//
+// SELF-BUFF FLAG: a buff with `selfBuff: true` is a personal Major/Minor buff a
+// player can maintain for themselves. The Discord bot's build-details DM lists
+// any self-buff NOT covered group-wide by the team under a "Self Buffs" field,
+// so each player knows which buffs they must bring on their own.
 const BUFFS = [
   // Major Resolve has true group-wide providers (the Warden Frost Cloak line and
   // the Mighty Glacier set apply it to "you and your grouped allies").
-  { value: "major_resolve", label: "Major Resolve", desc: "Increases group Physical and Spell Resistance.",
+  { value: "major_resolve", label: "Major Resolve", desc: "Increases group Physical and Spell Resistance.", selfBuff: true,
     sources: { skills: ["frost_cloak", "expansive_frost_cloak", "ice_fortress", "mend_spirit"], gear: ["mighty_glacier"] } },
   // Minor Toughness shared to the group by the Warden Green Balance passive.
-  { value: "minor_toughness", label: "Minor Toughness", desc: "Increases group Max Health by 10%.",
+  { value: "minor_toughness", label: "Minor Toughness", desc: "Increases group Max Health by 10%.", selfBuff: true,
     sources: { skillLines: ["green_balance"], classes: ["warden"] } },
   // Major Brutality & Sorcery: only the Dragonknight Igneous Weapons line shares
   // it with grouped allies; personal potions/Degeneration/Surge are self-only.
-  { value: "major_brutality_sorcery", label: "Major Brutality and Sorcery", desc: "Increases group Weapon and Spell Damage.",
+  { value: "major_brutality_sorcery", label: "Major Brutality and Sorcery", desc: "Increases group Weapon and Spell Damage.", selfBuff: true,
     sources: { skills: ["igneous_weapons", "molten_armaments", "molten_weapons"] } },
   // Minor Brutality shared to the group by the Dragonknight Draconic Power passive.
-  { value: "minor_brutality_sorcery", label: "Minor Brutality", desc: "Increases group Weapon Damage.",
+  { value: "minor_brutality_sorcery", label: "Minor Brutality", desc: "Increases group Weapon Damage.", selfBuff: true,
     sources: { skillLines: ["draconic_power"], classes: ["dragonknight"] } },
   // Minor Savagery shared to the group by the Nightblade Assassination passive.
-  { value: "minor_savagery_prophecy", label: "Minor Savagery", desc: "Increases group Weapon Critical.",
+  { value: "minor_savagery_prophecy", label: "Minor Savagery", desc: "Increases group Weapon Critical.", selfBuff: true,
     sources: { skillLines: ["assassination"], classes: ["nightblade"] } },
-  { value: "major_berserk", label: "Major Berserk", desc: "Increases damage done by 10%.",
+  { value: "major_berserk", label: "Major Berserk", desc: "Increases damage done by 10%.", selfBuff: true,
     sources: { masteries: ["lead_from_the_front"], skills: ["summon_storm_atronach", "summon_charged_atronach", "greater_storm_atronach"] } },
-  { value: "minor_berserk", label: "Minor Berserk", desc: "Increases group damage done by 5%.",
+  { value: "minor_berserk", label: "Minor Berserk", desc: "Increases group damage done by 5%.", selfBuff: true,
     sources: { skills: ["combat_prayer"], gear: ["kinras_wrath"] } },
   { value: "major_slayer", label: "Major Slayer", desc: "Increases damage to Dungeon/Trial monsters.",
     sources: { gear: ["master_architect", "roaring_opportunist", "perfected_roaring_opportunist", "war_machine"] } },
