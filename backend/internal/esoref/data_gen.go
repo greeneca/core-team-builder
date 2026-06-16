@@ -1573,3 +1573,45 @@ var dayLabels = map[string]string{
 	"tue": "Tue",
 	"wed": "Wed",
 }
+
+// Coverage constants (mirror data.js).
+const (
+	CritCap                     = 125
+	CritBase                    = 50
+	PenTarget                   = 18200
+	ElementalCatalystPerElement = 5
+)
+
+// AnthelmirPenPerWD is the Armor reduction per point of (higher) Weapon/Spell
+// Damage from Anthelmir's Construct.
+const AnthelmirPenPerWD = 0.5
+
+var CritGroupSources = []CritGroupSource{
+	{Value: "major_force", Label: "Major Force", Pct: 20, PerElement: false, Detect: DetectMap{Gear: []string{"saxhleel_champion", "perfected_saxhleel_champion", "grisly_gourmet"}, Skills: []string{"aggressive_horn", "lights_champion"}, Masteries: []string{"ink_scribes_verve"}}},
+	{Value: "minor_force", Label: "Minor Force", Pct: 10, PerElement: false, Detect: DetectMap{Gear: []string{"twilight_remedy", "phoenix_moth_theurge", "grave_inevitability"}}},
+	{Value: "lucent_echoes", Label: "Lucent Echoes", Pct: 11, PerElement: false, Detect: DetectMap{Gear: []string{"lucent_echoes", "perfected_lucent_echoes"}}},
+	{Value: "minor_brittle", Label: "Minor Brittle", Pct: 10, PerElement: false, Detect: DetectMap{Gear: []string{"glittering_goad"}, Skills: []string{"rune_of_the_colorless_pool"}}},
+	{Value: "major_brittle", Label: "Major Brittle", Pct: 20, PerElement: false, Detect: DetectMap{Gear: []string{"nunatak"}, Masteries: []string{"tundras_maw"}}},
+	{Value: "elemental_catalyst", Label: "Elemental Catalyst", Pct: 0, PerElement: true, Detect: DetectMap{Gear: []string{"elemental_catalyst"}}},
+}
+
+var PenGroupSources = []PenGroupSource{
+	{Value: "major_breach", Label: "Major Breach", Pen: 5948, PerWeaponDamage: false, Detect: DetectMap{Skills: []string{"pierce_armor", "puncture", "ransack", "elemental_drain", "weakness_to_elements", "elemental_susceptibility", "crushing_weapon"}}},
+	{Value: "minor_breach", Label: "Minor Breach", Pen: 2974, PerWeaponDamage: false, Detect: DetectMap{Skills: []string{"pierce_armor", "deep_fissure", "sunderflame"}}},
+	{Value: "alkosh", Label: "Roar of Alkosh", Pen: 6000, PerWeaponDamage: false, Detect: DetectMap{Gear: []string{"roar_of_alkosh"}}},
+	{Value: "crimson_oath", Label: "Crimson Oath's Rive", Pen: 3541, PerWeaponDamage: false, Detect: DetectMap{Gear: []string{"crimson_oaths_rive"}}},
+	{Value: "tremorscale", Label: "Tremorscale", Pen: 2640, PerWeaponDamage: false, Detect: DetectMap{Gear: []string{"tremorscale"}}},
+	{Value: "runic_sunder", Label: "Runic Sunder", Pen: 2200, PerWeaponDamage: false, Detect: DetectMap{Skills: []string{"runic_sunder"}}},
+	{Value: "crystal_weapon", Label: "Crystal Weapon", Pen: 1000, PerWeaponDamage: false, Detect: DetectMap{Skills: []string{"crystal_weapon"}}},
+	{Value: "anthelmirs_construct", Label: "Anthelmir's Construct", Pen: 0, PerWeaponDamage: true, Detect: DetectMap{Gear: []string{"anthelmirs_construct"}}},
+}
+
+var PenExtraSources = []PenExtraSource{
+	{Value: "crusher", Label: "Crusher (enchant)", Pen: 2108, Bucket: "group", MaxStack: 0},
+	{Value: "sharpened", Label: "Sharpened (single)", Pen: 1638, Bucket: "self", MaxStack: 0},
+	{Value: "sharpened_double", Label: "Sharpened (double)", Pen: 3276, Bucket: "self", MaxStack: 0},
+	{Value: "arena_one_piece", Label: "Arena weapon (1pc)", Pen: 1190, Bucket: "self", MaxStack: 0},
+	{Value: "mace_maul", Label: "Mace (single)", Pen: 1487, Bucket: "self", MaxStack: 0},
+	{Value: "mace_maul_double", Label: "Mace / Maul (double)", Pen: 2974, Bucket: "self", MaxStack: 0},
+	{Value: "set_piece_bonuses", Label: "Set-piece bonuses", Pen: 1487, Bucket: "self", MaxStack: 5},
+}

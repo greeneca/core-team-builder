@@ -386,13 +386,25 @@ column; the `User` JSON model hides it (`json:"-"`).
   - `setup` — (Manage Channels) binds the current channel to one of the linked
     user's teams, or creates a new team. Shows a select menu; "Create a new team"
     opens a modal for the name.
-  - `post` — posts the team's condensed **overview** (roster by role with
-    abbreviated gear, schedule, groupings) with a **Get my details** button.
+  - `post` — posts the team's **overview** as a boxed embed: title (team name),
+    a single dynamic schedule timestamp (`<t:unix:F>`/`<t:unix:R>`, shown in each
+    viewer's own timezone — no more per-tz list), the roster grouped by role with
+    abbreviated gear inside a monospace box, groupings, and a footer with the
+    **self-required penetration and crit damage**. Carries three buttons:
+    **✅ Coming**, **❌ Not coming** (RSVP), and **Get My Build Details**. Built by
+    `discordfmt.BuildPost`; the bot wraps the parts in the embed and attaches the
+    buttons via `postComponents()`.
   - `status` / `unset` — show / remove the channel's team binding.
-  - **Get my details** button → matches the presser to a roster slot (by Discord
-    ID/mention in `players.discord_handle`, else case-insensitive username/global
-    name) and DMs them their full per-encounter loadout (falls back to an
-    ephemeral reply if DMs are closed).
+  - **Get My Build Details** button (`get_my_details`) → matches the presser to a
+    roster slot (by Discord ID/mention in `players.discord_handle`, else
+    case-insensitive username/global name) and DMs them their build, formatted
+    with underlined per-data-type headers (`discordfmt.PlayerDetail`); falls back
+    to an ephemeral reply if DMs are closed.
+  - **✅ Coming / ❌ Not coming** buttons → record the presser's attendance for
+    that specific post (`discord_rsvps`, keyed by message ID), then edit the post
+    in place (`InteractionResponseUpdateMessage`) to refresh the **Attendance**
+    embed field (Coming / Not coming lists as mentions). A user has one RSVP per
+    post; pressing the other button switches it. Re-posting starts a fresh tally.
 - **Account linking**: `users.discord_user_id` (unique) / `discord_username` link
   an app account to a Discord identity. The web UI ("Link Discord" topbar button,
   `#discord-modal`) calls `POST /api/discord/link-code` to mint a short,
@@ -403,12 +415,20 @@ column; the `User` JSON model hides it (`json:"-"`).
   link codes.
 - **Channel bindings**: `discord_channels` maps `channel_id` → `team_id` (upsert;
   `DiscordStore.BindChannel`/`GetChannelTeam`/`UnbindChannel`).
+- **RSVPs**: `discord_rsvps` (`028_discord_rsvps.sql`) stores one row per
+  `(message_id, discord_user_id)` with a `'yes'`/`'no'` status
+  (`DiscordStore.SetRSVP`/`ListRSVPs`).
 - **Label data (codegen)**: the bot formats posts using
   `backend/internal/discordfmt` (Go ports of the JS `formatCondensed` /
-  `formatDetailed` formatters), which reads labels/abbreviations from
+  `formatDetailed` formatters + the GROUP-source half of `computePenCoverage` /
+  `computeCritCoverage` for the self-required footer), which reads
+  labels/abbreviations and the crit/pen coverage tables from
   `backend/internal/esoref`. `esoref/data_gen.go` is **code-generated** from the
   frontend's single-source data (`frontend/js/gear-skills.js` + `data.js`) by
-  `tools/gen-esoref/gen.js` — run `node tools/gen-esoref/gen.js` (or `go generate
+  `tools/gen-esoref/gen.js` — it emits the label maps plus the structured
+  `CritGroupSources` / `PenGroupSources` / `PenExtraSources` tables and the
+  `CritCap` / `CritBase` / `PenTarget` / … constants (types are hand-written in
+  `esoref/pencrit.go`). Run `node tools/gen-esoref/gen.js` (or `go generate
   ./internal/esoref`) whenever that frontend data changes, then commit the result.
 - **Config**: `DISCORD_BOT_TOKEN` (required to run the bot), optional
   `DISCORD_APP_ID` and `DISCORD_GUILD_ID` (set the guild ID for instant,

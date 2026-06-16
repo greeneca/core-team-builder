@@ -173,3 +173,56 @@ func (s *DiscordStore) UnbindChannel(ctx context.Context, channelID string) erro
 	_, err := s.pool.Exec(ctx, q, channelID)
 	return err
 }
+
+// RSVP attendance statuses for a posted trial.
+const (
+	RSVPYes = "yes"
+	RSVPNo  = "no"
+)
+
+// RSVP is one Discord user's attendance response to a posted trial overview.
+type RSVP struct {
+	DiscordUserID   string
+	DiscordUsername string
+	Status          string
+}
+
+// SetRSVP records (or updates) a user's attendance response for a posted message.
+// A user has at most one RSVP per message; pressing the other button overwrites
+// the prior choice.
+func (s *DiscordStore) SetRSVP(ctx context.Context, messageID, channelID, discordUserID, discordUsername, status string) error {
+	const q = `
+		INSERT INTO discord_rsvps (message_id, channel_id, discord_user_id, discord_username, status, updated_at)
+		VALUES ($1, $2, $3, $4, $5, now())
+		ON CONFLICT (message_id, discord_user_id)
+		DO UPDATE SET status = EXCLUDED.status,
+		              discord_username = EXCLUDED.discord_username,
+		              channel_id = EXCLUDED.channel_id,
+		              updated_at = now()`
+	_, err := s.pool.Exec(ctx, q, messageID, channelID, discordUserID, discordUsername, status)
+	return err
+}
+
+// ListRSVPs returns all attendance responses for a posted message, ordered by
+// when each was last set (so the displayed lists are stable).
+func (s *DiscordStore) ListRSVPs(ctx context.Context, messageID string) ([]RSVP, error) {
+	const q = `
+		SELECT discord_user_id, discord_username, status
+		FROM discord_rsvps
+		WHERE message_id = $1
+		ORDER BY updated_at`
+	rows, err := s.pool.Query(ctx, q, messageID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []RSVP
+	for rows.Next() {
+		var r RSVP
+		if err := rows.Scan(&r.DiscordUserID, &r.DiscordUsername, &r.Status); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}

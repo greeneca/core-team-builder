@@ -9,7 +9,9 @@ package discordfmt
 
 import (
 	"fmt"
+	"math"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,15 +19,54 @@ import (
 	"github.com/core-team-builder/backend/internal/models"
 )
 
-// Overview builds the condensed channel post for a team: a schedule header, then
-// players grouped by role (Tank, Healer, Support DPS, DPS) with abbreviated gear
-// from the primary encounter. groupings are appended when present.
-func Overview(team *models.Team, primary *models.Encounter, groupings []models.Grouping) string {
-	var L []string
-	L = append(L, fmt.Sprintf("**%s**", team.Name))
-	L = append(L, scheduleHeader(team))
-	L = append(L, "")
+// BuildPost renders a team's channel post into embed-ready parts the bot wraps
+// in a single boxed embed:
+//   - title:       the team name.
+//   - description: a dynamic next-run timestamp (shown in each viewer's own
+//     timezone), the roster grouped by role inside a monospace box, any
+//     groupings, and the signup note.
+//   - footer:      the self-required penetration and crit damage (what each
+//     player must bring after the team's group buffs).
+func BuildPost(team *models.Team, primary *models.Encounter, groupings []models.Grouping) (title, description, footer string) {
+	title = team.Name
 
+	var L []string
+	// Schedule as a single Discord timestamp: each viewer sees it in their own
+	// timezone, plus a relative "in X" hint. Falls back to the day list when
+	// there is no concrete next run to anchor a timestamp on.
+	if unix, ok := nextRunUnix(team.ScheduleDays, team.ScheduleTime); ok {
+		L = append(L, fmt.Sprintf("\U0001F5D3\uFE0F  Next run: <t:%d:F> (<t:%d:R>)", unix, unix))
+	} else if s := scheduleFallback(team); s != "" {
+		L = append(L, "\U0001F5D3\uFE0F  "+s)
+	}
+
+	// Roster as a monospace code block so columns line up inside the embed box.
+	if table := rosterTable(team, primary); table != "" {
+		if len(L) > 0 {
+			L = append(L, "")
+		}
+		L = append(L, "```")
+		L = append(L, table)
+		L = append(L, "```")
+	}
+
+	if gl := formatGroupings(team, groupings); len(gl) > 0 {
+		L = append(L, "")
+		L = append(L, gl...)
+	}
+	if note := strings.TrimSpace(team.SignupNote); note != "" {
+		L = append(L, "")
+		L = append(L, note)
+	}
+	description = strings.TrimSpace(strings.Join(L, "\n"))
+	footer = selfRequiredFooter(team, primary)
+	return title, description, footer
+}
+
+// rosterTable renders the roster grouped by role (Tank, Healer, Support DPS,
+// DPS, then any "Other") into aligned monospace rows: slot, who, class, and
+// abbreviated gear from the primary encounter. Returns "" when no players.
+func rosterTable(team *models.Team, primary *models.Encounter) string {
 	bySlot := map[int]models.Loadout{}
 	if primary != nil {
 		for _, lo := range primary.Loadouts {
@@ -34,6 +75,9 @@ func Overview(team *models.Team, primary *models.Encounter, groupings []models.G
 	}
 
 	players := sortedPlayers(team)
+	if len(players) == 0 {
+		return ""
+	}
 	type row struct{ role, slot, who, cls, gear string }
 	rows := make([]row, 0, len(players))
 	for _, p := range players {
@@ -46,8 +90,6 @@ func Overview(team *models.Team, primary *models.Encounter, groupings []models.G
 		})
 	}
 
-	// Column widths across all rows so groups line up (best-effort in Discord's
-	// proportional font; no code block so handles still notify).
 	wSlot, wWho, wCls := 0, 0, 0
 	for _, r := range rows {
 		wSlot = max(wSlot, len(r.slot))
@@ -67,6 +109,7 @@ func Overview(team *models.Team, primary *models.Encounter, groupings []models.G
 		}
 	}
 
+	var L []string
 	first := true
 	for _, g := range groups {
 		var grp []row
@@ -86,53 +129,56 @@ func Overview(team *models.Team, primary *models.Encounter, groupings []models.G
 			L = append(L, "")
 		}
 		first = false
-		L = append(L, fmt.Sprintf("__%s__", g.label))
+		L = append(L, "── "+g.label+" ──")
 		for _, r := range grp {
-			L = append(L, fmt.Sprintf("%s  %s  %s  %s",
+			L = append(L, fmt.Sprintf("%s %s  %s  %s",
 				padEnd(r.slot, wSlot), padEnd(r.who, wWho), padEnd(r.cls, wCls), r.gear))
 		}
 	}
-
-	if gl := formatGroupings(team, groupings); len(gl) > 0 {
-		L = append(L, "")
-		L = append(L, gl...)
-	}
-	if note := strings.TrimSpace(team.SignupNote); note != "" {
-		L = append(L, "")
-		L = append(L, note)
-	}
-	return strings.TrimSpace(strings.Join(L, "\n"))
+	return strings.Join(L, "\n")
 }
 
-// PlayerDetail builds the detailed DM for a single player: role/class/race, the
-// build line (subclass lines or masteries), and each encounter's loadout.
+// PlayerDetail builds the detailed DM for a single player. It is formatted for
+// easy reading: a title, then sections (Player, Class & Race, Build, and one per
+// encounter) where every data type sits on its own line under an underlined
+// header (Discord `__header__`).
 func PlayerDetail(team *models.Team, p models.Player, encounters []models.Encounter) string {
-	var L []string
 	name := p.Name
 	if name == "" {
 		name = fmt.Sprintf("Slot %d", p.Slot)
 	}
-	L = append(L, fmt.Sprintf("**%s** — %s", team.Name, "Your trial assignment"))
-	L = append(L, "")
-	header := fmt.Sprintf("__%d. %s__ — %s", p.Slot, name, esoref.RoleLabel(p.Role))
+
+	var L []string
+	L = append(L, fmt.Sprintf("**%s — Your Build Details**", team.Name))
+
+	// Player.
+	who := fmt.Sprintf("%d. %s — %s", p.Slot, name, esoref.RoleLabel(p.Role))
 	if tag := discordTag(p.DiscordHandle); tag != "" {
-		header += " · " + tag
+		who += " · " + tag
 	}
-	L = append(L, header)
-	L = append(L, fmt.Sprintf("Class: %s · Race: %s", esoref.ClassLabel(p.Class), esoref.RaceLabel(p.Race)))
-	L = append(L, buildText(p))
+	L = append(L, "", "__Player__", who)
+
+	// Class & Race.
+	L = append(L, "", "__Class & Race__", fmt.Sprintf("%s · %s", esoref.ClassLabel(p.Class), esoref.RaceLabel(p.Race)))
+
+	// Build (subclass lines or masteries).
+	L = append(L, "", "__Build__", buildText(p))
+
+	// One section per encounter, each data type on its own underlined line.
 	for _, enc := range encounters {
+		L = append(L, "", fmt.Sprintf("**%s**", enc.Name))
 		lo, ok := loadoutForSlot(enc, p.Slot)
-		parts := ""
+		var fields []labelledField
 		if ok {
-			if dp := loadoutDetailParts(lo); len(dp) > 0 {
-				parts = strings.Join(dp, " | ")
-			}
+			fields = loadoutDetailFields(lo)
 		}
-		if parts == "" {
-			parts = "(no loadout set)"
+		if len(fields) == 0 {
+			L = append(L, "_(no loadout set)_")
+			continue
 		}
-		L = append(L, fmt.Sprintf("• %s: %s", enc.Name, parts))
+		for _, f := range fields {
+			L = append(L, "__"+f.header+"__", f.value)
+		}
 	}
 	return strings.TrimSpace(strings.Join(L, "\n"))
 }
@@ -218,26 +264,35 @@ func loadoutForSlot(enc models.Encounter, slot int) (models.Loadout, bool) {
 	return models.Loadout{}, false
 }
 
-// loadoutDetailParts mirrors the JS helper: labelled segments for one loadout.
-func loadoutDetailParts(lo models.Loadout) []string {
-	var parts []string
+// labelledField is one loadout data type rendered as an underlined header
+// (Header) plus its value (Value) in the player-detail DM.
+type labelledField struct {
+	header string
+	value  string
+}
+
+// loadoutDetailFields mirrors the JS helper: one labelled field per data type
+// set on a loadout (Gear, Skills, Crit Damage, Mundus, Potions, CP, Armor,
+// Penetration). Empty data types are omitted.
+func loadoutDetailFields(lo models.Loadout) []labelledField {
+	var fields []labelledField
 	if s := mapLabels(lo.Gear, esoref.GearLabel); s != "" {
-		parts = append(parts, "Gear: "+s)
+		fields = append(fields, labelledField{"Gear", s})
 	}
 	if s := mapLabels(lo.Skills, esoref.SkillLabel); s != "" {
-		parts = append(parts, "Skills: "+s)
+		fields = append(fields, labelledField{"Skills", s})
 	}
 	if s := mapLabels(lo.CritDmg, esoref.CritDmgLabel); s != "" {
-		parts = append(parts, "Crit dmg: "+s)
+		fields = append(fields, labelledField{"Crit Damage", s})
 	}
 	if lo.Mundus != "" {
-		parts = append(parts, "Mundus: "+esoref.MundusLabel(lo.Mundus))
+		fields = append(fields, labelledField{"Mundus", esoref.MundusLabel(lo.Mundus)})
 	}
 	if s := mapLabels(lo.Potions, esoref.PotionLabel); s != "" {
-		parts = append(parts, "Potions: "+s)
+		fields = append(fields, labelledField{"Potions", s})
 	}
 	if s := mapLabels(lo.CPBlue, esoref.CPBlueLabel); s != "" {
-		parts = append(parts, "CP: "+s)
+		fields = append(fields, labelledField{"CP", s})
 	}
 	var armor []string
 	if lo.ArmorHeavy > 0 {
@@ -250,13 +305,13 @@ func loadoutDetailParts(lo models.Loadout) []string {
 		armor = append(armor, fmt.Sprintf("%dL", lo.ArmorLight))
 	}
 	if len(armor) > 0 {
-		parts = append(parts, "Armor: "+strings.Join(armor, "/"))
+		fields = append(fields, labelledField{"Armor", strings.Join(armor, "/")})
 	}
 	// pen_extra may repeat keys for stackable sources; collapse into "Label ×N".
 	if pen := penExtraParts(lo.PenExtra); pen != "" {
-		parts = append(parts, "Pen: "+pen)
+		fields = append(fields, labelledField{"Penetration", pen})
 	}
-	return parts
+	return fields
 }
 
 func penExtraParts(keys []string) string {
@@ -342,26 +397,17 @@ func formatGroupings(team *models.Team, groupings []models.Grouping) []string {
 	return L
 }
 
-// scheduleHeader renders the days + time line for the overview. The stored time
-// is UTC; it is shown in UTC plus each of the team's extra display timezones
-// (using Go's embedded tzdata). Recurring weekly times have no date, so the
-// conversion is anchored on "today" and may be off by an hour near a DST change
-// (same trade-off the web UI accepts).
-func scheduleHeader(team *models.Team) string {
-	days := "TBD"
-	if labels := dayLabels(team.ScheduleDays); labels != "" {
-		days = labels
+// scheduleFallback renders a plain days/time line, used when there is no
+// concrete next run to anchor a dynamic timestamp on.
+func scheduleFallback(team *models.Team) string {
+	days := dayLabels(team.ScheduleDays)
+	if days == "" {
+		return "Schedule: TBD"
 	}
 	if team.ScheduleTime == "" {
-		return days
+		return "Schedule: " + days
 	}
-	times := []string{team.ScheduleTime + " UTC"}
-	for _, tz := range team.TeamTimezones {
-		if conv, short, ok := convertWallTime(team.ScheduleTime, tz); ok {
-			times = append(times, fmt.Sprintf("%s %s", conv, short))
-		}
-	}
-	return fmt.Sprintf("%s · %s", days, strings.Join(times, " · "))
+	return fmt.Sprintf("Schedule: %s · %s UTC", days, team.ScheduleTime)
 }
 
 func dayLabels(days []string) string {
@@ -375,22 +421,42 @@ func dayLabels(days []string) string {
 	return strings.Join(out, ", ")
 }
 
-// convertWallTime converts an "HH:MM" UTC wall time to the given IANA zone,
-// anchored on today. Returns the converted "HH:MM", a short zone abbreviation,
-// and ok=false when the time or zone is invalid.
-func convertWallTime(hhmm, zone string) (string, string, bool) {
+var weekdayByDay = map[string]time.Weekday{
+	"sun": time.Sunday, "mon": time.Monday, "tue": time.Tuesday, "wed": time.Wednesday,
+	"thu": time.Thursday, "fri": time.Friday, "sat": time.Saturday,
+}
+
+// nextRunUnix returns the Unix time (seconds) of the next occurrence of the
+// recurring weekly schedule (one of days, at the UTC HH:MM time), or ok=false
+// when either is unset/invalid. The schedule has no date, so the nearest future
+// match within the coming week is used. The emitted Discord timestamp then
+// renders in each viewer's own timezone.
+func nextRunUnix(days []string, hhmm string) (int64, bool) {
+	if len(days) == 0 || hhmm == "" {
+		return 0, false
+	}
 	t, err := time.Parse("15:04", hhmm)
 	if err != nil {
-		return "", "", false
+		return 0, false
 	}
-	loc, err := time.LoadLocation(zone)
-	if err != nil {
-		return "", "", false
+	want := map[time.Weekday]bool{}
+	for _, d := range days {
+		if wd, ok := weekdayByDay[strings.ToLower(strings.TrimSpace(d))]; ok {
+			want[wd] = true
+		}
+	}
+	if len(want) == 0 {
+		return 0, false
 	}
 	now := time.Now().UTC()
-	utc := time.Date(now.Year(), now.Month(), now.Day(), t.Hour(), t.Minute(), 0, 0, time.UTC)
-	local := utc.In(loc)
-	return local.Format("15:04"), local.Format("MST"), true
+	base := time.Date(now.Year(), now.Month(), now.Day(), t.Hour(), t.Minute(), 0, 0, time.UTC)
+	for offset := 0; offset < 8; offset++ {
+		cand := base.AddDate(0, 0, offset)
+		if want[cand.Weekday()] && cand.After(now) {
+			return cand.Unix(), true
+		}
+	}
+	return 0, false
 }
 
 func padEnd(s string, n int) string {
@@ -398,4 +464,240 @@ func padEnd(s string, n int) string {
 		return s
 	}
 	return s + strings.Repeat(" ", n-len(s))
+}
+
+// --- Self-required penetration / crit damage ---
+//
+// Ports the GROUP-source half of computePenCoverage / computeCritCoverage in
+// frontend/js/data.js: detect which sources the team provides to everyone, then
+// the "self required" figure is the target/cap minus that group total — what
+// each player must still bring from their own gear/CP/skills.
+
+// pcContext is one player's inputs for crit/pen group-source detection.
+type pcContext struct {
+	slot             int
+	gear             map[string]bool
+	skills           map[string]bool
+	masteries        map[string]bool
+	skillLines       map[string]bool
+	cpBlue           map[string]bool
+	penExtra         map[string]bool
+	mundus           string
+	race             string
+	class            string
+	subclassed       bool
+	catalystElements int
+	weaponDamage     int
+}
+
+func newPCContext(p models.Player, lo models.Loadout) pcContext {
+	c := pcContext{
+		slot:             p.Slot,
+		gear:             toSet(lo.Gear),
+		skills:           toSet(lo.Skills),
+		cpBlue:           toSet(lo.CPBlue),
+		penExtra:         toSet(lo.PenExtra),
+		mundus:           lo.Mundus,
+		race:             p.Race,
+		class:            p.Class,
+		subclassed:       p.Subclassed,
+		masteries:        map[string]bool{},
+		skillLines:       map[string]bool{},
+		catalystElements: clampCatalystElements(lo.CatalystElements),
+		weaponDamage:     lo.WeaponDamage,
+	}
+	if c.weaponDamage < 0 {
+		c.weaponDamage = 0
+	}
+	if p.Subclassed {
+		for _, v := range []string{p.SkillLine1, p.SkillLine2, p.SkillLine3} {
+			if v != "" {
+				c.skillLines[v] = true
+			}
+		}
+	} else {
+		for _, v := range []string{p.Mastery1, p.Mastery2} {
+			if v != "" {
+				c.masteries[v] = true
+			}
+		}
+	}
+	return c
+}
+
+func toSet(keys []string) map[string]bool {
+	m := make(map[string]bool, len(keys))
+	for _, k := range keys {
+		m[k] = true
+	}
+	return m
+}
+
+// clampCatalystElements mirrors the JS clamp: anything < 1 falls back to 3
+// (the full Elemental Catalyst bonus), capped at 3.
+func clampCatalystElements(v int) int {
+	if v < 1 || v > 3 {
+		return 3
+	}
+	return v
+}
+
+func anySet(have map[string]bool, keys []string) bool {
+	for _, k := range keys {
+		if have[k] {
+			return true
+		}
+	}
+	return false
+}
+
+// detectHit reports whether a player satisfies a detection map any way it can be
+// applied (any category, any candidate key).
+func detectHit(c pcContext, d esoref.DetectMap) bool {
+	if anySet(c.gear, d.Gear) || anySet(c.skills, d.Skills) || anySet(c.masteries, d.Masteries) ||
+		anySet(c.skillLines, d.SkillLines) || anySet(c.cpBlue, d.CP) {
+		return true
+	}
+	for _, k := range d.Classes {
+		if c.class != "" && c.class == k {
+			return true
+		}
+	}
+	for _, k := range d.Race {
+		if c.race != "" && c.race == k {
+			return true
+		}
+	}
+	for _, k := range d.Mundus {
+		if c.mundus != "" && c.mundus == k {
+			return true
+		}
+	}
+	for _, cp := range d.ClassPassive {
+		if c.subclassed {
+			if c.skillLines[cp.Line] {
+				return true
+			}
+		} else if c.class == cp.Class {
+			return true
+		}
+	}
+	return false
+}
+
+// selfRequired returns the penetration and crit damage (%) each player must
+// supply from their own sources, after subtracting what the team provides
+// group-wide. Loadout inputs come from the primary encounter.
+func selfRequired(team *models.Team, primary *models.Encounter) (penReq, critReq int) {
+	bySlot := map[int]models.Loadout{}
+	if primary != nil {
+		for _, lo := range primary.Loadouts {
+			bySlot[lo.Slot] = lo
+		}
+	}
+	contexts := make([]pcContext, 0, len(team.Players))
+	for _, p := range team.Players {
+		contexts = append(contexts, newPCContext(p, bySlot[p.Slot]))
+	}
+
+	// Crit group total = base (everyone) + detected group sources.
+	critGroup := esoref.CritBase
+	for _, s := range esoref.CritGroupSources {
+		var providers []pcContext
+		for _, c := range contexts {
+			if detectHit(c, s.Detect) {
+				providers = append(providers, c)
+			}
+		}
+		if len(providers) == 0 {
+			continue
+		}
+		pct := s.Pct
+		if s.PerElement {
+			// Elemental Catalyst scales with the highest element count among wearers.
+			elements := 0
+			for _, c := range providers {
+				if c.catalystElements > elements {
+					elements = c.catalystElements
+				}
+			}
+			pct = elements * esoref.ElementalCatalystPerElement
+		}
+		critGroup += pct
+	}
+	critReq = esoref.CritCap - critGroup
+	if critReq < 0 {
+		critReq = 0
+	}
+
+	// Pen group total = detected group sources + group-bucket pen_extra (Crusher).
+	penGroup := 0
+	for _, s := range esoref.PenGroupSources {
+		var providers []pcContext
+		for _, c := range contexts {
+			if detectHit(c, s.Detect) {
+				providers = append(providers, c)
+			}
+		}
+		if len(providers) == 0 {
+			continue
+		}
+		pen := s.Pen
+		if s.PerWeaponDamage {
+			// Anthelmir's Construct scales off the highest weapon damage among wearers.
+			wd := 0
+			for _, c := range providers {
+				if c.weaponDamage > wd {
+					wd = c.weaponDamage
+				}
+			}
+			pen = int(math.Round(float64(wd) * esoref.AnthelmirPenPerWD))
+		}
+		if pen > 0 {
+			penGroup += pen
+		}
+	}
+	for _, s := range esoref.PenExtraSources {
+		if s.Bucket != "group" {
+			continue
+		}
+		for _, c := range contexts {
+			if c.penExtra[s.Value] {
+				penGroup += s.Pen
+				break
+			}
+		}
+	}
+	penReq = esoref.PenTarget - penGroup
+	if penReq < 0 {
+		penReq = 0
+	}
+	return penReq, critReq
+}
+
+// selfRequiredFooter is the embed footer summarizing the self-required figures.
+func selfRequiredFooter(team *models.Team, primary *models.Encounter) string {
+	pen, crit := selfRequired(team, primary)
+	return fmt.Sprintf("Self-required (after group buffs) — Penetration %s · Crit damage %d%%",
+		commaInt(pen), crit)
+}
+
+// commaInt formats an integer with thousands separators (e.g. 18200 -> 18,200).
+func commaInt(n int) string {
+	s := strconv.Itoa(n)
+	neg := strings.HasPrefix(s, "-")
+	if neg {
+		s = s[1:]
+	}
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if i > 0 && (len(s)-i)%3 == 0 {
+			b.WriteByte(',')
+		}
+		b.WriteByte(s[i])
+	}
+	if neg {
+		return "-" + b.String()
+	}
+	return b.String()
 }

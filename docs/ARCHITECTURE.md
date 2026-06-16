@@ -38,13 +38,13 @@ Core Team Builder is a three-tier application:
             │     players, encounters, encounter_loadouts,  │
             │     groupings, grouping_groups,               │
             │     grouping_members, discord_link_codes,     │
-            │     discord_channels                          │
+            │     discord_channels, discord_rsvps           │
             └───────────────▲─────────────────────────────┘
                             │ pgx (shares stores)
             ┌───────────────┴─────────────────────────────┐
             │  bot (Go, discordgo) — optional, no inbound  │
             │   • /coreteam slash command (link/setup/     │
-            │     post/status/unset) + Get my details DM    │
+            │     post/status/unset) + details DM + RSVPs    │
             │   • outbound WebSocket to the Discord gateway │
             └─────────────────────────────────────────────┘
 ```
@@ -362,6 +362,19 @@ which roster to render):
 | set_by_user_id | bigint      | FK → `users(id)`, set null on delete       |
 | created_at     | timestamptz | default `now()`                            |
 | updated_at     | timestamptz | bump on rebind                             |
+
+`discord_rsvps` (`028_discord_rsvps.sql`) records attendance from the ✅/❌
+buttons on a posted overview — one row per `(message_id, discord_user_id)`:
+
+| column           | type        | notes                                    |
+|------------------|-------------|------------------------------------------|
+| message_id       | text        | posted overview message (PK part)        |
+| channel_id       | text        | channel the post is in                   |
+| discord_user_id  | text        | the responder (PK part)                  |
+| discord_username | text        | display-name fallback                    |
+| status           | text        | `'yes'` (coming) or `'no'` (not coming)  |
+| created_at       | timestamptz | default `now()`                          |
+| updated_at       | timestamptz | bump on re-RSVP                          |
 
 Managed via `DiscordStore`; the hourly sweep prunes expired/used link codes. See
 `docs/AGENT_CONTEXT.md` "Discord bot".

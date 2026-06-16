@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"strconv"
 	"strings"
@@ -24,6 +25,42 @@ type bot struct {
 
 // discordMessageLimit is Discord's hard cap on a message's content length.
 const discordMessageLimit = 2000
+
+// Discord embed limits (and the post's accent color, Discord blurple).
+const (
+	embedTitleLimit       = 256
+	embedDescriptionLimit = 4096
+	embedFooterLimit      = 2048
+	embedFieldValueLimit  = 1024
+	embedColor            = 0x5865F2
+)
+
+// postComponents are the buttons attached to a posted trial overview: the two
+// RSVP buttons (coming / not coming) and the per-player details button. Defined
+// once so /coreteam post and the RSVP update both render the same row.
+func postComponents() []discordgo.MessageComponent {
+	return []discordgo.MessageComponent{
+		discordgo.ActionsRow{Components: []discordgo.MessageComponent{
+			discordgo.Button{
+				Label:    "Coming",
+				Emoji:    &discordgo.ComponentEmoji{Name: "✅"},
+				Style:    discordgo.SuccessButton,
+				CustomID: "rsvp_yes",
+			},
+			discordgo.Button{
+				Label:    "Not coming",
+				Emoji:    &discordgo.ComponentEmoji{Name: "❌"},
+				Style:    discordgo.DangerButton,
+				CustomID: "rsvp_no",
+			},
+			discordgo.Button{
+				Label:    "Get My Build Details",
+				Style:    discordgo.PrimaryButton,
+				CustomID: "get_my_details",
+			},
+		}},
+	}
+}
 
 // createTeamOption is the sentinel select value meaning "create a new team".
 const createTeamOption = "__create__"
@@ -108,6 +145,10 @@ func (b *bot) onComponent(s *discordgo.Session, i *discordgo.InteractionCreate) 
 		b.handleGetMyDetails(s, i)
 	case "setup_select":
 		b.handleSetupSelect(s, i)
+	case "rsvp_yes":
+		b.handleRSVP(s, i, models.RSVPYes)
+	case "rsvp_no":
+		b.handleRSVP(s, i, models.RSVPNo)
 	}
 }
 
@@ -356,24 +397,106 @@ func (b *bot) handlePost(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		return
 	}
 
-	content := truncate(discordfmt.Overview(team, primary, gr), discordMessageLimit)
+	title, desc, footer := discordfmt.BuildPost(team, primary, gr)
+	// Render as an embed so the post is wrapped in a tidy box (colored bar +
+	// border), the schedule renders as a per-viewer dynamic timestamp, and the
+	// self-required pen/crit sit in the footer.
+	embed := &discordgo.MessageEmbed{
+		Title:       truncate(title, embedTitleLimit),
+		Description: truncate(desc, embedDescriptionLimit),
+		Color:       embedColor,
+		Footer:      &discordgo.MessageEmbedFooter{Text: truncate(footer, embedFooterLimit)},
+	}
 	err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
-			Content: content,
-			Components: []discordgo.MessageComponent{
-				discordgo.ActionsRow{Components: []discordgo.MessageComponent{
-					discordgo.Button{
-						Label:    "Get my details",
-						Style:    discordgo.PrimaryButton,
-						CustomID: "get_my_details",
-					},
-				}},
-			},
+			Embeds:     []*discordgo.MessageEmbed{embed},
+			Components: postComponents(),
 		},
 	})
 	if err != nil {
 		log.Printf("post: respond: %v", err)
+	}
+}
+
+// --- RSVP buttons (✅ Coming / ❌ Not coming) ---
+
+// handleRSVP records the presser's attendance for the post they clicked, then
+// edits the post in place so everyone sees the updated Coming / Not coming
+// tally. RSVPs are keyed to this specific message, so a fresh /coreteam post
+// starts a new tally.
+func (b *bot) handleRSVP(s *discordgo.Session, i *discordgo.InteractionCreate, status string) {
+	user := invokingUser(i)
+	if user == nil {
+		ephemeral(s, i, "Could not identify your Discord account.")
+		return
+	}
+	if i.Message == nil {
+		ephemeral(s, i, "Could not find the post to update.")
+		return
+	}
+
+	ctx, cancel := handlerContext()
+	defer cancel()
+
+	if err := b.discord.SetRSVP(ctx, i.Message.ID, i.ChannelID, user.ID, displayName(user), status); err != nil {
+		log.Printf("rsvp: set: %v", err)
+		ephemeral(s, i, "Something went wrong saving your RSVP. Please try again.")
+		return
+	}
+	rsvps, err := b.discord.ListRSVPs(ctx, i.Message.ID)
+	if err != nil {
+		log.Printf("rsvp: list: %v", err)
+		ephemeral(s, i, "Saved your RSVP, but couldn't refresh the post.")
+		return
+	}
+
+	// Preserve the original embed; swap in a fresh Attendance field. Falls back
+	// to a minimal embed if the message somehow has none.
+	var embed discordgo.MessageEmbed
+	if len(i.Message.Embeds) > 0 {
+		embed = *i.Message.Embeds[0]
+	}
+	embed.Fields = []*discordgo.MessageEmbedField{attendanceField(rsvps)}
+
+	err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseUpdateMessage,
+		Data: &discordgo.InteractionResponseData{
+			Embeds:     []*discordgo.MessageEmbed{&embed},
+			Components: postComponents(),
+		},
+	})
+	if err != nil {
+		log.Printf("rsvp: respond: %v", err)
+	}
+}
+
+// attendanceField renders the Coming / Not coming lists (as mentions) into a
+// single embed field for the post.
+func attendanceField(rsvps []models.RSVP) *discordgo.MessageEmbedField {
+	var yes, no []string
+	for _, r := range rsvps {
+		mention := "<@" + r.DiscordUserID + ">"
+		switch r.Status {
+		case models.RSVPYes:
+			yes = append(yes, mention)
+		case models.RSVPNo:
+			no = append(no, mention)
+		}
+	}
+	yesLine := "—"
+	if len(yes) > 0 {
+		yesLine = strings.Join(yes, " ")
+	}
+	noLine := "—"
+	if len(no) > 0 {
+		noLine = strings.Join(no, " ")
+	}
+	value := fmt.Sprintf("✅ Coming (%d): %s\n❌ Not coming (%d): %s", len(yes), yesLine, len(no), noLine)
+	return &discordgo.MessageEmbedField{
+		Name:   "Attendance",
+		Value:  truncate(value, embedFieldValueLimit),
+		Inline: false,
 	}
 }
 
