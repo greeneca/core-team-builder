@@ -252,7 +252,8 @@ Run it:
 - Auth: bcrypt (cost 12), constant-time login, short access tokens + rotating
   DB-backed refresh tokens with revocation/logout, HS256-pinned JWTs with
   `iss`/`aud`/required-`exp` validation, ≥ 32-byte `JWT_SECRET` enforced at boot.
-- Abuse limits: per-owner team cap, per-team encounter cap, timezone/roster caps.
+- Abuse limits: per-owner team cap, per-team encounter cap, per-team grouping and
+  member-pool caps, and per-loadout item caps.
 - Containers: backend on `scratch` as non-root, unprivileged non-root nginx,
   read-only root filesystems + tmpfs, `cap_drop: [ALL]` (minimal caps for db),
   `no-new-privileges`, and per-service memory/PID limits.

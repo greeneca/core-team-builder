@@ -275,7 +275,21 @@ column; the `User` JSON model hides it (`json:"-"`).
   flat penetration sources that aren't otherwise derivable (Crusher enchant,
   Sharpened trait, Mace/Maul, generic set-piece bonuses). These plus reused
   inputs feed the penetration calculator (see "Penetration model").
-- **Loadout items** (gear sets, skills, potions, cp_blue, crit_dmg, pen_extra): stored as keys; the backend does **not**
+- **Scribing inputs** (`032_loadout_scribed_buffs.sql`,
+  `033_loadout_banner_bearer_focus.sql`): each `(encounter, slot)` loadout also
+  carries `scribed_buffs TEXT[]` and `banner_bearer_focus TEXT`. ESO **scribing**
+  grimoires let a player attach a group buff to a slotted scribed skill; when a
+  loadout slots a grimoire skill (`GRIMOIRE_SKILLS` in `data.js`) the roster
+  reveals a **Scribed buffs** chip column (`LOADOUT_TYPES.scribed_buffs`, options
+  `SCRIBED_BUFFS`) recording which group buffs that skill provides — these count
+  toward the Group Buffs coverage card (the `scribed` source category; note
+  `minor_breach` instead feeds the penetration calculator as a group source).
+  When the **Banner Bearer** grimoire is slotted, a single `banner_bearer_focus`
+  `<select>` (`BANNER_BEARER_FOCUS`) records the chosen Focus Script; it is
+  **informational only** (shown in the UI and Discord export, feeds no
+  calculation).
+- **Loadout items** (gear sets, skills, potions, cp_blue, crit_dmg, pen_extra,
+  scribed_buffs): stored as keys; the backend does **not**
   validate them against a master list (free-form, defensively sanitized via
   `SanitizeLoadoutItems`: trimmed, non-empty, ≤100 chars, ≤30 items). The
   searchable dropdowns, labels, and gear tooltips live entirely in the frontend
@@ -548,7 +562,9 @@ interest gathered via Discord, plus manual web entries.
   a buff is **met** if at least one player provides at least one of its sources.
   Build sources honor subclassing — a `subclassed` player contributes their
   `skill_line_*`; a non-subclassed player contributes their `class` + `mastery_*`.
-  Loadout sources (gear/skills/potions) always count. Returns `{ total, met,
+  Loadout sources (gear/skills/potions) always count. A player whose loadout
+  slots a grimoire skill also covers any buff listed in its `scribed_buffs` (the
+  `scribed` category). Returns `{ total, met,
   items: [{ buff, met, providers:[{slot, category, key}] }] }`.
 - **UI** (`app.js` / `index.html`): a **Group Buffs** card on the team detail
   page shows `met / total` plus a pip bar; a **Details** button opens
@@ -616,7 +632,7 @@ interest gathered via Discord, plus manual web entries.
   `type` ∈ `cp|gear|mundus|race|classPassive`; an optional `scaled`
   `{per,ctxKey,unit}` multiplies a per-unit pen by a per-loadout count instead of
   a flat `pen` — `splintered_secrets` uses `splinteredSecretsSkills`
-  (`splintered_secrets_skills`, 0–2, default 2 = 2480), `force_of_nature` uses
+  (`splintered_secrets_skills`, 0–5, default 2; 1240 each), `force_of_nature` uses
   `forceOfNatureStatus` (`force_of_nature_status`, 0–5, default 5 = 3300)),
   `PEN_EXTRA_SOURCES` (the
   `pen_extra` chip options, each `{value,label,pen,bucket}` where `bucket` ∈
@@ -634,11 +650,13 @@ interest gathered via Discord, plus manual web entries.
   stats with a `Details` button (`#pen-modal`). Each roster slot has a `pen_extra`
   chip column and a penetration label with a met/unmet indicator.
   `refreshPenCoverage()` repaints live (same trigger points as
-  `refreshCritCoverage()`). Conditional per-slot crit/pen inputs are shown only
+  `refreshCritCoverage()`). Conditional per-slot inputs are shown only
   when relevant: `catalyst_elements` (Elemental Catalyst equipped),
   `weapon_damage` (Anthelmir's Construct equipped),
   `splintered_secrets_skills` (player has Herald of the Tome — `slotHasHeraldOfTome`),
-  and `force_of_nature_status` (the Force of Nature blue CP chip is slotted).
+  `force_of_nature_status` (the Force of Nature blue CP chip is slotted),
+  `scribed_buffs` (a grimoire skill is slotted), and `banner_bearer_focus`
+  (the Banner Bearer grimoire is slotted).
 
 ## Request flow
 

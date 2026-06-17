@@ -197,7 +197,7 @@ Mutating endpoints return the full refreshed team (with `players` and `members`)
 | `GET /api/teams`                           | member   | List teams you own or that are shared with you (`{ "teams": [...] }`). |
 | `POST /api/teams`                          | any user | Create a team `{ "name": "...", "copy_from"?: <teamID> }` → `201`. Without `copy_from`: 12 empty slots + a `Default` encounter. With `copy_from` (a team you can access): copies its schedule, roster, and encounters/loadouts (never its sharing). |
 | `GET /api/teams/{id}`                      | viewer+  | Get one team with `players` + `members`. |
-| `PUT /api/teams/{id}`                      | editor+  | Save everything: `{ name, schedule_days, schedule_time, team_timezones, encounters_enabled, post_footer, dm_footer, players }`. |
+| `PUT /api/teams/{id}`                      | editor+  | Save everything: `{ name, schedule_days, schedule_time, encounters_enabled, post_footer, dm_footer, signup_post, players }`. |
 | `DELETE /api/teams/{id}`                   | owner    | Delete the team (cascades).          |
 | `POST /api/teams/{id}/share`              | owner    | Share/update role `{ "username": "...", "role": "viewer"\|"editor" }` (role defaults to `editor`; upsert). |
 | `DELETE /api/teams/{id}/members/{userID}` | owner    | Revoke a member's access.            |
@@ -213,10 +213,10 @@ in `docs/AGENT_CONTEXT.md`):
   "name": "Sunday Trial Core",
   "schedule_days": ["mon", "wed"],
   "schedule_time": "00:00",
-  "team_timezones": ["America/New_York", "Europe/London"],
   "encounters_enabled": false,
   "post_footer": "Voice: Discord. Loot: need-before-greed.",
   "dm_footer": "Double-check your CP and potions before the run.",
+  "signup_post": "Recruiting for our Sunday vet trial core — press below to sign up.",
   "players": [
     {
       "slot": 1, "name": "Aedric", "discord_handle": "aedric#1234",
@@ -234,16 +234,14 @@ in `docs/AGENT_CONTEXT.md`):
   `400`. There is no manual timezone picker — the UI converts the time from the
   viewer's current zone to UTC before saving and back to the viewer's zone on
   load, so each viewer sees the time in their own zone.
-- `team_timezones` is an optional list of IANA names — extra zones the team wants
-  the time shown in. Validated + de-duped via `normalizeTimezones`
-  (`time.LoadLocation`); invalid names return `400`. Managed as removable chips
-  plus a searchable add-picker on the team page (default `[]`).
 - `encounters_enabled` (bool, default `false`) toggles whether the UI surfaces
   the multi-encounter section; the team always keeps ≥1 encounter regardless.
 - `post_footer` / `dm_footer` are free-form text (≤2000 runes each, trailing
   whitespace trimmed; over-length returns `400`) the Discord bot appends to its
   output — `post_footer` to the `/coreteam post` overview, `dm_footer` to the
   "Get My Build Details" DM.
+- `signup_post` is free-form text (same limits) the Discord bot posts as the body
+  of its `/coreteam signup` recruitment embed.
 - `players` is optional; omitted slots are left unchanged. Invalid slot/role/
   class/skill-line/mastery returns `400` and the whole save is rolled back.
 
@@ -313,25 +311,31 @@ alongside one trial). Violations return `400`.
       "armor_heavy": 0, "armor_medium": 5, "armor_light": 2,
       "pen_extra": ["sharpened"],
       "catalyst_elements": 3, "weapon_damage": 0,
-      "splintered_secrets_skills": 2, "force_of_nature_status": 5
+      "splintered_secrets_skills": 2, "force_of_nature_status": 5,
+      "scribed_buffs": ["minor_courage"], "banner_bearer_focus": "mitigation"
     }
   ]
 }
 ```
 
-- `gear`/`skills`/`potions`/`cp_blue`/`crit_dmg`/`pen_extra` are ordered,
-  free-form key lists (the UI constrains choices to the master data in
+- `gear`/`skills`/`potions`/`cp_blue`/`crit_dmg`/`pen_extra`/`scribed_buffs` are
+  ordered, free-form key lists (the UI constrains choices to the master data in
   `frontend/js/data.js`). The backend sanitizes them (trim, drop empties, ≤100
   chars each, ≤30 items) but does not allow-list the keys. Stackable `pen_extra`
   sources (e.g. `set_piece_bonuses`, up to 5) are stored as the key repeated once
   per stack — duplicates are intentional and summed by the penetration calculator.
-- `mundus` is a trimmed string (≤100 chars); `armor_heavy/medium/light` are
-  integers clamped to `0–7`. `catalyst_elements` clamps to `1–3` (default 3),
-  `weapon_damage` to `0–20000`, `splintered_secrets_skills` to `0–2`
-  (default 2) — the Arcanist Splintered Secrets passive's slotted Herald of the
-  Tome ability count (1240 pen each) — and `force_of_nature_status` to `0–5`
-  (default 5) — negative status effects on the enemy for the Force of Nature
-  blue CP star (660 pen each).
+- `mundus` and `banner_bearer_focus` are trimmed strings (≤100 chars);
+  `armor_heavy/medium/light` are integers clamped to `0–7`. `catalyst_elements`
+  clamps to `1–3` (default 3), `weapon_damage` to `0–20000`,
+  `splintered_secrets_skills` to `0–5` (default 2) — the Arcanist Splintered
+  Secrets passive's slotted Herald of the Tome ability count (1240 pen each) —
+  and `force_of_nature_status` to `0–5` (default 5) — negative status effects on
+  the enemy for the Force of Nature blue CP star (660 pen each).
+- `scribed_buffs` are the group buffs a player's scribed (grimoire) skill
+  provides; they count toward the client-side Group Buffs coverage.
+  `banner_bearer_focus` records the Banner Bearer grimoire's chosen Focus Script
+  and is informational only (surfaced in the UI and Discord export; feeds no
+  calculation).
 - The crit/penetration inputs (`cp_blue`, `crit_dmg`, `mundus`, armor counts,
   `pen_extra`) feed the client-side crit and penetration calculators — see
   `docs/AGENT_CONTEXT.md` "Crit damage model" / "Penetration model".
@@ -370,6 +374,36 @@ edits). A grouping splits the roster into numbered groups for mechanics — see
 - `slots` are player slots 1–12. A slot may appear in **at most one** group per
   grouping — a duplicate returns `400` (the `(grouping_id, player_slot)` PK is the
   final guard). The save replaces all members in one transaction.
+
+### Member pool (all protected)
+
+Nested under a team. The per-team **member pool** is a recruitment roster of
+prospective players, separate from the 12 fixed `players` slots — see
+`docs/AGENT_CONTEXT.md` "Member pool / recruitment". Capped at 200 members per
+team.
+
+| Method & path                                              | Who     | Description                                |
+|------------------------------------------------------------|---------|--------------------------------------------|
+| `GET /api/teams/{id}/roster-members`                       | viewer+ | List the team's member pool (`{ "members": [...] }`). |
+| `POST /api/teams/{id}/roster-members`                      | editor+ | Add a member manually → `201`.             |
+| `PUT /api/teams/{id}/roster-members/{memberID}`            | editor+ | Edit a member's availability/roles/classes (leaves intake status/step/source untouched). |
+| `DELETE /api/teams/{id}/roster-members/{memberID}`         | editor+ | Remove a member → `204`.                   |
+
+Days/roles/classes are normalized/validated against the same allow-lists as the
+roster; availability start hours clamp to 0–23 and end hours to 1–24 (24 = end
+of day). Discord-sourced members are added by the bot's DM intake flow; the web
+endpoints can still edit or remove them.
+
+### Discord account linking (all protected)
+
+Link an app account to a Discord identity so the bot can match the user to a
+roster slot — see `docs/AGENT_CONTEXT.md` "Discord bot".
+
+| Method & path                  | Description                                                      |
+|--------------------------------|-----------------------------------------------------------------|
+| `POST /api/discord/link-code`  | Mint a short, single-use link code (stored only as a SHA-256 hash, 15-min TTL) for `/coreteam link`. |
+| `GET /api/discord/link`        | Report the caller's current Discord link (`{ linked, discord_username }`). |
+| `DELETE /api/discord/link`     | Clear the caller's Discord link.                                |
 
 ### Quick curl test
 

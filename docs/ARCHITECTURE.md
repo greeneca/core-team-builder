@@ -25,7 +25,8 @@ Core Team Builder is a three-tier application:
             │     /api/reset-password,                      │
             │     /api/registration-status (public)        │
             │   • /api/me, /api/teams, .../encounters,      │
-            │     .../groupings, /api/admin/* (JWT)         │
+            │     .../groupings, .../roster-members,        │
+            │     /api/discord/*, /api/admin/* (JWT)        │
             │   • bcrypt hashing, access JWT + refresh tokens│
             │   • SMTP email (password resets)             │
             └───────────────┬─────────────────────────────┘
@@ -37,14 +38,16 @@ Core Team Builder is a three-tier application:
             │     password_resets, teams, team_members,     │
             │     players, encounters, encounter_loadouts,  │
             │     groupings, grouping_groups,               │
-            │     grouping_members, discord_link_codes,     │
-            │     discord_channels, discord_rsvps           │
+            │     grouping_members, team_roster_members,    │
+            │     discord_link_codes, discord_channels,     │
+            │     discord_rsvps                             │
             └───────────────▲─────────────────────────────┘
                             │ pgx (shares stores)
             ┌───────────────┴─────────────────────────────┐
             │  bot (Go, discordgo) — optional, no inbound  │
             │   • /coreteam slash command (link/setup/     │
-            │     post/status/unset) + details DM + RSVPs    │
+            │     post/signup/status/unset) + details DM,    │
+            │     RSVPs, and DM signup intake               │
             │   • outbound WebSocket to the Discord gateway │
             └─────────────────────────────────────────────┘
 ```
@@ -100,10 +103,12 @@ method-aware patterns, Go 1.22+). Layout:
 - `internal/config` — environment configuration (12-factor).
 - `internal/db` — pgx pool with startup retry.
 - `internal/models` — domain types + data access (`UserStore`, `TeamStore`,
-  `EncounterStore`, `GroupingStore`, `RefreshTokenStore`, `PasswordResetStore`,
-  `DiscordStore` (link codes + channel bindings), and `SettingsStore` for the
-  `app_settings` key/value store). ESO game reference data and the player-build
-  validators live in `eso.go`, kept separate from the persistence stores.
+  `EncounterStore`, `GroupingStore`, `MemberStore` (the member pool /
+  recruitment roster), `RefreshTokenStore`, `PasswordResetStore`,
+  `DiscordStore` (link codes + channel bindings + RSVPs), and `SettingsStore`
+  for the `app_settings` key/value store). ESO game reference data and the
+  player-build validators live in `eso.go`, kept separate from the persistence
+  stores.
 - `internal/esoref` — code-generated ESO labels/abbreviations
   (`data_gen.go`, produced by `tools/gen-esoref/gen.js` from the frontend's
   `gear-skills.js`/`data.js`) so the bot renders the same names as the web UI.
@@ -117,8 +122,10 @@ method-aware patterns, Go 1.22+). Layout:
 - `internal/handlers` — HTTP handlers, JSON helpers, CORS. The `Server` is
   constructed from a `handlers.Config` struct. Split by area: `handlers.go` (the
   `Server`, routing, auth/refresh, shared helpers), `teams.go`, `encounters.go`,
-  `groupings.go`, `password_reset.go` (forgot/reset password), and admin-only
-  user/settings handlers (with a `requireAdmin` gate) in `admin.go`.
+  `groupings.go`, `members.go` (the member pool / recruitment roster),
+  `discord.go` (Discord account-link codes + link status), `password_reset.go`
+  (forgot/reset password), and admin-only user/settings handlers (with a
+  `requireAdmin` gate) in `admin.go`.
 
 ### Database (`database/`)
 
@@ -210,21 +217,24 @@ rows. Managed via `PasswordResetStore`.
 | owner_id       | bigint            | FK → `users(id)`, cascade                  |
 | schedule_days  | text[]            | weekday keys, e.g. `{mon,wed}` (default `{}`) |
 | schedule_time  | varchar(5)        | `"HH:MM"` 24h **in UTC**, `''` when unset  |
-| team_timezones | text[]            | extra IANA zones to display the time in (default `{}`) |
 | encounters_enabled | boolean       | surface multi-encounter UI; default `false`; `017_team_encounters_enabled.sql` |
 | post_footer    | text              | Discord bot `/coreteam post` footer (default `''`); `018_team_signup_note.sql` → `029_team_bot_footers.sql` |
 | dm_footer      | text              | Discord bot build-details DM footer (default `''`); `019_team_detailed_header.sql` → `029_team_bot_footers.sql` |
+| signup_post    | text              | Discord bot `/coreteam signup` recruitment body (default `''`); `030_team_members_pool.sql` |
 | created_at     | timestamptz       | default `now()`                            |
 | updated_at     | timestamptz       | auto-updated via trigger                   |
 
-The trial schedule lives on `teams` (`004_team_schedule.sql`,
-`009_team_timezones.sql`). `schedule_time` is stored in UTC and converted to/from
-each viewer's current timezone in the browser; the old per-team
-`schedule_timezone` column was removed in `010_drop_schedule_timezone.sql`.
-`encounters_enabled` gates the multi-encounter UI (off → only the first encounter
-shows); `post_footer` / `dm_footer` are free-form footers the Discord bot appends
-to its `/coreteam post` overview and its build-details DM respectively (see
-`docs/AGENT_CONTEXT.md` "Discord bot footers").
+The trial schedule lives on `teams` (`004_team_schedule.sql`). `schedule_time`
+is stored in UTC and converted to/from each viewer's current timezone in the
+browser; the old per-team `schedule_timezone` column was removed in
+`010_drop_schedule_timezone.sql`, and the `team_timezones` list of extra display
+zones (`009_team_timezones.sql`) was removed in `031_drop_team_timezones.sql`
+(viewers always see their own zone). `encounters_enabled` gates the
+multi-encounter UI (off → only the first encounter shows); `post_footer` /
+`dm_footer` are free-form footers the Discord bot appends to its `/coreteam post`
+overview and its build-details DM respectively (see `docs/AGENT_CONTEXT.md`
+"Discord bot footers"); `signup_post` is the free-form body the bot posts with
+`/coreteam signup` to recruit new members (see "Member pool" below).
 
 ### `team_members` (sharing)
 
@@ -294,18 +304,24 @@ apply (drawn from the player's class) and the skill lines are blanked.
 | pen_extra    | text[]   | flat penetration source keys (default `{}`); `014_loadout_pen_extra.sql` |
 | catalyst_elements | integer | Elemental Catalyst damage types applied 1–3 (default `3`); `023_loadout_catalyst_elements.sql` |
 | weapon_damage | integer | higher of Weapon/Spell Damage for Anthelmir's Construct pen (default `0`); `024_loadout_weapon_damage.sql` |
-| splintered_secrets_skills | integer | slotted Herald of the Tome abilities 0–2 for Splintered Secrets pen (default `2`); `025_loadout_splintered_secrets_skills.sql` |
+| splintered_secrets_skills | integer | slotted Herald of the Tome abilities 0–5 for Splintered Secrets pen (default `2`); `025_loadout_splintered_secrets_skills.sql` |
 | force_of_nature_status | integer | negative status effects on enemy 0–5 for Force of Nature CP pen (default `5`); `026_loadout_force_of_nature_status.sql` |
+| scribed_buffs | text[]   | group buffs a player's scribed (grimoire) skill provides (default `{}`); counted toward Group Buffs coverage; `032_loadout_scribed_buffs.sql` |
+| banner_bearer_focus | text | Focus Script chosen for the Banner Bearer grimoire (default `''`); informational only; `033_loadout_banner_bearer_focus.sql` |
 
 Every team has at least one encounter (`Default`), created with the team and
 backfilled for existing teams. Encounter names are validated against
 `ValidEncounterNames` and must be **unique per team** and all from a **single
 trial** (plus the always-allowed `General` group) — see
 `ValidateEncounterSelection`, with a unique index on `encounters(team_id, name)`
-as a DB backstop. gear/skill/potion/cp_blue/crit_dmg/pen_extra items are free-form
-(sanitized, not allow-listed); mundus is a trimmed string and the armor counts
-are clamped to 0–7 — the searchable options + tooltips live in the frontend
-master data (`frontend/js/data.js`). The crit-input columns
+as a DB backstop. gear/skill/potion/cp_blue/crit_dmg/pen_extra/scribed_buffs
+items are free-form (sanitized, not allow-listed); mundus and banner_bearer_focus
+are trimmed strings and the armor counts are clamped to 0–7 — the searchable
+options + tooltips live in the frontend master data (`frontend/js/data.js`).
+`scribed_buffs` records the group buffs a player's scribed (grimoire) skill
+provides and is counted toward the Group Buffs coverage; `banner_bearer_focus`
+records the Banner Bearer grimoire's chosen Focus Script (informational only).
+The crit-input columns
 (`cp_blue`/`crit_dmg`/`mundus`/armor) feed the client-side crit-damage calculator
 (see `docs/AGENT_CONTEXT.md` "Crit damage model"); `pen_extra` plus those reused
 inputs feed the penetration calculator (see "Penetration model"); `players.race`
@@ -334,6 +350,36 @@ belongs to at most one group per grouping.
 holds slot assignments with PK `(grouping_id, player_slot)`, which guarantees a
 player is in at most one group per grouping. Both cascade on grouping delete.
 Managed via `GroupingStore`; see `docs/AGENT_CONTEXT.md` "Groupings model".
+
+### `team_roster_members` (member pool)
+
+A per-team list of prospective players (`030_team_members_pool.sql`), **separate**
+from the 12 fixed `players` slots and from app-account sharing (`team_members`).
+It captures availability/role/class interest gathered via the Discord
+`/coreteam signup` DM intake, plus manual web entries.
+
+| column           | type        | notes                                          |
+|------------------|-------------|------------------------------------------------|
+| id               | bigint (IDENTITY) | primary key                              |
+| team_id          | bigint      | FK → `teams(id)`, cascade                      |
+| discord_user_id  | text        | linked Discord user (NULL for manual entries)  |
+| discord_username | text        | Discord display name (default `''`)            |
+| display_name     | text        | shown name (default `''`)                      |
+| timezone         | text        | IANA zone the availability hours are in        |
+| days             | text[]      | available weekday keys `mon..sun` (default `{}`)|
+| availability     | jsonb       | `{ "mon": { "start": 18, "end": 22 } }` (start 0–23, end 1–24; 24 = end of day) |
+| roles            | text[]      | roles of interest (default `{}`)               |
+| classes_by_role  | jsonb       | `{ "tank": ["dragonknight"] }`                 |
+| status           | text        | `draft` (intake in progress) → `complete`      |
+| step             | text        | current DM-intake step                         |
+| source           | text        | `discord` or `manual`                          |
+| created_at       | timestamptz | default `now()`                                |
+| updated_at       | timestamptz | auto-updated via trigger                       |
+
+A partial unique index on `(team_id, discord_user_id)` means re-running signup
+**updates** the same row; manual entries (NULL `discord_user_id`) are
+unconstrained. Managed via `MemberStore`; see `docs/AGENT_CONTEXT.md`
+"Member pool / recruitment".
 
 ### `discord_link_codes` + `discord_channels`
 
