@@ -150,6 +150,14 @@ type Loadout struct {
 	// enemy for the "Force of Nature" Warfare CP star; feeds the penetration
 	// calculator (660 Offensive Penetration each). Defaults to 5 (full bonus).
 	ForceOfNatureStatus int `json:"force_of_nature_status"`
+	// ScribedBuffs are the group buffs a player's scribed (grimoire) skills
+	// provide, e.g. minor_berserk. The web UI surfaces this only when a grimoire
+	// skill is slotted and counts these toward the team's Group Buffs coverage.
+	ScribedBuffs []string `json:"scribed_buffs"`
+	// BannerBearerFocus is the Focus Script chosen for the Banner Bearer grimoire
+	// (e.g. mitigation). Informational only: surfaced when Banner Bearer is
+	// slotted and shown in the Discord export; it feeds no calculation.
+	BannerBearerFocus string `json:"banner_bearer_focus"`
 }
 
 // Encounter is a named fight within a team, with a per-player loadout list.
@@ -235,8 +243,8 @@ func copyEncountersTx(ctx context.Context, tx pgx.Tx, srcTeamID, dstTeamID int64
 		}
 		// Copy the 12 loadout rows (gear + skills + potions + crit inputs) slot-for-slot.
 		if _, err := tx.Exec(ctx,
-			`INSERT INTO encounter_loadouts (encounter_id, slot, gear, skills, potions, cp_blue, crit_dmg, mundus, armor_heavy, armor_medium, armor_light, pen_extra, catalyst_elements, weapon_damage, splintered_secrets_skills, force_of_nature_status)
-			 SELECT $1, slot, gear, skills, potions, cp_blue, crit_dmg, mundus, armor_heavy, armor_medium, armor_light, pen_extra, catalyst_elements, weapon_damage, splintered_secrets_skills, force_of_nature_status FROM encounter_loadouts WHERE encounter_id = $2`,
+			`INSERT INTO encounter_loadouts (encounter_id, slot, gear, skills, potions, cp_blue, crit_dmg, mundus, armor_heavy, armor_medium, armor_light, pen_extra, catalyst_elements, weapon_damage, splintered_secrets_skills, force_of_nature_status, scribed_buffs, banner_bearer_focus)
+			 SELECT $1, slot, gear, skills, potions, cp_blue, crit_dmg, mundus, armor_heavy, armor_medium, armor_light, pen_extra, catalyst_elements, weapon_damage, splintered_secrets_skills, force_of_nature_status, scribed_buffs, banner_bearer_focus FROM encounter_loadouts WHERE encounter_id = $2`,
 			newID, src.id,
 		); err != nil {
 			return err
@@ -315,7 +323,9 @@ func (s *EncounterStore) Create(ctx context.Context, teamID int64, name string, 
 			     pen_extra = src.pen_extra, catalyst_elements = src.catalyst_elements,
 			     weapon_damage = src.weapon_damage,
 			     splintered_secrets_skills = src.splintered_secrets_skills,
-			     force_of_nature_status = src.force_of_nature_status
+			     force_of_nature_status = src.force_of_nature_status,
+			     scribed_buffs = src.scribed_buffs,
+			     banner_bearer_focus = src.banner_bearer_focus
 			 FROM encounter_loadouts src
 			 JOIN encounters e ON e.id = src.encounter_id
 			 WHERE dst.encounter_id = $1
@@ -351,7 +361,7 @@ func (s *EncounterStore) Get(ctx context.Context, encounterID int64) (*Encounter
 	}
 
 	const lq = `
-		SELECT slot, gear, skills, potions, cp_blue, crit_dmg, mundus, armor_heavy, armor_medium, armor_light, pen_extra, catalyst_elements, weapon_damage, splintered_secrets_skills, force_of_nature_status
+		SELECT slot, gear, skills, potions, cp_blue, crit_dmg, mundus, armor_heavy, armor_medium, armor_light, pen_extra, catalyst_elements, weapon_damage, splintered_secrets_skills, force_of_nature_status, scribed_buffs, banner_bearer_focus
 		FROM encounter_loadouts WHERE encounter_id = $1 ORDER BY slot`
 	rows, err := s.pool.Query(ctx, lq, encounterID)
 	if err != nil {
@@ -362,7 +372,7 @@ func (s *EncounterStore) Get(ctx context.Context, encounterID int64) (*Encounter
 		var l Loadout
 		if err := rows.Scan(
 			&l.Slot, &l.Gear, &l.Skills, &l.Potions,
-			&l.CPBlue, &l.CritDmg, &l.Mundus, &l.ArmorHeavy, &l.ArmorMedium, &l.ArmorLight, &l.PenExtra, &l.CatalystElements, &l.WeaponDamage, &l.SplinteredSecretsSkills, &l.ForceOfNatureStatus,
+			&l.CPBlue, &l.CritDmg, &l.Mundus, &l.ArmorHeavy, &l.ArmorMedium, &l.ArmorLight, &l.PenExtra, &l.CatalystElements, &l.WeaponDamage, &l.SplinteredSecretsSkills, &l.ForceOfNatureStatus, &l.ScribedBuffs, &l.BannerBearerFocus,
 		); err != nil {
 			return nil, err
 		}
@@ -410,14 +420,14 @@ func (s *EncounterStore) SaveLoadouts(ctx context.Context, encounterID int64, lo
 		SET gear = $1, skills = $2, potions = $3, cp_blue = $4, crit_dmg = $5,
 		    mundus = $6, armor_heavy = $7, armor_medium = $8, armor_light = $9, pen_extra = $10,
 		    catalyst_elements = $11, weapon_damage = $12, splintered_secrets_skills = $13,
-		    force_of_nature_status = $14
-		WHERE encounter_id = $15 AND slot = $16`
+		    force_of_nature_status = $14, scribed_buffs = $15, banner_bearer_focus = $16
+		WHERE encounter_id = $17 AND slot = $18`
 	for _, l := range loadouts {
 		if _, err := tx.Exec(ctx, q,
 			l.Gear, l.Skills, l.Potions, l.CPBlue, l.CritDmg,
 			l.Mundus, l.ArmorHeavy, l.ArmorMedium, l.ArmorLight, l.PenExtra,
 			l.CatalystElements, l.WeaponDamage, l.SplinteredSecretsSkills,
-			l.ForceOfNatureStatus,
+			l.ForceOfNatureStatus, l.ScribedBuffs, l.BannerBearerFocus,
 			encounterID, l.Slot,
 		); err != nil {
 			return err

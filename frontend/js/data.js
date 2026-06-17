@@ -664,6 +664,94 @@ const CRIT_DMG_SELECT_GROUPS = [{ group: null, items: CRIT_DMG_SOURCES }];
 const BLUE_CP_SELECT_GROUPS = [{ group: null, items: BLUE_CP }];
 const PEN_EXTRA_SELECT_GROUPS = [{ group: null, items: PEN_EXTRA_SOURCES }];
 
+// --- Scribing (grimoires) ---
+//
+// GRIMOIRE_SKILLS are the scribed "grimoire" abilities. When a player slots one,
+// the roster reveals a "Scribed buffs" column so they can record which group
+// buff(s) their scribed skill provides (via its focus/affix scripts). The set is
+// hand-maintained; keep it aligned with the grimoire skill keys in
+// gear-skills.js.
+const GRIMOIRE_SKILLS = new Set([
+  "trample",
+  "vault",
+  "elemental_explosion",
+  "torchbearer",
+  "ulfsilds_contingency",
+  "traveling_knife",
+  "shield_throw",
+  "menders_bond",
+  "soul_burst",
+  "wield_soul",
+  "banner_bearer",
+  "smash",
+]);
+function isGrimoireSkill(key) {
+  return GRIMOIRE_SKILLS.has(key);
+}
+
+// SCRIBED_BUFFS are the group buffs a scribed skill can be set to provide.
+// Stored per loadout under `scribed_buffs`. A value that matches a tracked buff
+// in BUFFS counts toward the Group Buffs coverage card. `minor_breach` is the
+// exception: it is NOT a tracked group buff — instead it feeds the penetration
+// calculator as a group source (see PEN_GROUP_SOURCES), since Minor Breach
+// lowers the enemy's Resistance for the whole team.
+const SCRIBED_BUFFS = [
+  { value: "minor_resolve", label: "Minor Resolve", desc: "Increases group Physical and Spell Resistance by 2974." },
+  { value: "minor_berserk", label: "Minor Berserk", desc: "Increases group damage done by 5%." },
+  { value: "minor_protection", label: "Minor Protection", desc: "Reduces group damage taken by 5%." },
+  { value: "minor_courage", label: "Minor Courage", desc: "Increases group Weapon and Spell Damage by 215." },
+  { value: "minor_heroism", label: "Minor Heroism", desc: "Grants the group 1 Ultimate every 1.5 seconds." },
+  { value: "minor_intellect_endurance", label: "Minor Intellect and Endurance", desc: "Increases group Magicka and Stamina Recovery by 15%." },
+  { value: "minor_breach", label: "Minor Breach", desc: "Reduces the enemy's Physical and Spell Resistance by 2974." },
+  { value: "minor_vulnerability", label: "Minor Vulnerability", desc: "Increases the enemy's damage taken by 5%." },
+  { value: "minor_force", label: "Minor Force", desc: "Increases group Critical Damage by 10%." },
+  { value: "off_balance", label: "Off Balance", desc: "Sets the enemy Off Balance, increasing damage they take from Heavy Attacks." },
+];
+const SCRIBED_BUFF_BY_KEY = Object.fromEntries(SCRIBED_BUFFS.map((b) => [b.value, b]));
+const SCRIBED_BUFF_BY_LABEL = Object.fromEntries(
+  SCRIBED_BUFFS.map((b) => [b.label.toLowerCase(), b])
+);
+function scribedBuffLabel(key) {
+  const b = SCRIBED_BUFF_BY_KEY[key];
+  return b ? b.label : key;
+}
+function scribedBuffDesc(key) {
+  const b = SCRIBED_BUFF_BY_KEY[key];
+  return b && b.desc ? b.desc : "";
+}
+function scribedBuffByLabel(label) {
+  return SCRIBED_BUFF_BY_LABEL[String(label || "").trim().toLowerCase()] || null;
+}
+const SCRIBED_BUFF_SELECT_GROUPS = [{ group: null, items: SCRIBED_BUFFS }];
+
+// BANNER_BEARER_FOCUS lists the Focus Scripts available for the Banner Bearer
+// grimoire. Each Focus Script turns the banner into a different morph (label) and
+// determines the group bonus it grants. This is recorded per loadout under
+// `banner_bearer_focus` (a single value) and surfaced only when a player has
+// Banner Bearer slotted. It is informational: shown in the roster loadout UI and
+// the Discord export, but it does NOT feed any buff/penetration calculation. The
+// list is hand-maintained; keep it aligned with in-game Focus Scripts.
+const BANNER_BEARER_FOCUS = [
+  { value: "flame_damage", label: "Fiery Banner (Flame Damage)", desc: "Increases damage done with damage over time effects by 6%." },
+  { value: "immobilize", label: "Binding Banner (Immobilize)", desc: "Cleanses you of snares and immobilizations and grants immunity to them while the banner is active." },
+  { value: "magic_damage", label: "Magical Banner (Magic Damage)", desc: "Increases Magical damage done by 6%." },
+  { value: "mitigation", label: "Fortifying Banner (Mitigation)", desc: "Reduces damage taken by 6%." },
+  { value: "multi_target", label: "Shattering Banner (Multi-Target)", desc: "Increases damage done with area of effect attacks by 6%." },
+  { value: "physical_damage", label: "Sundering Banner (Physical Damage)", desc: "Increases Martial damage done by 6%." },
+  { value: "restore_resources", label: "Restorative Banner (Restore Resources)", desc: "Reduces the cost of non-Ultimate abilities by 8%." },
+  { value: "shock_damage", label: "Shocking Banner (Shock Damage)", desc: "Increases damage done with direct damage by 6%." },
+];
+const BANNER_BEARER_SKILL = "banner_bearer";
+const BANNER_BEARER_FOCUS_BY_KEY = Object.fromEntries(BANNER_BEARER_FOCUS.map((b) => [b.value, b]));
+function bannerBearerFocusLabel(key) {
+  const b = BANNER_BEARER_FOCUS_BY_KEY[key];
+  return b ? b.label : key;
+}
+function bannerBearerFocusDesc(key) {
+  const b = BANNER_BEARER_FOCUS_BY_KEY[key];
+  return b && b.desc ? b.desc : "";
+}
+
 // Master tables keyed by loadout type, so UI code can stay generic. cp_blue and
 // the crit-damage sources reuse the same chip/searchable-select machinery as
 // gear/skills. The crit-damage sources are stored under the `crit_dmg` key.
@@ -674,6 +762,7 @@ const LOADOUT_TYPES = {
   cp_blue: { items: BLUE_CP, groups: BLUE_CP_SELECT_GROUPS, byLabel: cpBlueByLabel, label: cpBlueLabel, desc: cpBlueDesc, addPlaceholder: "Search blue CP star…" },
   crit_dmg: { items: CRIT_DMG_SOURCES, groups: CRIT_DMG_SELECT_GROUPS, byLabel: critDmgByLabel, label: critDmgLabel, desc: critDmgDesc, addPlaceholder: "Add crit damage source…" },
   pen_extra: { items: PEN_EXTRA_SOURCES, groups: PEN_EXTRA_SELECT_GROUPS, byLabel: penExtraByLabel, label: penExtraLabel, desc: penExtraDesc, addPlaceholder: "Add penetration source…" },
+  scribed_buffs: { items: SCRIBED_BUFFS, groups: SCRIBED_BUFF_SELECT_GROUPS, byLabel: scribedBuffByLabel, label: scribedBuffLabel, desc: scribedBuffDesc, addPlaceholder: "Add scribed buff…" },
 };
 
 // --- Buffs: coverage tracking ---
@@ -711,13 +800,20 @@ const LOADOUT_TYPES = {
 // any self-buff NOT covered group-wide by the team under a "Self Buffs" field,
 // so each player knows which buffs they must bring on their own.
 const BUFFS = [
-  // Major Resolve has true group-wide providers (the Warden Frost Cloak line and
-  // the Mighty Glacier set apply it to "you and your grouped allies").
-  { value: "major_resolve", label: "Major Resolve", desc: "Increases group Physical and Spell Resistance.", selfBuff: true,
-    sources: { skills: ["frost_cloak", "expansive_frost_cloak", "ice_fortress", "mend_spirit"], gear: ["mighty_glacier"] } },
-  // Minor Toughness shared to the group by the Warden Green Balance passive.
-  { value: "minor_toughness", label: "Minor Toughness", desc: "Increases group Max Health by 10%.", selfBuff: true,
-    sources: { skillLines: ["green_balance"], classes: ["warden"] } },
+  // --- Major / Minor buffs ---
+  // Ordered alphabetically by the base buff name, with the Major and Minor
+  // variants paired together (Major first) when both are tracked. Every source
+  // listed grants the buff to 5+ other group members (or is an enemy debuff that
+  // benefits the whole team); self-only and small-radius (<5 ally) sources are
+  // omitted. A player's scribed (grimoire) skill selection can additionally
+  // cover any of these (see SCRIBED_BUFFS / computeBuffCoverage).
+
+  // Berserk
+  { value: "major_berserk", label: "Major Berserk", desc: "Increases damage done by 10%.", selfBuff: true,
+    sources: { masteries: ["lead_from_the_front"], skills: ["summon_storm_atronach", "summon_charged_atronach", "greater_storm_atronach"] } },
+  { value: "minor_berserk", label: "Minor Berserk", desc: "Increases group damage done by 5%.", selfBuff: true,
+    sources: { skills: ["combat_prayer"], gear: ["kinras_wrath"] } },
+  // Brutality & Sorcery
   // Major Brutality & Sorcery: only the Dragonknight Igneous Weapons line shares
   // it with grouped allies; personal potions/Degeneration/Surge are self-only.
   { value: "major_brutality_sorcery", label: "Major Brutality and Sorcery", desc: "Increases group Weapon and Spell Damage.", selfBuff: true,
@@ -725,50 +821,79 @@ const BUFFS = [
   // Minor Brutality shared to the group by the Dragonknight Draconic Power passive.
   { value: "minor_brutality_sorcery", label: "Minor Brutality", desc: "Increases group Weapon Damage.", selfBuff: true,
     sources: { skillLines: ["draconic_power"], classes: ["dragonknight"] } },
-  // Minor Savagery shared to the group by the Nightblade Assassination passive.
-  { value: "minor_savagery_prophecy", label: "Minor Savagery", desc: "Increases group Weapon Critical.", selfBuff: true,
-    sources: { skillLines: ["assassination"], classes: ["nightblade"] } },
-  { value: "major_berserk", label: "Major Berserk", desc: "Increases damage done by 10%.", selfBuff: true,
-    sources: { masteries: ["lead_from_the_front"], skills: ["summon_storm_atronach", "summon_charged_atronach", "greater_storm_atronach"] } },
-  { value: "minor_berserk", label: "Minor Berserk", desc: "Increases group damage done by 5%.", selfBuff: true,
-    sources: { skills: ["combat_prayer"], gear: ["kinras_wrath"] } },
-  { value: "major_slayer", label: "Major Slayer", desc: "Increases damage to Dungeon/Trial monsters.",
-    sources: { gear: ["master_architect", "roaring_opportunist", "perfected_roaring_opportunist", "war_machine"] } },
+  // Courage
   { value: "major_courage", label: "Major Courage", desc: "Increases Weapon and Spell Damage.",
     sources: { gear: ["perfected_olorime", "vestment_of_olorime", "spell_power_cure"], skills: ["ferocious_roar"] } },
   { value: "minor_courage", label: "Minor Courage", desc: "Increases Weapon and Spell Damage.",
-    sources: { gear: ["claw_of_yolnahkriin", "perfected_claw_of_yolnahkriin", "magma_incarnate", "pangrit_denmother", "phoenix_moth_theurge", "crusader", "fledglings_nest"], skills: ["arcanists_domain", "reconstructive_domain", "zenas_empowering_disc"] } },
-  // Enemy debuff: applied to the boss by a Necromancer Colossus ultimate or the
-  // Umbral Edge set, so the whole group benefits.
-  { value: "major_vulnerability", label: "Major Vulnerability", desc: "Increases the damage the enemy takes by 10%.",
-    sources: { skills: ["glacial_colossus", "frozen_colossus", "pestilent_colossus"], gear: ["umbral_edge"] } },
-  // Enemy debuff: the Nightblade Cutthroat's Focus mastery makes a dodged
-  // attacker take 5% more damage (20s vs monsters), benefiting the whole group.
-  { value: "cutthroats_focus", label: "Cutthroat's Focus", desc: "Increases the enemy's damage taken by 5%.",
-    sources: { masteries: ["cutthroats_focus"] } },
-  { value: "heat_shock", label: "Heat Shock", desc: "Increases the target's damage taken (from Magma Fist).",
-    sources: { skills: ["magma_fist"] } },
-  // Minor Fortitude/Intellect/Endurance shared to allies by the Arcanist domains
-  // and the Templar Radiant Aura.
-  { value: "minor_fei", label: "Minor Fortitude, Endurance, Intellect", desc: "Increases group Health, Stamina, and Magicka Recovery.",
-    sources: { skills: ["arcanists_domain", "reconstructive_domain", "zenas_empowering_disc", "radiant_aura"] } },
-  // Minor Evasion: the Arcanist Soldier of Apocrypha passive shares it with the
-  // group, plus the Abyssal Brace set.
+    sources: { gear: ["claw_of_yolnahkriin", "perfected_claw_of_yolnahkriin", "magma_incarnate", "pangrit_denmother", "phoenix_moth_theurge", "crusader", "fledglings_nest"], skills: ["arcanists_domain", "reconstructive_domain", "zenas_empowering_disc", "blood_of_the_elder_dragon", "pack_leader"] } },
+  // Evasion: the Arcanist Soldier of Apocrypha passive shares it with the group,
+  // plus the Abyssal Brace set.
   { value: "minor_evasion", label: "Minor Evasion", desc: "Reduces group damage taken from area attacks.",
     sources: { skillLines: ["soldier_of_apocrypha"], classes: ["arcanist"], gear: ["abyssal_brace"] } },
-  // --- Group survival/support buffs (several only come from class masteries) ---
-  // Major Protection (−10% group damage taken): DK Lead From the Front mastery,
-  // the Warden Sleet Storm ultimate line, and supporting sets.
-  { value: "major_protection", label: "Major Protection", desc: "Reduces group damage taken by 10%.",
-    sources: { masteries: ["lead_from_the_front"], skills: ["sleet_storm", "permafrost", "glyphic_of_the_tides"], gear: ["hagravens_garden"] } },
-  // Major Vitality (+12% group healing received / shield strength): Arcanist
-  // Erudite's Rigor mastery and the Nightblade Soul Siphon ultimate.
-  { value: "major_vitality", label: "Major Vitality", desc: "Increases group healing received and shield strength.",
-    sources: { masteries: ["erudites_rigor"], skills: ["soul_siphon"] } },
+  // Force. Group-wide Minor Force: Grave Inevitability's aura and Phoenix Moth's
+  // heals share it, and the Werewolf Feeding Frenzy synergy (Roar morphs) grants
+  // it to allies who activate it.
+  { value: "minor_force", label: "Minor Force", desc: "Increases group Critical Damage by 10%.",
+    sources: { gear: ["grave_inevitability", "phoenix_moth_theurge"], skills: ["roar", "ferocious_roar", "deafening_roar"] } },
+  // Fortitude, Endurance, Intellect: shared to allies by the Arcanist domains and
+  // the Templar Radiant Aura.
+  { value: "minor_fei", label: "Minor Fortitude, Endurance, Intellect", desc: "Increases group Health, Stamina, and Magicka Recovery.",
+    sources: { skills: ["arcanists_domain", "reconstructive_domain", "zenas_empowering_disc", "radiant_aura", "restoring_aura"] } },
+  // Heroism
   // Major Heroism (group Ultimate generation): Warden Bountiful Harvest mastery
   // plus the usual support sets.
   { value: "major_heroism", label: "Major Heroism", desc: "Grants the group 3 Ultimate every 1.5s.",
     sources: { masteries: ["bountiful_harvest"], gear: ["drakes_rush", "transformative_hope", "perfected_transformative_hope", "heroic_unity"] } },
+  // Minor Heroism shared to healed allies by the Fire/Hearth heals and to allies
+  // by Reawakened Hierophant (2 Crux).
+  { value: "minor_heroism", label: "Minor Heroism", desc: "Grants the group Ultimate over time.",
+    sources: { gear: ["reawakened_hierophant"], skills: ["fire_keeper", "hearth_and_home", "hearthfire"] } },
+  // Intellect and Endurance: the Arcanist domains, Templar auras, and the
+  // Magicka/Stamina-recovery group heals (Refreshing Path, Regenerative Ward,
+  // Enchanted Growth) apply both Minor Intellect and Minor Endurance to allies.
+  { value: "minor_intellect_endurance", label: "Minor Intellect and Endurance", desc: "Increases group Magicka and Stamina Recovery.",
+    sources: { skills: ["arcanists_domain", "reconstructive_domain", "zenas_empowering_disc", "radiant_aura", "restoring_aura", "refreshing_path", "regenerative_ward", "enchanted_growth"] } },
+  // Protection
+  // Major Protection (−10% group damage taken): DK Lead From the Front mastery,
+  // the Warden Sleet Storm ultimate line, and supporting sets.
+  { value: "major_protection", label: "Major Protection", desc: "Reduces group damage taken by 10%.",
+    sources: { masteries: ["lead_from_the_front"], skills: ["sleet_storm", "northern_storm", "permafrost", "glyphic_of_the_tides", "consuming_darkness", "bolstering_darkness", "veil_of_blades"], gear: ["hagravens_garden", "reawakened_hierophant"] } },
+  { value: "minor_protection", label: "Minor Protection", desc: "Reduces group damage taken by 5%.",
+    sources: { skills: ["protect_the_brood", "circle_of_protection", "ring_of_preservation", "turn_evil", "bone_totem", "agony_totem", "remote_totem"] } },
+  // Resolve
+  // Major Resolve has true group-wide providers (the Warden Frost Cloak line and
+  // the Mighty Glacier set apply it to "you and your grouped allies").
+  { value: "major_resolve", label: "Major Resolve", desc: "Increases group Physical and Spell Resistance.", selfBuff: true,
+    sources: { skills: ["frost_cloak", "expansive_frost_cloak", "ice_fortress", "mend_spirit"], gear: ["mighty_glacier"] } },
+  { value: "minor_resolve", label: "Minor Resolve", desc: "Increases group Physical and Spell Resistance.",
+    sources: { gear: ["magma_incarnate"], skills: ["combat_prayer", "runic_defense", "runeguard_of_freedom", "runeguard_of_still_waters"] } },
+  // Savagery: shared to the group by the Nightblade Assassination passive.
+  { value: "minor_savagery_prophecy", label: "Minor Savagery", desc: "Increases group Weapon Critical.", selfBuff: true,
+    sources: { skillLines: ["assassination"], classes: ["nightblade"] } },
+  // Slayer
+  { value: "major_slayer", label: "Major Slayer", desc: "Increases damage to Dungeon/Trial monsters.",
+    sources: { gear: ["master_architect", "roaring_opportunist", "perfected_roaring_opportunist", "war_machine"] } },
+  // Toughness: shared to the group by the Warden Green Balance passive.
+  { value: "minor_toughness", label: "Minor Toughness", desc: "Increases group Max Health by 10%.", selfBuff: true,
+    sources: { skillLines: ["green_balance"], classes: ["warden"] } },
+  // Vitality (+12% group healing received / shield strength): Arcanist Erudite's
+  // Rigor mastery and the Nightblade Soul Siphon ultimate.
+  { value: "major_vitality", label: "Major Vitality", desc: "Increases group healing received and shield strength.",
+    sources: { masteries: ["erudites_rigor"], skills: ["soul_siphon", "bone_surge"] } },
+  // Vulnerability (enemy debuff)
+  // Applied to the boss by a Necromancer Colossus ultimate or the Umbral Edge
+  // set, so the whole group benefits.
+  { value: "major_vulnerability", label: "Major Vulnerability", desc: "Increases the damage the enemy takes by 10%.",
+    sources: { skills: ["glacial_colossus", "frozen_colossus", "pestilent_colossus"], gear: ["umbral_edge", "stonehulk_domination", "turning_tide", "archdruid_devyric"] } },
+  // Minor Vulnerability (enemy debuff): tracked from reliable, non-random
+  // applicators — Heavy-Attack sets, Warden swarms, Necromancer boneyards,
+  // Nightblade strikes, taunts, and the Arcanist runes.
+  { value: "minor_vulnerability", label: "Minor Vulnerability", desc: "Increases the enemy's damage taken by 5%.",
+    sources: { gear: ["scavenging_demise", "infallible_mage", "wise_mage", "nobles_conquest"], skills: ["swarm", "fetcher_infection", "growing_swarm", "boneyard", "avid_boneyard", "unnerving_boneyard", "ambush", "lotus_fan", "teleport_strike", "inner_beast", "fossilize", "rune_of_eldritch_horror", "rune_of_the_colorless_pool", "rune_of_uncanny_adoration"] } },
+
+  // --- Unique buffs ---
+  // Named effects that aren't Major/Minor variants, ordered alphabetically.
+
   // Bright Harbinger: unique +300 Weapon/Spell Damage to allies, only from the
   // Templar Bright Harbinger mastery (upgrades Illuminate).
   { value: "bright_harbinger", label: "Bright Harbinger", desc: "Grants allies +300 Weapon and Spell Damage.",
@@ -777,22 +902,34 @@ const BUFFS = [
   // only from the Sorcerer Calculated Defense mastery (when its shield holds).
   { value: "calculated_defense", label: "Calculated Defense", desc: "Grants nearby group members +6% Weapon and Spell Damage.",
     sources: { masteries: ["calculated_defense"] } },
-  { value: "powerful_assault", label: "Powerful Assault", desc: "Set: grants Weapon and Spell Damage to nearby allies.",
-    sources: { gear: ["powerful_assault"] } },
-  { value: "pillagers_profit", label: "Pillager's Profit", desc: "Set: grants resource recovery when an ally uses an Ultimate.",
-    sources: { gear: ["pillagers_profit"] } },
+  // Cutthroat's Focus: the Nightblade mastery makes a dodged attacker take 5%
+  // more damage (20s vs monsters), benefiting the whole group.
+  { value: "cutthroats_focus", label: "Cutthroat's Focus", desc: "Increases the enemy's damage taken by 5%.",
+    sources: { masteries: ["cutthroats_focus"] } },
+  { value: "encratiss_behemoth", label: "Encratis's Behemoth", desc: "Monster set: Flame Damage debuff/buff swing.",
+    sources: { gear: ["encratiss_behemoth"] } },
+  { value: "heat_shock", label: "Heat Shock", desc: "Increases the target's damage taken (from Magma Fist).",
+    sources: { skills: ["magma_fist"] } },
+  // Off Balance (enemy debuff). Only reliable, non-conditional AoE group setters
+  // are tracked: the Storm morphs of Wall of Elements set Concussed enemies Off
+  // Balance for everyone fighting that target. Single-target / interrupt / flank
+  // setters are intentionally omitted.
+  { value: "off_balance", label: "Off Balance", desc: "Sets the enemy Off Balance for bonus Heavy Attack damage.",
+    sources: { skills: ["wall_of_elements", "elemental_blockade", "unstable_wall_of_elements"] } },
+  { value: "ozezan_the_inferno", label: "Ozezan the Inferno", desc: "Monster set: grants healed allies Minor Vitality and Armor.",
+    sources: { gear: ["ozezan_the_inferno"] } },
   { value: "pearlescent_ward", label: "Pearlescent Ward", desc: "Set: scaling Weapon and Spell Damage from worn Trial sets.",
     sources: { gear: ["pearlescent_ward"] } },
+  { value: "pillagers_profit", label: "Pillager's Profit", desc: "Set: grants resource recovery when an ally uses an Ultimate.",
+    sources: { gear: ["pillagers_profit"] } },
+  { value: "powerful_assault", label: "Powerful Assault", desc: "Set: grants Weapon and Spell Damage to nearby allies.",
+    sources: { gear: ["powerful_assault"] } },
+  { value: "symphony_of_blades", label: "Symphony of Blades", desc: "Monster set: resource sustain for low-resource allies.",
+    sources: { gear: ["symphony_of_blades"] } },
   { value: "touch_of_zen", label: "Touch of Z'en", desc: "Set: increases damage per damage-over-time effect on the target.",
     sources: { gear: ["z_ens_redress"] } },
   { value: "way_of_martial_knowledge", label: "Way of Martial Knowledge", desc: "Set: increases the target's damage taken from your next direct attack.",
     sources: { gear: ["way_of_martial_knowledge"] } },
-  { value: "encratiss_behemoth", label: "Encratis's Behemoth", desc: "Monster set: Flame Damage debuff/buff swing.",
-    sources: { gear: ["encratiss_behemoth"] } },
-  { value: "symphony_of_blades", label: "Symphony of Blades", desc: "Monster set: resource sustain for low-resource allies.",
-    sources: { gear: ["symphony_of_blades"] } },
-  { value: "ozezan_the_inferno", label: "Ozezan the Inferno", desc: "Monster set: grants healed allies Minor Vitality and Armor.",
-    sources: { gear: ["ozezan_the_inferno"] } },
 ];
 
 // Human labels for buff source categories (shown in the details modal).
@@ -803,6 +940,7 @@ const BUFF_CATEGORY_LABELS = {
   masteries: "Mastery",
   classes: "Class",
   skillLines: "Skill line",
+  scribed: "Scribed",
 };
 
 // buffSourceLabel(category, key): the display label for one source key.
@@ -820,6 +958,7 @@ function buffSourceLabel(category, key) {
     }
     case "classes": return labelFor(CLASSES, key);
     case "skillLines": return labelFor(SKILL_LINES, key);
+    case "scribed": return scribedBuffLabel(key);
     default: return key;
   }
 }
@@ -844,6 +983,10 @@ function buffKnownSources(buff) {
 // potions) always count.
 function playerBuffContributions(player, loadout) {
   const lo = loadout || {};
+  // Scribed buffs only count when the player actually has a grimoire skill
+  // slotted; otherwise a stale selection (kept when a grimoire is removed)
+  // should not contribute to coverage.
+  const hasGrimoire = (lo.skills || []).some((k) => GRIMOIRE_SKILLS.has(k));
   const sets = {
     gear: new Set(lo.gear || []),
     skills: new Set(lo.skills || []),
@@ -851,6 +994,7 @@ function playerBuffContributions(player, loadout) {
     masteries: new Set(),
     classes: new Set(),
     skillLines: new Set(),
+    scribed: new Set(hasGrimoire ? lo.scribed_buffs || [] : []),
   };
   if (player.subclassed) {
     [player.skill_line_1, player.skill_line_2, player.skill_line_3].forEach((v) => {
@@ -883,6 +1027,10 @@ function computeBuffCoverage(players, loadoutBySlot) {
         for (const key of keys) {
           if (have.has(key)) providers.push({ slot: player.slot, category, key });
         }
+      }
+      // A scribed (grimoire) skill set to provide this buff covers it too.
+      if (sets.scribed && sets.scribed.has(buff.value)) {
+        providers.push({ slot: player.slot, category: "scribed", key: buff.value });
       }
     }
     return { buff, met: providers.length > 0, providers };
@@ -1075,7 +1223,7 @@ function playerCritContext(player, loadout) {
 // detection category? Returns the matched key (truthy) or null. Shared by the
 // group/target (team-wide) and self (per-player) detection so a `detect` map
 // behaves identically everywhere. Categories:
-//   gear/skills/masteries/skillLines/cp → Set membership;
+//   gear/skills/masteries/skillLines/cp/scribed → Set membership;
 //   classes/race/mundus → scalar equality against the candidate list;
 //   classPassive → array of { class, line }: `line` for a subclassed player,
 //   otherwise `class`.
@@ -1096,7 +1244,11 @@ function ctxDetectHit(c, cat, keys) {
   else if (cat === "masteries") have = c.masteries;
   else if (cat === "skillLines") have = c.skillLines;
   else if (cat === "cp") have = c.cpBlue;
+  // `scribed` matches a player's scribed (grimoire) buff selection; only the
+  // pen context carries this set, so guard against contexts without it.
+  else if (cat === "scribed") have = c.scribed;
   else return null;
+  if (!have) return null;
   return keys.find((k) => have.has(k)) || null;
 }
 
@@ -1275,12 +1427,13 @@ const PEN_GROUP_SOURCES = [
   // Major Breach (−5948 enemy Resistance) — applied to the target, so the whole
   // group benefits. Provided by the Puncture line (Pierce Armor/Puncture/Ransack),
   // the Elemental Drain line (Elemental Drain/Weakness to Elements/Elemental
-  // Susceptibility), and Crushing Weapon.
-  { value: "major_breach", label: "Major Breach", pen: 5948, detect: { skills: ["pierce_armor", "puncture", "ransack", "elemental_drain", "weakness_to_elements", "elemental_susceptibility", "crushing_weapon"] } },
+  // Susceptibility), Crushing Weapon, and Razor Caltrops.
+  { value: "major_breach", label: "Major Breach", pen: 5948, detect: { skills: ["pierce_armor", "puncture", "ransack", "elemental_drain", "weakness_to_elements", "elemental_susceptibility", "crushing_weapon", "razor_caltrops"] } },
   // Minor Breach (−2974 enemy Resistance). Only Pierce Armor (of the Puncture
   // morphs) also applies Minor Breach; Deep Fissure and Sunderflame apply it too.
   // (Elemental Drain was previously here but grants MAJOR Breach, not Minor.)
-  { value: "minor_breach", label: "Minor Breach", pen: 2974, detect: { skills: ["pierce_armor", "deep_fissure", "sunderflame"] } },
+  // A scribed skill set to provide Minor Breach also applies it to the target.
+  { value: "minor_breach", label: "Minor Breach", pen: 2974, detect: { skills: ["pierce_armor", "deep_fissure", "sunderflame"], scribed: ["minor_breach"] } },
   { value: "alkosh", label: "Roar of Alkosh", pen: 6000, detect: { gear: ["roar_of_alkosh"] } },
   { value: "crimson_oath", label: "Crimson Oath's Rive", pen: 3541, detect: { gear: ["crimson_oaths_rive"] } },
   { value: "tremorscale", label: "Tremorscale", pen: 2640, detect: { gear: ["tremorscale"] } },
@@ -1332,6 +1485,11 @@ function playerPenContext(player, loadout) {
     cpBlue: new Set(lo.cp_blue || []),
     penExtra: new Set(lo.pen_extra || []),
     penExtraCounts: countKeys(lo.pen_extra || []),
+    // Scribed (grimoire) buffs only apply when a grimoire skill is slotted, so a
+    // stale selection (kept when the grimoire is removed) doesn't add pen.
+    scribed: new Set(
+      (lo.skills || []).some((k) => GRIMOIRE_SKILLS.has(k)) ? lo.scribed_buffs || [] : []
+    ),
     mundus: lo.mundus || "",
     armorLight: Number(lo.armor_light) || 0,
     // Higher of Weapon/Spell Damage; drives Anthelmir's Construct's pen scaling.

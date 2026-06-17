@@ -46,6 +46,16 @@ func CritDmgLabel(key string) string { return lookup(critDmgLabels, key) }
 // PenExtraLabel returns the display name for an extra-penetration source key.
 func PenExtraLabel(key string) string { return lookup(penExtraLabels, key) }
 
+// ScribedBuffLabel returns the display name for a scribed-buff key.
+func ScribedBuffLabel(key string) string { return lookup(scribedBuffLabels, key) }
+
+// BannerBearerFocusLabel returns the display name (banner morph) for a Banner
+// Bearer Focus Script key.
+func BannerBearerFocusLabel(key string) string { return lookup(bannerBearerFocusLabels, key) }
+
+// IsGrimoireSkill reports whether a skill key is a scribed grimoire ability.
+func IsGrimoireSkill(key string) bool { return grimoireSkills[key] }
+
 // RoleLabel returns the display name for a role key.
 func RoleLabel(key string) string { return lookup(roleLabels, key) }
 

@@ -1707,6 +1707,10 @@
                 <label>Pen sources</label>
                 <div class="chip-list" data-list></div>
               </div>
+              <div class="loadout-col is-hidden" data-type="scribed_buffs" data-scribed-col>
+                <label>Scribed buffs</label>
+                <div class="chip-list" data-list></div>
+              </div>
             </div>
             <div class="crit-setup" data-crit>
               <div class="crit-field">
@@ -1753,6 +1757,13 @@
                   <option value="2">2 effects (1320)</option>
                   <option value="1">1 effect (660)</option>
                   <option value="0">0 effects (0)</option>
+                </select>
+              </div>
+              <div class="crit-field crit-banner is-hidden" data-banner-focus-field>
+                <label>Banner focus</label>
+                <select class="input" data-crit-field="banner_bearer_focus" aria-label="Banner Bearer focus script">
+                  <option value="">—</option>
+                  ${optionsHtml(BANNER_BEARER_FOCUS, "")}
                 </select>
               </div>
               <div class="crit-results">
@@ -2001,7 +2012,7 @@
     });
 
     // Crit/pen setup fields (mundus + armor counts + catalyst element count + weapon damage).
-    ["mundus", "armor_heavy", "armor_medium", "armor_light", "catalyst_elements", "weapon_damage", "splintered_secrets_skills", "force_of_nature_status"].forEach((f) => {
+    ["mundus", "armor_heavy", "armor_medium", "armor_light", "catalyst_elements", "weapon_damage", "splintered_secrets_skills", "force_of_nature_status", "banner_bearer_focus"].forEach((f) => {
       const s = srcSlot.querySelector(`[data-crit-field="${f}"]`);
       const d = dstSlot.querySelector(`[data-crit-field="${f}"]`);
       if (s && d) d.value = s.value;
@@ -2052,6 +2063,8 @@
         const selEl = critEl.querySelector(`[data-crit-field="${f}"]`);
         if (selEl) selEl.value = "0";
       });
+      const bannerSel = critEl.querySelector('[data-crit-field="banner_bearer_focus"]');
+      if (bannerSel) bannerSel.value = "";
     }
 
     refreshBuffCoverage();
@@ -2105,9 +2118,12 @@
         if (ssSel) ssSel.value = String(clampSplinteredSecretsSkills(lo.splintered_secrets_skills));
         const fonSel = critEl.querySelector('[data-crit-field="force_of_nature_status"]');
         if (fonSel) fonSel.value = String(clampForceOfNatureStatus(lo.force_of_nature_status));
+        const bbSel = critEl.querySelector('[data-crit-field="banner_bearer_focus"]');
+        if (bbSel) bbSel.value = lo.banner_bearer_focus || "";
       }
     });
 
+    updateScribedColumns();
     refreshCritCoverage();
     refreshPenCoverage();
   }
@@ -2466,6 +2482,7 @@
         cp_blue: read("cp_blue"),
         crit_dmg: read("crit_dmg"),
         pen_extra: read("pen_extra"),
+        scribed_buffs: read("scribed_buffs"),
         mundus: critVal("mundus"),
         armor_heavy: armor("armor_heavy"),
         armor_medium: armor("armor_medium"),
@@ -2478,6 +2495,7 @@
         })(),
         splintered_secrets_skills: clampSplinteredSecretsSkills(critVal("splintered_secrets_skills")),
         force_of_nature_status: clampForceOfNatureStatus(critVal("force_of_nature_status")),
+        banner_bearer_focus: critVal("banner_bearer_focus"),
       };
     });
   }
@@ -2551,12 +2569,34 @@
     return map;
   }
 
+  // Show each slot's "Scribed buffs" column only when that player has a scribed
+  // (grimoire) skill slotted; hide it otherwise. Selections are left in the DOM
+  // when hidden so toggling the grimoire back restores them (coverage ignores
+  // them while no grimoire is slotted; see playerBuffContributions).
+  function updateScribedColumns() {
+    el("roster")
+      .querySelectorAll(".player-slot")
+      .forEach((slot) => {
+        const col = slot.querySelector("[data-scribed-col]");
+        if (!col) return;
+        const chips = slot.querySelectorAll(
+          '[data-loadout] .loadout-col[data-type="skills"] .chip'
+        );
+        const hasGrimoire = Array.from(chips).some((c) =>
+          isGrimoireSkill(c.dataset.value)
+        );
+        col.classList.toggle("is-hidden", !hasGrimoire);
+      });
+  }
+
   // Recompute and repaint the summary card (count + pip bar). Cheap; safe to
   // call on every roster/loadout change. Keeps an open modal in sync.
   function refreshBuffCoverage() {
     const countEl = el("buffs-count");
     if (!countEl || !currentTeam || detailView.classList.contains("is-hidden")) return;
     if (!el("roster").querySelector(".player-slot")) return;
+
+    updateScribedColumns();
 
     const coverage = computeBuffCoverage(collectPlayers(), currentLoadoutBySlot());
     lastBuffCoverage = coverage;
@@ -2678,6 +2718,17 @@
           '[data-loadout] .loadout-col[data-type="gear"] .chip[data-value="elemental_catalyst"]'
         );
         catField.classList.toggle("is-hidden", !hasCatalyst);
+      }
+
+      // The Banner focus dropdown only matters when the Banner Bearer grimoire is
+      // slotted; show it only then. Informational (records the banner morph), so
+      // it doesn't affect crit/pen — it just lives in this conditional setup row.
+      const bannerField = slot.querySelector("[data-banner-focus-field]");
+      if (bannerField) {
+        const hasBannerBearer = !!slot.querySelector(
+          `[data-loadout] .loadout-col[data-type="skills"] .chip[data-value="${BANNER_BEARER_SKILL}"]`
+        );
+        bannerField.classList.toggle("is-hidden", !hasBannerBearer);
       }
 
       const label = slot.querySelector("[data-crit-label]");

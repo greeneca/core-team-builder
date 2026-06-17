@@ -318,7 +318,7 @@ type labelledField struct {
 
 // loadoutDetailFields mirrors the JS helper: one labelled field per data type
 // set on a loadout (Gear, Skills, Crit Damage, Mundus, Potions, CP, Armor,
-// Penetration). Empty data types are omitted.
+// Penetration, Scribed Buffs). Empty data types are omitted.
 func loadoutDetailFields(lo models.Loadout) []labelledField {
 	var fields []labelledField
 	if s := mapLabels(lo.Gear, esoref.GearLabel); s != "" {
@@ -356,7 +356,26 @@ func loadoutDetailFields(lo models.Loadout) []labelledField {
 	if pen := penExtraParts(lo.PenExtra); pen != "" {
 		fields = append(fields, labelledField{"Penetration", pen})
 	}
+	if s := mapLabels(lo.ScribedBuffs, esoref.ScribedBuffLabel); s != "" {
+		fields = append(fields, labelledField{"Scribed Buffs", s})
+	}
+	// Banner Bearer's Focus Script only makes sense when the grimoire is slotted;
+	// mirror the web UI gate so a stale selection isn't shown after it's removed.
+	if lo.BannerBearerFocus != "" && hasBannerBearer(lo) {
+		fields = append(fields, labelledField{"Banner Focus", esoref.BannerBearerFocusLabel(lo.BannerBearerFocus)})
+	}
 	return fields
+}
+
+// hasBannerBearer reports whether the loadout has the Banner Bearer grimoire
+// skill slotted.
+func hasBannerBearer(lo models.Loadout) bool {
+	for _, k := range lo.Skills {
+		if k == "banner_bearer" {
+			return true
+		}
+	}
+	return false
 }
 
 func penExtraParts(keys []string) string {
@@ -521,6 +540,7 @@ type pcContext struct {
 	skillLines       map[string]bool
 	cpBlue           map[string]bool
 	penExtra         map[string]bool
+	scribed          map[string]bool
 	mundus           string
 	race             string
 	class            string
@@ -537,6 +557,7 @@ func newPCContext(p models.Player, lo models.Loadout) pcContext {
 		potions:          toSet(lo.Potions),
 		cpBlue:           toSet(lo.CPBlue),
 		penExtra:         toSet(lo.PenExtra),
+		scribed:          scribedSet(lo),
 		mundus:           lo.Mundus,
 		race:             p.Race,
 		class:            p.Class,
@@ -573,6 +594,23 @@ func toSet(keys []string) map[string]bool {
 	return m
 }
 
+// scribedSet returns the loadout's scribed-buff selection, but only when a
+// grimoire skill is slotted (mirrors the JS gate so a stale selection kept after
+// removing the grimoire doesn't contribute, e.g. to penetration).
+func scribedSet(lo models.Loadout) map[string]bool {
+	hasGrimoire := false
+	for _, k := range lo.Skills {
+		if esoref.IsGrimoireSkill(k) {
+			hasGrimoire = true
+			break
+		}
+	}
+	if !hasGrimoire {
+		return map[string]bool{}
+	}
+	return toSet(lo.ScribedBuffs)
+}
+
 // clampCatalystElements mirrors the JS clamp: anything < 1 falls back to 3
 // (the full Elemental Catalyst bonus), capped at 3.
 func clampCatalystElements(v int) int {
@@ -595,7 +633,8 @@ func anySet(have map[string]bool, keys []string) bool {
 // applied (any category, any candidate key).
 func detectHit(c pcContext, d esoref.DetectMap) bool {
 	if anySet(c.gear, d.Gear) || anySet(c.skills, d.Skills) || anySet(c.potions, d.Potions) ||
-		anySet(c.masteries, d.Masteries) || anySet(c.skillLines, d.SkillLines) || anySet(c.cpBlue, d.CP) {
+		anySet(c.masteries, d.Masteries) || anySet(c.skillLines, d.SkillLines) || anySet(c.cpBlue, d.CP) ||
+		anySet(c.scribed, d.Scribed) {
 		return true
 	}
 	for _, k := range d.Classes {

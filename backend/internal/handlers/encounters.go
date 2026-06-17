@@ -230,6 +230,8 @@ type loadoutPayload struct {
 	WeaponDamage            int      `json:"weapon_damage"`
 	SplinteredSecretsSkills int      `json:"splintered_secrets_skills"`
 	ForceOfNatureStatus     int      `json:"force_of_nature_status"`
+	ScribedBuffs            []string `json:"scribed_buffs"`
+	BannerBearerFocus       string   `json:"banner_bearer_focus"`
 }
 
 type saveLoadoutsRequest struct {
@@ -357,6 +359,16 @@ func (s *Server) handleSaveLoadouts(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "invalid penetration sources list")
 			return
 		}
+		scribedBuffs, err := models.SanitizeLoadoutItems(p.ScribedBuffs)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid scribed buffs list")
+			return
+		}
+		bannerBearerFocus := strings.TrimSpace(p.BannerBearerFocus)
+		if len(bannerBearerFocus) > 100 {
+			writeError(w, http.StatusBadRequest, "invalid banner bearer focus")
+			return
+		}
 		loadouts = append(loadouts, models.Loadout{
 			Slot: p.Slot, Gear: gear, Skills: skills, Potions: potions,
 			CPBlue: cpBlue, CritDmg: critDmg, Mundus: mundus,
@@ -368,6 +380,8 @@ func (s *Server) handleSaveLoadouts(w http.ResponseWriter, r *http.Request) {
 			WeaponDamage:            clampWeaponDamage(p.WeaponDamage),
 			SplinteredSecretsSkills: clampSplinteredSecretsSkills(p.SplinteredSecretsSkills),
 			ForceOfNatureStatus:     clampForceOfNatureStatus(p.ForceOfNatureStatus),
+			ScribedBuffs:            scribedBuffs,
+			BannerBearerFocus:       bannerBearerFocus,
 		})
 	}
 

@@ -26,6 +26,7 @@ type DetectMap struct {
 	Classes      []string
 	Race         []string
 	Mundus       []string
+	Scribed      []string
 	ClassPassive []ClassPassive
 }
 
