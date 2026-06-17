@@ -1658,7 +1658,7 @@
               <input class="input" data-field="name" maxlength="100" />
             </div>
             <div class="form-group">
-              <label>Discord handle</label>
+              <label>Discord Handle</label>
               <div data-discord-combo></div>
             </div>
             <div class="form-group">
@@ -1700,15 +1700,15 @@
                 <div class="chip-list" data-list></div>
               </div>
               <div class="loadout-col" data-type="crit_dmg">
-                <label>Crit Dmg sources</label>
+                <label>Crit Dmg Sources</label>
                 <div class="chip-list" data-list></div>
               </div>
               <div class="loadout-col" data-type="pen_extra">
-                <label>Pen sources</label>
+                <label>Pen Sources</label>
                 <div class="chip-list" data-list></div>
               </div>
               <div class="loadout-col is-hidden" data-type="scribed_buffs" data-scribed-col>
-                <label>Scribed buffs</label>
+                <label>Scribed Group Buffs<span class="info-indicator" tabindex="0" role="img" aria-label="Scribed Group Buffs: only add scribed (grimoire) buffs that your scribed skill provides to the whole group. Self-only buffs should not be added here." data-tip="Only add scribed (grimoire) buffs that your scribed skill provides to the whole group. Self-only buffs should not be added here.">i</span></label>
                 <div class="chip-list" data-list></div>
               </div>
             </div>
@@ -1718,7 +1718,7 @@
                 <select class="input" data-crit-field="mundus">${optionsHtml(MUNDUS_STONES, "")}</select>
               </div>
               <div class="crit-field crit-armor">
-                <label>Armor pieces (H / M / L)</label>
+                <label>Armor Pieces (H / M / L)</label>
                 <div class="armor-steppers">
                   <input class="input armor-count" type="number" min="0" max="7" data-crit-field="armor_heavy" aria-label="Heavy armor pieces" />
                   <input class="input armor-count" type="number" min="0" max="7" data-crit-field="armor_medium" aria-label="Medium armor pieces" />
@@ -1726,7 +1726,7 @@
                 </div>
               </div>
               <div class="crit-field crit-catalyst is-hidden" data-catalyst-field>
-                <label>Catalyst dmg types</label>
+                <label>Catalyst Dmg Types</label>
                 <select class="input" data-crit-field="catalyst_elements" aria-label="Elemental Catalyst damage types applied">
                   <option value="3">3 — Flame/Frost/Shock (15%)</option>
                   <option value="2">2 elements (10%)</option>
@@ -1734,11 +1734,11 @@
                 </select>
               </div>
               <div class="crit-field crit-weapon-dmg is-hidden" data-weapon-dmg-field>
-                <label>Weapon damage</label>
+                <label>Weapon Damage</label>
                 <input class="input" type="number" min="0" max="20000" step="1" data-crit-field="weapon_damage" aria-label="Higher of Weapon or Spell Damage (for Anthelmir's Construct penetration)" />
               </div>
               <div class="crit-field crit-splintered is-hidden" data-splintered-field>
-                <label>Splintered skills</label>
+                <label>Splintered Skills</label>
                 <select class="input" data-crit-field="splintered_secrets_skills" aria-label="Herald of the Tome abilities slotted for Splintered Secrets penetration">
                   <option value="5">5 skills (6200)</option>
                   <option value="4">4 skills (4960)</option>
@@ -1749,7 +1749,7 @@
                 </select>
               </div>
               <div class="crit-field crit-force-nature is-hidden" data-force-nature-field>
-                <label>Status effects</label>
+                <label>Status Effects</label>
                 <select class="input" data-crit-field="force_of_nature_status" aria-label="Negative status effects on the enemy for Force of Nature penetration">
                   <option value="5">5 effects (3300)</option>
                   <option value="4">4 effects (2640)</option>
@@ -1760,7 +1760,7 @@
                 </select>
               </div>
               <div class="crit-field crit-banner is-hidden" data-banner-focus-field>
-                <label>Banner focus</label>
+                <label>Banner Focus</label>
                 <select class="input" data-crit-field="banner_bearer_focus" aria-label="Banner Bearer focus script">
                   <option value="">—</option>
                   ${optionsHtml(BANNER_BEARER_FOCUS, "")}
@@ -1768,7 +1768,7 @@
               </div>
               <div class="crit-results">
                 <div class="crit-field crit-result">
-                  <label>Crit damage</label>
+                  <label>Crit Damage</label>
                   <span class="crit-label" data-crit-label>—</span>
                 </div>
                 <div class="crit-field crit-result">
@@ -2141,7 +2141,7 @@
         .map(
           (n) => `
         <div class="form-group">
-          <label>Skill line ${n}</label>
+          <label>Skill Line ${n}</label>
           <select class="input" data-field="skill_line_${n}">${skillLineOptionsHtml(
             player[`skill_line_${n}`]
           )}</select>
@@ -2156,7 +2156,7 @@
         .map(
           (n) => `
         <div class="form-group">
-          <label>Class mastery ${n}</label>
+          <label>Class Mastery ${n}</label>
           <select class="input" data-field="mastery_${n}" title="${escapeAttr(
             masteryDesc(cls, player[`mastery_${n}`])
           )}">${masteryOptionsHtml(masteries, player[`mastery_${n}`])}</select>

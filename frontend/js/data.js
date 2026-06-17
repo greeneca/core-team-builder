@@ -691,10 +691,10 @@ function isGrimoireSkill(key) {
 
 // SCRIBED_BUFFS are the group buffs a scribed skill can be set to provide.
 // Stored per loadout under `scribed_buffs`. A value that matches a tracked buff
-// in BUFFS counts toward the Group Buffs coverage card. `minor_breach` is the
-// exception: it is NOT a tracked group buff — instead it feeds the penetration
-// calculator as a group source (see PEN_GROUP_SOURCES), since Minor Breach
-// lowers the enemy's Resistance for the whole team.
+// in BUFFS counts toward the Group Buffs coverage card. `major_breach` and
+// `minor_breach` are the exceptions: they are NOT tracked group buffs — instead
+// they feed the penetration calculator as group sources (see PEN_GROUP_SOURCES),
+// since Breach lowers the enemy's Resistance for the whole team.
 const SCRIBED_BUFFS = [
   { value: "minor_resolve", label: "Minor Resolve", desc: "Increases group Physical and Spell Resistance by 2974." },
   { value: "minor_berserk", label: "Minor Berserk", desc: "Increases group damage done by 5%." },
@@ -702,6 +702,7 @@ const SCRIBED_BUFFS = [
   { value: "minor_courage", label: "Minor Courage", desc: "Increases group Weapon and Spell Damage by 215." },
   { value: "minor_heroism", label: "Minor Heroism", desc: "Grants the group 1 Ultimate every 1.5 seconds." },
   { value: "minor_intellect_endurance", label: "Minor Intellect and Endurance", desc: "Increases group Magicka and Stamina Recovery by 15%." },
+  { value: "major_breach", label: "Major Breach", desc: "Reduces the enemy's Physical and Spell Resistance by 5948." },
   { value: "minor_breach", label: "Minor Breach", desc: "Reduces the enemy's Physical and Spell Resistance by 2974." },
   { value: "minor_vulnerability", label: "Minor Vulnerability", desc: "Increases the enemy's damage taken by 5%." },
   { value: "major_cowardice", label: "Major Cowardice", desc: "Reduces the enemy's Weapon and Spell Damage by 430." },
@@ -1446,8 +1447,9 @@ const PEN_GROUP_SOURCES = [
   // Major Breach (−5948 enemy Resistance) — applied to the target, so the whole
   // group benefits. Provided by the Puncture line (Pierce Armor/Puncture/Ransack),
   // the Elemental Drain line (Elemental Drain/Weakness to Elements/Elemental
-  // Susceptibility), Crushing Weapon, and Razor Caltrops.
-  { value: "major_breach", label: "Major Breach", pen: 5948, detect: { skills: ["pierce_armor", "puncture", "ransack", "elemental_drain", "weakness_to_elements", "elemental_susceptibility", "crushing_weapon", "razor_caltrops"] } },
+  // Susceptibility), Crushing Weapon, and Razor Caltrops. A scribed skill set to
+  // provide Major Breach also applies it to the target.
+  { value: "major_breach", label: "Major Breach", pen: 5948, detect: { skills: ["pierce_armor", "puncture", "ransack", "elemental_drain", "weakness_to_elements", "elemental_susceptibility", "crushing_weapon", "razor_caltrops"], scribed: ["major_breach"] } },
   // Minor Breach (−2974 enemy Resistance). Only Pierce Armor (of the Puncture
   // morphs) also applies Minor Breach; Deep Fissure and Sunderflame apply it too.
   // (Elemental Drain was previously here but grants MAJOR Breach, not Minor.)

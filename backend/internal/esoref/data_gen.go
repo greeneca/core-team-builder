@@ -1535,6 +1535,7 @@ var penExtraLabels = map[string]string{
 }
 
 var scribedBuffLabels = map[string]string{
+	"major_breach":              "Major Breach",
 	"major_cowardice":           "Major Cowardice",
 	"minor_berserk":             "Minor Berserk",
 	"minor_breach":              "Minor Breach",
@@ -1622,7 +1623,7 @@ var CritGroupSources = []CritGroupSource{
 }
 
 var PenGroupSources = []PenGroupSource{
-	{Value: "major_breach", Label: "Major Breach", Pen: 5948, PerWeaponDamage: false, Detect: DetectMap{Skills: []string{"pierce_armor", "puncture", "ransack", "elemental_drain", "weakness_to_elements", "elemental_susceptibility", "crushing_weapon", "razor_caltrops"}}},
+	{Value: "major_breach", Label: "Major Breach", Pen: 5948, PerWeaponDamage: false, Detect: DetectMap{Skills: []string{"pierce_armor", "puncture", "ransack", "elemental_drain", "weakness_to_elements", "elemental_susceptibility", "crushing_weapon", "razor_caltrops"}, Scribed: []string{"major_breach"}}},
 	{Value: "minor_breach", Label: "Minor Breach", Pen: 2974, PerWeaponDamage: false, Detect: DetectMap{Skills: []string{"pierce_armor", "deep_fissure", "sunderflame"}, Scribed: []string{"minor_breach"}}},
 	{Value: "alkosh", Label: "Roar of Alkosh", Pen: 6000, PerWeaponDamage: false, Detect: DetectMap{Gear: []string{"roar_of_alkosh"}}},
 	{Value: "crimson_oath", Label: "Crimson Oath's Rive", Pen: 3541, PerWeaponDamage: false, Detect: DetectMap{Gear: []string{"crimson_oaths_rive"}}},
