@@ -878,11 +878,9 @@ const BUFFS = [
   // plus the Abyssal Brace set.
   { value: "minor_evasion", label: "Minor Evasion", desc: "Reduces group damage taken from area attacks.",
     sources: { skillLines: ["soldier_of_apocrypha"], classes: ["arcanist"], gear: ["abyssal_brace"] } },
-  // Force. Group-wide Minor Force: Grave Inevitability's aura and Phoenix Moth's
-  // heals share it, and the Werewolf Feeding Frenzy synergy (Roar morphs) grants
-  // it to allies who activate it.
-  { value: "minor_force", label: "Minor Force", desc: "Increases group Critical Damage by 10%.", selfBuff: true,
-    sources: { gear: ["grave_inevitability", "phoenix_moth_theurge"], skills: ["roar", "ferocious_roar", "deafening_roar"] } },
+  // Minor Force is intentionally NOT tracked as a buff-coverage entry: it only
+  // affects Critical Damage, so it is modelled solely in the crit-damage
+  // calculator (CRIT_GROUP_SOURCES / CRIT_SELF_SOURCES below).
   // Fortitude, Endurance, Intellect: shared to allies by the Arcanist domains and
   // the Templar Radiant Aura.
   { value: "minor_fei", label: "Minor Fortitude, Endurance, Intellect", desc: "Increases group Health, Stamina, and Magicka Recovery.",
@@ -1121,9 +1119,11 @@ const CRIT_GROUP_SOURCES = [
   { value: "major_force", label: "Major Force", pct: 20, detect: { gear: ["saxhleel_champion", "perfected_saxhleel_champion", "grisly_gourmet"], skills: ["aggressive_horn", "lights_champion"], masteries: ["ink_scribes_verve"] } },
   // Minor Force (+10% crit dmg) applied to group members by these sets (the
   // wearer of Grave Inevitability gets Major Force instead, but its grouped
-  // allies get Minor Force). Velothi's self-only Minor Force stays in the self
-  // list and is deduped per-player when the team already provides this.
-  { value: "minor_force", label: "Minor Force", pct: 10, detect: { gear: ["twilight_remedy", "phoenix_moth_theurge", "grave_inevitability"] } },
+  // allies get Minor Force), plus the Werewolf Feeding Frenzy synergy (Roar
+  // morphs) that grants it to allies who activate it. Personal-only Minor Force
+  // (Velothi, Beast Trap, Accelerate, Stalwart Guard) lives in the self list and
+  // is deduped per-player when the team already provides this group-wide.
+  { value: "minor_force", label: "Minor Force", pct: 10, detect: { gear: ["twilight_remedy", "phoenix_moth_theurge", "grave_inevitability"], skills: ["roar", "ferocious_roar", "deafening_roar"] } },
   { value: "lucent_echoes", label: "Lucent Echoes", pct: 11, detect: { gear: ["lucent_echoes", "perfected_lucent_echoes"] } },
   // Minor Brittle (+10% crit dmg taken) is an enemy debuff: Rune of the
   // Colorless Pool and Glittering Goad both apply it to the target. (Baron
@@ -1190,7 +1190,12 @@ function clampForceOfNatureStatus(v) {
 // Warden's Advanced Species passive are handled specially in playerSelfCrit
 // (per-piece / MAX / per-slotted-Animal-Companion-skill).
 const CRIT_SELF_SOURCES = [
-  { value: "minor_force", label: "Minor Force (Velothi)", pct: 10, detect: { gear: ["velothi_ur_mages_amulet"] } },
+  // Personal Minor Force: Velothi's amulet plus self-applied skills — Beast Trap
+  // and its morphs (Trap Beast / Barbed Trap / Lightweight Beast Trap),
+  // Accelerate and its morphs (Channeled Acceleration / Race Against Time), and
+  // Stalwart Guard. Deduped against the group Minor Force above when the team
+  // already provides it (Minor Force does not stack).
+  { value: "minor_force", label: "Minor Force", pct: 10, detect: { gear: ["velothi_ur_mages_amulet"], skills: ["trap_beast", "barbed_trap", "lightweight_beast_trap", "accelerate", "channeled_acceleration", "race_against_time", "stalwart_guard"] } },
   { value: "the_shadow", label: "The Shadow Mundus", pct: 18, detect: { mundus: ["the_shadow"] } },
   { value: "backstabber", label: "Backstabber", pct: 15, detect: { cp: ["backstabber"] } },
   { value: "fighting_finesse", label: "Fighting Finesse", pct: 10, detect: { cp: ["fighting_finesse"] } },

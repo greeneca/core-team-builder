@@ -1615,7 +1615,7 @@ const AnthelmirPenPerWD = 0.5
 
 var CritGroupSources = []CritGroupSource{
 	{Value: "major_force", Label: "Major Force", Pct: 20, PerElement: false, Detect: DetectMap{Gear: []string{"saxhleel_champion", "perfected_saxhleel_champion", "grisly_gourmet"}, Skills: []string{"aggressive_horn", "lights_champion"}, Masteries: []string{"ink_scribes_verve"}}},
-	{Value: "minor_force", Label: "Minor Force", Pct: 10, PerElement: false, Detect: DetectMap{Gear: []string{"twilight_remedy", "phoenix_moth_theurge", "grave_inevitability"}}},
+	{Value: "minor_force", Label: "Minor Force", Pct: 10, PerElement: false, Detect: DetectMap{Gear: []string{"twilight_remedy", "phoenix_moth_theurge", "grave_inevitability"}, Skills: []string{"roar", "ferocious_roar", "deafening_roar"}}},
 	{Value: "lucent_echoes", Label: "Lucent Echoes", Pct: 11, PerElement: false, Detect: DetectMap{Gear: []string{"lucent_echoes", "perfected_lucent_echoes"}}},
 	{Value: "minor_brittle", Label: "Minor Brittle", Pct: 10, PerElement: false, Detect: DetectMap{Gear: []string{"glittering_goad"}, Skills: []string{"rune_of_the_colorless_pool"}}},
 	{Value: "major_brittle", Label: "Major Brittle", Pct: 20, PerElement: false, Detect: DetectMap{Gear: []string{"nunatak"}, Masteries: []string{"tundras_maw"}}},
@@ -1653,7 +1653,6 @@ var Buffs = []Buff{
 	{Value: "major_cowardice", Label: "Major Cowardice", SelfBuff: false, Detect: DetectMap{Gear: []string{"nix_hounds_howl", "gardener_of_seasons", "vykosa"}, Skills: []string{"chains_of_dominance", "chains_of_flame", "agony_totem", "bone_totem", "remote_totem", "aspect_of_terror", "manifestation_of_terror", "mass_hysteria", "deafening_roar"}}},
 	{Value: "minor_cowardice", Label: "Minor Cowardice", SelfBuff: false, Detect: DetectMap{Gear: []string{"healing_mage"}, Skills: []string{"power_extraction", "corrupting_pollen"}, Masteries: []string{"erudites_rigor"}}},
 	{Value: "minor_evasion", Label: "Minor Evasion", SelfBuff: false, Detect: DetectMap{Gear: []string{"abyssal_brace"}, SkillLines: []string{"soldier_of_apocrypha"}, Classes: []string{"arcanist"}}},
-	{Value: "minor_force", Label: "Minor Force", SelfBuff: true, Detect: DetectMap{Gear: []string{"grave_inevitability", "phoenix_moth_theurge"}, Skills: []string{"roar", "ferocious_roar", "deafening_roar"}}},
 	{Value: "minor_fei", Label: "Minor Fortitude, Endurance, Intellect", SelfBuff: false, Detect: DetectMap{Skills: []string{"arcanists_domain", "reconstructive_domain", "zenas_empowering_disc", "radiant_aura", "restoring_aura"}}},
 	{Value: "major_heroism", Label: "Major Heroism", SelfBuff: false, Detect: DetectMap{Gear: []string{"drakes_rush", "transformative_hope", "perfected_transformative_hope", "heroic_unity"}, Masteries: []string{"bountiful_harvest"}}},
 	{Value: "minor_heroism", Label: "Minor Heroism", SelfBuff: false, Detect: DetectMap{Gear: []string{"reawakened_hierophant"}, Skills: []string{"fire_keeper", "hearth_and_home", "hearthfire"}}},
