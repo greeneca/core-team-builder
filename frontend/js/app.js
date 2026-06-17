@@ -849,7 +849,12 @@
   function renderSchedule(editable) {
     const container = el("schedule-days");
     container.innerHTML = "";
-    const selected = new Set(currentTeam.schedule_days || []);
+    // Stored days+time are UTC. Convert the time to the viewer's zone and shift
+    // the days by the same midnight-crossing delta so the checkboxes and time
+    // stay consistent (and round-trip back to the same UTC pair on save).
+    const localZone = localTimezone();
+    const conv = convertWallTimeFull(currentTeam.schedule_time, "UTC", localZone);
+    const selected = new Set(shiftDayKeys(currentTeam.schedule_days || [], conv.dayDelta));
 
     DAYS.forEach((d) => {
       const label = document.createElement("label");
@@ -868,11 +873,8 @@
 
     // The stored time is in UTC. Always show/edit it in the **viewer's**
     // current timezone.
-    const localZone = localTimezone();
     const timeInput = el("schedule-time");
-    timeInput.value = currentTeam.schedule_time
-      ? convertWallTime(currentTeam.schedule_time, "UTC", localZone)
-      : "";
+    timeInput.value = currentTeam.schedule_time ? conv.time : "";
     timeInput.disabled = !editable;
     el("schedule-tz-note").textContent = `(in your timezone: ${localZone})`;
   }
@@ -1033,12 +1035,15 @@
       showMessage(buildError);
       return;
     }
+    // The time input is in the viewer's current zone; store it (and the days) in
+    // UTC so any viewer can convert back to their own zone. When the time
+    // crosses midnight on conversion, shift the days by the same delta so the
+    // stored UTC day/time pair stays consistent.
+    const scheduleConv = convertWallTimeFull(el("schedule-time").value, localTimezone(), "UTC");
     const payload = {
       name,
-      schedule_days: collectScheduleDays(),
-      // The time input is in the viewer's current zone; store it in UTC so any
-      // viewer can convert it back to their own zone.
-      schedule_time: convertWallTime(el("schedule-time").value, localTimezone(), "UTC"),
+      schedule_days: shiftDayKeys(collectScheduleDays(), scheduleConv.dayDelta),
+      schedule_time: scheduleConv.time,
       encounters_enabled: encountersEnabled(),
       post_footer: el("post-footer-input") ? el("post-footer-input").value : "",
       dm_footer: el("dm-footer-input") ? el("dm-footer-input").value : "",

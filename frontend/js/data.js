@@ -168,15 +168,21 @@ function tzOffsetMinutes(timeZone, date) {
   }
 }
 
-// convertWallTime(hhmm, fromZone, toZone): convert a recurring "HH:MM" wall
-// time from one IANA zone to another, anchored on today's date for DST.
-// Returns "HH:MM" (24h). Empty/invalid input or matching zones pass through.
+// convertWallTimeFull(hhmm, fromZone, toZone): convert a recurring "HH:MM" wall
+// time from one IANA zone to another, anchored on today's date for DST. Returns
+// { time: "HH:MM", dayDelta } where dayDelta is the number of days (-1, 0, +1)
+// the calendar date shifts during the conversion. A recurring schedule carries
+// its weekday and time together, so when the time crosses midnight the weekday
+// must shift by dayDelta too (see shiftDayKeys). Empty/invalid input or matching
+// zones pass through with dayDelta 0.
 // Note: recurring times have no real date, so conversions near a DST boundary
 // can be off by an hour — acceptable for a weekly schedule display.
-function convertWallTime(hhmm, fromZone, toZone) {
-  if (!hhmm || !fromZone || !toZone || fromZone === toZone) return hhmm || "";
+function convertWallTimeFull(hhmm, fromZone, toZone) {
+  if (!hhmm || !fromZone || !toZone || fromZone === toZone) {
+    return { time: hhmm || "", dayDelta: 0 };
+  }
   const m = /^(\d{1,2}):(\d{2})$/.exec(hhmm);
-  if (!m) return hhmm;
+  if (!m) return { time: hhmm, dayDelta: 0 };
   const hour = Number(m[1]);
   const minute = Number(m[2]);
   try {
@@ -193,20 +199,47 @@ function convertWallTime(hhmm, fromZone, toZone) {
     // Find the UTC instant whose wall time in fromZone is the given HH:MM.
     const guess = Date.UTC(Number(dp.year), Number(dp.month) - 1, Number(dp.day), hour, minute, 0);
     const instant = new Date(guess - tzOffsetMinutes(fromZone, new Date(guess)) * 60000);
-    // Read that instant's wall time in the target zone.
+    // Read that instant's wall date+time in the target zone.
     const op = {};
     for (const part of new Intl.DateTimeFormat("en-US", {
       timeZone: toZone,
       hourCycle: "h23",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
       hour: "2-digit",
       minute: "2-digit",
     }).formatToParts(instant)) {
       op[part.type] = part.value;
     }
-    return `${op.hour}:${op.minute}`;
+    const srcDate = Date.UTC(Number(dp.year), Number(dp.month) - 1, Number(dp.day));
+    const dstDate = Date.UTC(Number(op.year), Number(op.month) - 1, Number(op.day));
+    const dayDelta = Math.round((dstDate - srcDate) / 86400000);
+    return { time: `${op.hour}:${op.minute}`, dayDelta };
   } catch {
-    return hhmm;
+    return { time: hhmm, dayDelta: 0 };
   }
+}
+
+// convertWallTime(hhmm, fromZone, toZone): the "HH:MM" half of
+// convertWallTimeFull, kept for callers that only need the time.
+function convertWallTime(hhmm, fromZone, toZone) {
+  return convertWallTimeFull(hhmm, fromZone, toZone).time;
+}
+
+// Weekday keys in cyclic order, matching the backend day keys (see DAYS).
+const WEEKDAY_KEYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+
+// shiftDayKeys(days, delta): shift each weekday key by delta days (wrapping
+// across the week). Used to keep a recurring schedule's days aligned with its
+// time when the time conversion crosses midnight (see convertWallTimeFull).
+function shiftDayKeys(days, delta) {
+  if (!delta) return (days || []).slice();
+  return (days || []).map((d) => {
+    const i = WEEKDAY_KEYS.indexOf(d);
+    if (i < 0) return d;
+    return WEEKDAY_KEYS[((i + delta) % 7 + 7) % 7];
+  });
 }
 
 // shortZoneName(timeZone): a compact zone label (e.g. "EST", "GMT+2") for the
@@ -228,10 +261,13 @@ function shortZoneName(timeZone) {
 // timezone, e.g. "Mon, Wed · 17:00 PST". The stored `time` is in UTC and is
 // converted to the viewer's zone for display.
 function formatSchedule(days, time) {
-  const labels = (days || []).map((d) => labelFor(DAYS, d));
-  const dayText = labels.length ? labels.join(", ") : "";
   const localZone = localTimezone();
-  const localTime = time ? convertWallTime(time, "UTC", localZone) : "";
+  // Stored days+time are UTC; shift the days alongside the time so a run that
+  // crosses midnight in the viewer's zone lands on the right weekday.
+  const conv = convertWallTimeFull(time, "UTC", localZone);
+  const labels = shiftDayKeys(days, conv.dayDelta).map((d) => labelFor(DAYS, d));
+  const dayText = labels.length ? labels.join(", ") : "";
+  const localTime = time ? conv.time : "";
   let core = "";
   if (dayText && localTime) core = `${dayText} · ${localTime}`;
   else if (dayText) core = dayText;
