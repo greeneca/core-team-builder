@@ -1535,9 +1535,11 @@ var penExtraLabels = map[string]string{
 }
 
 var scribedBuffLabels = map[string]string{
+	"major_cowardice":           "Major Cowardice",
 	"minor_berserk":             "Minor Berserk",
 	"minor_breach":              "Minor Breach",
 	"minor_courage":             "Minor Courage",
+	"minor_cowardice":           "Minor Cowardice",
 	"minor_force":               "Minor Force",
 	"minor_heroism":             "Minor Heroism",
 	"minor_intellect_endurance": "Minor Intellect and Endurance",
@@ -1641,14 +1643,16 @@ var PenExtraSources = []PenExtraSource{
 }
 
 var Buffs = []Buff{
-	{Value: "major_berserk", Label: "Major Berserk", SelfBuff: true, Detect: DetectMap{Skills: []string{"summon_storm_atronach", "summon_charged_atronach", "greater_storm_atronach"}, Masteries: []string{"lead_from_the_front"}}},
+	{Value: "major_berserk", Label: "Major Berserk", SelfBuff: false, Detect: DetectMap{Skills: []string{"summon_storm_atronach", "summon_charged_atronach", "greater_storm_atronach"}, Masteries: []string{"lead_from_the_front"}}},
 	{Value: "minor_berserk", Label: "Minor Berserk", SelfBuff: true, Detect: DetectMap{Gear: []string{"kinras_wrath"}, Skills: []string{"combat_prayer"}}},
 	{Value: "major_brutality_sorcery", Label: "Major Brutality and Sorcery", SelfBuff: true, Detect: DetectMap{Skills: []string{"igneous_weapons", "molten_armaments", "molten_weapons"}}},
-	{Value: "minor_brutality_sorcery", Label: "Minor Brutality", SelfBuff: true, Detect: DetectMap{SkillLines: []string{"draconic_power"}, Classes: []string{"dragonknight"}}},
+	{Value: "minor_brutality_sorcery", Label: "Minor Brutality", SelfBuff: false, Detect: DetectMap{SkillLines: []string{"draconic_power"}, Classes: []string{"dragonknight"}}},
 	{Value: "major_courage", Label: "Major Courage", SelfBuff: false, Detect: DetectMap{Gear: []string{"perfected_olorime", "vestment_of_olorime", "spell_power_cure"}, Skills: []string{"ferocious_roar"}}},
 	{Value: "minor_courage", Label: "Minor Courage", SelfBuff: false, Detect: DetectMap{Gear: []string{"claw_of_yolnahkriin", "perfected_claw_of_yolnahkriin", "magma_incarnate", "pangrit_denmother", "phoenix_moth_theurge", "crusader", "fledglings_nest"}, Skills: []string{"arcanists_domain", "reconstructive_domain", "zenas_empowering_disc", "blood_of_the_elder_dragon", "pack_leader"}}},
+	{Value: "major_cowardice", Label: "Major Cowardice", SelfBuff: false, Detect: DetectMap{Gear: []string{"nix_hounds_howl", "gardener_of_seasons", "vykosa"}, Skills: []string{"chains_of_dominance", "chains_of_flame", "agony_totem", "bone_totem", "remote_totem", "aspect_of_terror", "manifestation_of_terror", "mass_hysteria", "deafening_roar"}}},
+	{Value: "minor_cowardice", Label: "Minor Cowardice", SelfBuff: false, Detect: DetectMap{Gear: []string{"healing_mage"}, Skills: []string{"power_extraction", "corrupting_pollen"}, Masteries: []string{"erudites_rigor"}}},
 	{Value: "minor_evasion", Label: "Minor Evasion", SelfBuff: false, Detect: DetectMap{Gear: []string{"abyssal_brace"}, SkillLines: []string{"soldier_of_apocrypha"}, Classes: []string{"arcanist"}}},
-	{Value: "minor_force", Label: "Minor Force", SelfBuff: false, Detect: DetectMap{Gear: []string{"grave_inevitability", "phoenix_moth_theurge"}, Skills: []string{"roar", "ferocious_roar", "deafening_roar"}}},
+	{Value: "minor_force", Label: "Minor Force", SelfBuff: true, Detect: DetectMap{Gear: []string{"grave_inevitability", "phoenix_moth_theurge"}, Skills: []string{"roar", "ferocious_roar", "deafening_roar"}}},
 	{Value: "minor_fei", Label: "Minor Fortitude, Endurance, Intellect", SelfBuff: false, Detect: DetectMap{Skills: []string{"arcanists_domain", "reconstructive_domain", "zenas_empowering_disc", "radiant_aura", "restoring_aura"}}},
 	{Value: "major_heroism", Label: "Major Heroism", SelfBuff: false, Detect: DetectMap{Gear: []string{"drakes_rush", "transformative_hope", "perfected_transformative_hope", "heroic_unity"}, Masteries: []string{"bountiful_harvest"}}},
 	{Value: "minor_heroism", Label: "Minor Heroism", SelfBuff: false, Detect: DetectMap{Gear: []string{"reawakened_hierophant"}, Skills: []string{"fire_keeper", "hearth_and_home", "hearthfire"}}},
@@ -1657,9 +1661,10 @@ var Buffs = []Buff{
 	{Value: "minor_protection", Label: "Minor Protection", SelfBuff: false, Detect: DetectMap{Skills: []string{"protect_the_brood", "circle_of_protection", "ring_of_preservation", "turn_evil", "bone_totem", "agony_totem", "remote_totem"}}},
 	{Value: "major_resolve", Label: "Major Resolve", SelfBuff: true, Detect: DetectMap{Gear: []string{"mighty_glacier"}, Skills: []string{"frost_cloak", "expansive_frost_cloak", "ice_fortress", "mend_spirit"}}},
 	{Value: "minor_resolve", Label: "Minor Resolve", SelfBuff: false, Detect: DetectMap{Gear: []string{"magma_incarnate"}, Skills: []string{"combat_prayer", "runic_defense", "runeguard_of_freedom", "runeguard_of_still_waters"}}},
-	{Value: "minor_savagery_prophecy", Label: "Minor Savagery", SelfBuff: true, Detect: DetectMap{SkillLines: []string{"assassination"}, Classes: []string{"nightblade"}}},
+	{Value: "major_savagery_prophecy", Label: "Major Savagery and Prophecy", SelfBuff: true, Detect: DetectMap{}},
+	{Value: "minor_savagery_prophecy", Label: "Minor Savagery", SelfBuff: false, Detect: DetectMap{SkillLines: []string{"assassination"}, Classes: []string{"nightblade"}}},
 	{Value: "major_slayer", Label: "Major Slayer", SelfBuff: false, Detect: DetectMap{Gear: []string{"master_architect", "roaring_opportunist", "perfected_roaring_opportunist", "war_machine"}}},
-	{Value: "minor_toughness", Label: "Minor Toughness", SelfBuff: true, Detect: DetectMap{SkillLines: []string{"green_balance"}, Classes: []string{"warden"}}},
+	{Value: "minor_toughness", Label: "Minor Toughness", SelfBuff: false, Detect: DetectMap{SkillLines: []string{"green_balance"}, Classes: []string{"warden"}}},
 	{Value: "major_vitality", Label: "Major Vitality", SelfBuff: false, Detect: DetectMap{Skills: []string{"soul_siphon", "bone_surge"}, Masteries: []string{"erudites_rigor"}}},
 	{Value: "major_vulnerability", Label: "Major Vulnerability", SelfBuff: false, Detect: DetectMap{Gear: []string{"umbral_edge", "stonehulk_domination", "turning_tide", "archdruid_devyric"}, Skills: []string{"glacial_colossus", "frozen_colossus", "pestilent_colossus"}}},
 	{Value: "minor_vulnerability", Label: "Minor Vulnerability", SelfBuff: false, Detect: DetectMap{Gear: []string{"scavenging_demise", "infallible_mage", "wise_mage", "nobles_conquest"}, Skills: []string{"swarm", "fetcher_infection", "growing_swarm", "boneyard", "avid_boneyard", "unnerving_boneyard", "ambush", "lotus_fan", "teleport_strike", "inner_beast", "fossilize", "rune_of_eldritch_horror", "rune_of_the_colorless_pool", "rune_of_uncanny_adoration"}}},

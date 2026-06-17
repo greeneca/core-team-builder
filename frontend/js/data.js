@@ -704,6 +704,8 @@ const SCRIBED_BUFFS = [
   { value: "minor_intellect_endurance", label: "Minor Intellect and Endurance", desc: "Increases group Magicka and Stamina Recovery by 15%." },
   { value: "minor_breach", label: "Minor Breach", desc: "Reduces the enemy's Physical and Spell Resistance by 2974." },
   { value: "minor_vulnerability", label: "Minor Vulnerability", desc: "Increases the enemy's damage taken by 5%." },
+  { value: "major_cowardice", label: "Major Cowardice", desc: "Reduces the enemy's Weapon and Spell Damage by 430." },
+  { value: "minor_cowardice", label: "Minor Cowardice", desc: "Reduces the enemy's Weapon and Spell Damage by 215." },
   { value: "minor_force", label: "Minor Force", desc: "Increases group Critical Damage by 10%." },
   { value: "off_balance", label: "Off Balance", desc: "Sets the enemy Off Balance, increasing damage they take from Heavy Attacks." },
 ];
@@ -809,7 +811,7 @@ const BUFFS = [
   // cover any of these (see SCRIBED_BUFFS / computeBuffCoverage).
 
   // Berserk
-  { value: "major_berserk", label: "Major Berserk", desc: "Increases damage done by 10%.", selfBuff: true,
+  { value: "major_berserk", label: "Major Berserk", desc: "Increases damage done by 10%.",
     sources: { masteries: ["lead_from_the_front"], skills: ["summon_storm_atronach", "summon_charged_atronach", "greater_storm_atronach"] } },
   { value: "minor_berserk", label: "Minor Berserk", desc: "Increases group damage done by 5%.", selfBuff: true,
     sources: { skills: ["combat_prayer"], gear: ["kinras_wrath"] } },
@@ -819,13 +821,22 @@ const BUFFS = [
   { value: "major_brutality_sorcery", label: "Major Brutality and Sorcery", desc: "Increases group Weapon and Spell Damage.", selfBuff: true,
     sources: { skills: ["igneous_weapons", "molten_armaments", "molten_weapons"] } },
   // Minor Brutality shared to the group by the Dragonknight Draconic Power passive.
-  { value: "minor_brutality_sorcery", label: "Minor Brutality", desc: "Increases group Weapon Damage.", selfBuff: true,
+  { value: "minor_brutality_sorcery", label: "Minor Brutality", desc: "Increases group Weapon Damage.",
     sources: { skillLines: ["draconic_power"], classes: ["dragonknight"] } },
   // Courage
   { value: "major_courage", label: "Major Courage", desc: "Increases Weapon and Spell Damage.",
     sources: { gear: ["perfected_olorime", "vestment_of_olorime", "spell_power_cure"], skills: ["ferocious_roar"] } },
   { value: "minor_courage", label: "Minor Courage", desc: "Increases Weapon and Spell Damage.",
     sources: { gear: ["claw_of_yolnahkriin", "perfected_claw_of_yolnahkriin", "magma_incarnate", "pangrit_denmother", "phoenix_moth_theurge", "crusader", "fledglings_nest"], skills: ["arcanists_domain", "reconstructive_domain", "zenas_empowering_disc", "blood_of_the_elder_dragon", "pack_leader"] } },
+  // Cowardice (enemy debuff: −Weapon/Spell Damage, so the whole group benefits).
+  // Tracked from reliable, non-random applicators — Nightblade fears, Necromancer
+  // bone totems, the Dragonknight chains, the Werewolf roar, and dedicated sets.
+  // Random multi-debuff sets (Kynmarcher's Cruelty, Saint and the Seducer) are
+  // intentionally omitted.
+  { value: "major_cowardice", label: "Major Cowardice", desc: "Reduces the enemy's Weapon and Spell Damage by 430.",
+    sources: { gear: ["nix_hounds_howl", "gardener_of_seasons", "vykosa"], skills: ["chains_of_dominance", "chains_of_flame", "agony_totem", "bone_totem", "remote_totem", "aspect_of_terror", "manifestation_of_terror", "mass_hysteria", "deafening_roar"] } },
+  { value: "minor_cowardice", label: "Minor Cowardice", desc: "Reduces the enemy's Weapon and Spell Damage by 215.",
+    sources: { gear: ["healing_mage"], skills: ["power_extraction", "corrupting_pollen"], masteries: ["erudites_rigor"] } },
   // Evasion: the Arcanist Soldier of Apocrypha passive shares it with the group,
   // plus the Abyssal Brace set.
   { value: "minor_evasion", label: "Minor Evasion", desc: "Reduces group damage taken from area attacks.",
@@ -833,7 +844,7 @@ const BUFFS = [
   // Force. Group-wide Minor Force: Grave Inevitability's aura and Phoenix Moth's
   // heals share it, and the Werewolf Feeding Frenzy synergy (Roar morphs) grants
   // it to allies who activate it.
-  { value: "minor_force", label: "Minor Force", desc: "Increases group Critical Damage by 10%.",
+  { value: "minor_force", label: "Minor Force", desc: "Increases group Critical Damage by 10%.", selfBuff: true,
     sources: { gear: ["grave_inevitability", "phoenix_moth_theurge"], skills: ["roar", "ferocious_roar", "deafening_roar"] } },
   // Fortitude, Endurance, Intellect: shared to allies by the Arcanist domains and
   // the Templar Radiant Aura.
@@ -867,14 +878,22 @@ const BUFFS = [
     sources: { skills: ["frost_cloak", "expansive_frost_cloak", "ice_fortress", "mend_spirit"], gear: ["mighty_glacier"] } },
   { value: "minor_resolve", label: "Minor Resolve", desc: "Increases group Physical and Spell Resistance.",
     sources: { gear: ["magma_incarnate"], skills: ["combat_prayer", "runic_defense", "runeguard_of_freedom", "runeguard_of_still_waters"] } },
-  // Savagery: shared to the group by the Nightblade Assassination passive.
-  { value: "minor_savagery_prophecy", label: "Minor Savagery", desc: "Increases group Weapon Critical.", selfBuff: true,
+  // Savagery & Prophecy
+  // Major Savagery and Prophecy has no group-wide provider — every source
+  // (potions, slotted skills like Camouflaged Hunter / Grim Focus, Toothrow /
+  // Treasure Hunter, Oakensoul) only buffs the wearer. It is therefore tracked
+  // as a self buff with no group sources: never group-covered, always listed in
+  // the Discord "Self Buffs" reminder so each player brings it themselves.
+  { value: "major_savagery_prophecy", label: "Major Savagery and Prophecy", desc: "Increases Weapon and Spell Critical.", selfBuff: true,
+    sources: {} },
+  // Minor Savagery is shared to the group by the Nightblade Assassination passive.
+  { value: "minor_savagery_prophecy", label: "Minor Savagery", desc: "Increases group Weapon Critical.",
     sources: { skillLines: ["assassination"], classes: ["nightblade"] } },
   // Slayer
   { value: "major_slayer", label: "Major Slayer", desc: "Increases damage to Dungeon/Trial monsters.",
     sources: { gear: ["master_architect", "roaring_opportunist", "perfected_roaring_opportunist", "war_machine"] } },
   // Toughness: shared to the group by the Warden Green Balance passive.
-  { value: "minor_toughness", label: "Minor Toughness", desc: "Increases group Max Health by 10%.", selfBuff: true,
+  { value: "minor_toughness", label: "Minor Toughness", desc: "Increases group Max Health by 10%.",
     sources: { skillLines: ["green_balance"], classes: ["warden"] } },
   // Vitality (+12% group healing received / shield strength): Arcanist Erudite's
   // Rigor mastery and the Nightblade Soul Siphon ultimate.
