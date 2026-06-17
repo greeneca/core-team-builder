@@ -1030,6 +1030,35 @@ function buffKnownSources(buff) {
   return parts;
 }
 
+// Plural category headers used to group a buff's known sources in the details
+// tooltip (one source per line under a shared header).
+const BUFF_CATEGORY_HEADERS = {
+  gear: "Gear",
+  skills: "Skills",
+  potions: "Potions",
+  masteries: "Masteries",
+  classes: "Classes",
+  skillLines: "Skill lines",
+  scribed: "Scribed",
+};
+
+// buffKnownSourcesGrouped(buff): the buff's possible providers grouped by source
+// category as [{ header, items: [label, ...] }], in BUFF_CATEGORY_HEADERS order.
+// Used to render an easy-to-scan "Known sources" tooltip block.
+function buffKnownSourcesGrouped(buff) {
+  const sources = (buff && buff.sources) || {};
+  const groups = [];
+  for (const category of Object.keys(BUFF_CATEGORY_HEADERS)) {
+    const keys = sources[category];
+    if (!keys || !keys.length) continue;
+    groups.push({
+      header: BUFF_CATEGORY_HEADERS[category],
+      items: keys.map((key) => buffSourceLabel(category, key)),
+    });
+  }
+  return groups;
+}
+
 // playerBuffContributions(player, loadout): the set of values one player
 // contributes per category. Build sources honor the subclassing rule — a
 // subclassed player contributes skill lines; a non-subclassed player
@@ -1699,4 +1728,64 @@ function computePenCoverage(players, loadoutBySlot) {
     groupSources,
     players: playerResults,
   };
+}
+
+// Known-source listings for the crit/pen details modals. Each returns the full
+// catalogue of *potential* sources (with their values) regardless of whether the
+// current roster runs them — used to populate the "all potential sources"
+// tooltips on the modal's Group and Per-player headers, so they stay in sync
+// with the source tables above.
+function fmtCritPct(pct) {
+  return `${pct >= 0 ? "+" : ""}${pct}%`;
+}
+
+// All group-wide Critical Damage sources (team buffs + boss debuffs).
+function critGroupKnownSources() {
+  return CRIT_GROUP_SOURCES.map((s) =>
+    s.perElement
+      ? `${s.label} +${ELEMENTAL_CATALYST_PER_ELEMENT}% per element (max +${
+          ELEMENTAL_CATALYST_PER_ELEMENT * 3
+        }%)`
+      : `${s.label} ${fmtCritPct(s.pct)}`
+  );
+}
+
+// All per-player (self) Critical Damage sources, including the per-piece /
+// per-skill scaling sources handled specially in playerSelfCrit.
+function critSelfKnownSources() {
+  const parts = CRIT_SELF_SOURCES.map((s) => `${s.label} ${fmtCritPct(s.pct)}`);
+  CRIT_DMG_SOURCES.forEach((s) => parts.push(`${s.label} ${fmtCritPct(s.critPct)}`));
+  parts.push(`Dexterity, Medium Armor +${CRIT_MEDIUM_PER_PIECE}% per piece`);
+  parts.push(
+    `Advanced Species, Warden +${ADVANCED_SPECIES_PER_SKILL}% per slotted Animal Companions ability`
+  );
+  return parts;
+}
+
+// All group-wide Penetration sources (target debuffs that help the whole team).
+function penGroupKnownSources() {
+  const parts = PEN_GROUP_SOURCES.map((s) =>
+    s.perWeaponDamage
+      ? `${s.label} (scales with Weapon/Spell Damage)`
+      : `${s.label} +${s.pen.toLocaleString()}`
+  );
+  PEN_EXTRA_SOURCES.filter((s) => s.bucket === "group").forEach((s) =>
+    parts.push(`${s.label} +${s.pen.toLocaleString()}`)
+  );
+  return parts;
+}
+
+// All per-player (self) Penetration sources, including the per-piece light armor
+// and arena-weapon bonuses handled specially in playerSelfPen.
+function penSelfKnownSources() {
+  const parts = PEN_SELF_SOURCES.map((s) =>
+    s.scaled
+      ? `${s.label} +${s.scaled.per.toLocaleString()} per ${s.scaled.unit}`
+      : `${s.label} +${s.pen.toLocaleString()}`
+  );
+  parts.push(`Concentration, Light Armor +${PEN_LIGHT_PER_PIECE.toLocaleString()} per piece`);
+  PEN_EXTRA_SOURCES.filter((s) => s.bucket === "self").forEach((s) =>
+    parts.push(`${s.label} +${s.pen.toLocaleString()}`)
+  );
+  return parts;
 }

@@ -1774,11 +1774,11 @@
               <div class="crit-results">
                 <div class="crit-field crit-result">
                   <label>Crit Damage</label>
-                  <span class="crit-label" data-crit-label>—</span>
+                  <span class="crit-label crit-label--link" data-crit-label role="button" tabindex="0" aria-label="Open crit damage breakdown for this player">—</span>
                 </div>
                 <div class="crit-field crit-result">
                   <label>Penetration</label>
-                  <span class="crit-label" data-pen-label>—</span>
+                  <span class="crit-label crit-label--link" data-pen-label role="button" tabindex="0" aria-label="Open penetration breakdown for this player">—</span>
                 </div>
               </div>
             </div>
@@ -2652,13 +2652,17 @@
         providersHtml = `<div class="buff-providers text-muted">Not covered</div>`;
       }
 
-      const known = buffKnownSources(item.buff);
-      const tipText = [
-        item.buff.desc || "",
-        known.length ? `Known sources: ${known.join("; ")}` : "",
-      ]
-        .filter(Boolean)
-        .join("\n");
+      // Group known sources under a category header, one source per line, so the
+      // tooltip is easy to scan. (`white-space: pre-line` collapses runs of
+      // spaces, so use a leading bullet rather than indentation.)
+      const groups = buffKnownSourcesGrouped(item.buff);
+      const knownBlock = groups.length
+        ? "Known sources:\n" +
+          groups
+            .map((g) => `${g.header}:\n${g.items.map((s) => `• ${s}`).join("\n")}`)
+            .join("\n")
+        : "";
+      const tipText = [item.buff.desc || "", knownBlock].filter(Boolean).join("\n\n");
       const tip = tipText ? ` data-tip="${escapeAttr(tipText)}"` : "";
       row.innerHTML = `
         <div class="buff-row-head">
@@ -2697,6 +2701,9 @@
   // autosaves. The card shows group/target/solo-required; each roster slot gets a
   // crit-damage label + met/unmet indicator against the cap.
   let lastCritCoverage = null;
+  // When set to a slot number, the crit details modal shows only that player
+  // (opened by clicking a roster slot's crit number). null = all players.
+  let critModalSlot = null;
 
   function refreshCritCoverage() {
     const groupEl = el("crit-group");
@@ -2761,8 +2768,17 @@
   function renderCritModal() {
     const cov =
       lastCritCoverage || computeCritCoverage(collectPlayers(), currentLoadoutBySlot());
+    const players =
+      critModalSlot != null
+        ? cov.players.filter((p) => p.slot === critModalSlot)
+        : cov.players;
+    el("crit-modal-title").textContent =
+      critModalSlot != null ? `Crit damage — P${critModalSlot}` : "Crit damage";
     el("crit-modal-sub").textContent =
-      `Cap ${cov.cap}% · Group ${cov.group}% · Each player needs ${cov.soloRequired}% of their own` +
+      `Cap ${cov.cap}% · Group ${cov.group}%` +
+      (critModalSlot != null
+        ? ""
+        : ` · Each player needs ${cov.soloRequired}% of their own`) +
       (currentEncounter ? ` · ${currentEncounter.name}` : "");
 
     const provs = (sources) =>
@@ -2777,15 +2793,21 @@
             .join("")
         : `<span class="text-muted">none detected</span>`;
 
+    const groupTip = `All potential group sources:\n${critGroupKnownSources().join("\n")}`;
     el("crit-modal-sources").innerHTML = `
       <div class="buff-row is-met">
-        <div class="buff-row-head"><span class="buff-name">Group provided (${cov.group}%)</span></div>
+        <div class="buff-row-head"><span class="buff-name">Group provided (${cov.group}%)</span><span class="info-indicator" tabindex="0" role="img" aria-label="All potential group crit damage sources" data-tip="${escapeAttr(groupTip)}">i</span></div>
         <div class="buff-providers"><span class="buff-provider">Base +${cov.base}%</span>${provs(cov.groupSources)}</div>
       </div>`;
 
+    const selfInfo = el("crit-modal-self-info");
+    if (selfInfo) {
+      selfInfo.dataset.tip = `All potential per-player sources:\n${critSelfKnownSources().join("\n")}`;
+    }
+
     const list = el("crit-modal-list");
     list.innerHTML = "";
-    cov.players.forEach((p) => {
+    players.forEach((p) => {
       const row = document.createElement("div");
       row.className = `buff-row ${p.met ? "is-met" : "is-unmet"}`;
       const selfParts = p.sources.length
@@ -2804,7 +2826,8 @@
     });
   }
 
-  function openCritModal() {
+  function openCritModal(slot = null) {
+    critModalSlot = typeof slot === "number" ? slot : null;
     renderCritModal();
     el("crit-modal").classList.remove("is-hidden");
   }
@@ -2813,7 +2836,7 @@
     el("crit-modal").classList.add("is-hidden");
   }
 
-  el("crit-details-btn").addEventListener("click", openCritModal);
+  el("crit-details-btn").addEventListener("click", () => openCritModal());
   el("crit-modal-close").addEventListener("click", closeCritModal);
   el("crit-modal").addEventListener("click", (e) => {
     if (e.target === el("crit-modal")) closeCritModal();
@@ -2829,6 +2852,9 @@
   // group total + per-player self requirement; each roster slot gets a pen label
   // with a met/unmet indicator against the target resistance.
   let lastPenCoverage = null;
+  // When set to a slot number, the pen details modal shows only that player
+  // (opened by clicking a roster slot's penetration number). null = all players.
+  let penModalSlot = null;
 
   // Whether a roster slot has the Arcanist Herald of the Tome skill line: a
   // subclassed player with it slotted, or a pure Arcanist. Mirrors the
@@ -2913,8 +2939,17 @@
   function renderPenModal() {
     const cov =
       lastPenCoverage || computePenCoverage(collectPlayers(), currentLoadoutBySlot());
+    const players =
+      penModalSlot != null
+        ? cov.players.filter((p) => p.slot === penModalSlot)
+        : cov.players;
+    el("pen-modal-title").textContent =
+      penModalSlot != null ? `Penetration — P${penModalSlot}` : "Penetration";
     el("pen-modal-sub").textContent =
-      `Target ${cov.target.toLocaleString()} · Group ${cov.group.toLocaleString()} · Each player needs ${cov.selfRequired.toLocaleString()} of their own` +
+      `Target ${cov.target.toLocaleString()} · Group ${cov.group.toLocaleString()}` +
+      (penModalSlot != null
+        ? ""
+        : ` · Each player needs ${cov.selfRequired.toLocaleString()} of their own`) +
       (currentEncounter ? ` · ${currentEncounter.name}` : "");
 
     const provs = (sources) =>
@@ -2929,15 +2964,21 @@
             .join("")
         : `<span class="text-muted">none detected</span>`;
 
+    const groupTip = `All potential group sources:\n${penGroupKnownSources().join("\n")}`;
     el("pen-modal-sources").innerHTML = `
       <div class="buff-row is-met">
-        <div class="buff-row-head"><span class="buff-name">Group provided (${cov.group.toLocaleString()})</span></div>
+        <div class="buff-row-head"><span class="buff-name">Group provided (${cov.group.toLocaleString()})</span><span class="info-indicator" tabindex="0" role="img" aria-label="All potential group penetration sources" data-tip="${escapeAttr(groupTip)}">i</span></div>
         <div class="buff-providers">${provs(cov.groupSources)}</div>
       </div>`;
 
+    const selfInfo = el("pen-modal-self-info");
+    if (selfInfo) {
+      selfInfo.dataset.tip = `All potential per-player sources:\n${penSelfKnownSources().join("\n")}`;
+    }
+
     const list = el("pen-modal-list");
     list.innerHTML = "";
-    cov.players.forEach((p) => {
+    players.forEach((p) => {
       const row = document.createElement("div");
       row.className = `buff-row ${p.met ? "is-met" : "is-unmet"}`;
       const selfParts = p.sources.length
@@ -2959,7 +3000,8 @@
     });
   }
 
-  function openPenModal() {
+  function openPenModal(slot = null) {
+    penModalSlot = typeof slot === "number" ? slot : null;
     renderPenModal();
     el("pen-modal").classList.remove("is-hidden");
   }
@@ -2968,7 +3010,33 @@
     el("pen-modal").classList.add("is-hidden");
   }
 
-  el("pen-details-btn").addEventListener("click", openPenModal);
+  el("pen-details-btn").addEventListener("click", () => openPenModal());
+
+  // Per-player crit/pen numbers on each roster slot are links into the matching
+  // details modal, filtered to just that player. Delegated on the roster so it
+  // survives slot rebuilds; supports click and keyboard (Enter/Space).
+  function rosterStatTarget(node) {
+    const label = node.closest("[data-crit-label], [data-pen-label]");
+    if (!label) return null;
+    const slotEl = label.closest(".player-slot");
+    const slot = slotEl ? Number(slotEl.dataset.slot) : NaN;
+    if (!Number.isFinite(slot)) return null;
+    return { kind: label.hasAttribute("data-crit-label") ? "crit" : "pen", slot };
+  }
+  el("roster").addEventListener("click", (e) => {
+    const t = rosterStatTarget(e.target);
+    if (!t) return;
+    if (t.kind === "crit") openCritModal(t.slot);
+    else openPenModal(t.slot);
+  });
+  el("roster").addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " " && e.key !== "Spacebar") return;
+    const t = rosterStatTarget(e.target);
+    if (!t) return;
+    e.preventDefault();
+    if (t.kind === "crit") openCritModal(t.slot);
+    else openPenModal(t.slot);
+  });
   el("pen-modal-close").addEventListener("click", closePenModal);
   el("pen-modal").addEventListener("click", (e) => {
     if (e.target === el("pen-modal")) closePenModal();

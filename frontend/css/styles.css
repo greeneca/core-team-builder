@@ -1370,6 +1370,13 @@ a.brand--home:hover {
 .crit-label.is-met::before { content: "\2713 "; }
 .crit-label.is-unmet { color: var(--color-danger); }
 .crit-label.is-unmet::before { content: "\2717 "; }
+.crit-label--link { cursor: pointer; }
+.crit-label--link:hover { text-decoration: underline; }
+.crit-label--link:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: var(--radius);
+}
 
 /* Floating jump nav (desktop only): fixed to the left edge, lists the Top /
    Group Buffs anchors plus every player slot. Hidden on narrow viewports where
