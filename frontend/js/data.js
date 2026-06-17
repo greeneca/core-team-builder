@@ -209,19 +209,6 @@ function convertWallTime(hhmm, fromZone, toZone) {
   }
 }
 
-// tzLabel(timeZone): the IANA name plus its current UTC offset, e.g.
-// "America/New_York (UTC-5)" or "Asia/Kolkata (UTC+5:30)". Used to label the
-// team-timezone picker options and chips so the offset is clear at a glance.
-function tzLabel(timeZone) {
-  const offset = tzOffsetMinutes(timeZone, new Date());
-  const sign = offset < 0 ? "-" : "+";
-  const abs = Math.abs(offset);
-  const hours = Math.floor(abs / 60);
-  const mins = abs % 60;
-  const offsetText = mins ? `${hours}:${String(mins).padStart(2, "0")}` : `${hours}`;
-  return `${timeZone} (UTC${sign}${offsetText})`;
-}
-
 // shortZoneName(timeZone): a compact zone label (e.g. "EST", "GMT+2") for the
 // zone right now, falling back to the IANA name.
 function shortZoneName(timeZone) {

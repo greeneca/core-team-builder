@@ -26,12 +26,12 @@ const (
 	maxTeamsPerOwner = 100
 	// maxEncountersPerTeam caps how many encounters a team may hold.
 	maxEncountersPerTeam = 10
-	// maxTeamTimezones caps the team's extra display-timezone list.
-	maxTeamTimezones = 20
 	// maxPostFooterLen caps the free-form Discord bot post footer (in runes).
 	maxPostFooterLen = 2000
 	// maxDMFooterLen caps the free-form Discord bot DM footer (in runes).
 	maxDMFooterLen = 2000
+	// maxSignupPostLen caps the free-form Discord bot signup post body (in runes).
+	maxSignupPostLen = 2000
 	// maxGroupingsPerTeam caps how many groupings a team may hold.
 	maxGroupingsPerTeam = 10
 	// maxGroupingNameLen caps a grouping's name (in runes).
@@ -46,6 +46,7 @@ type Server struct {
 	teams            *models.TeamStore
 	encounters       *models.EncounterStore
 	groupings        *models.GroupingStore
+	members          *models.MemberStore
 	settings         *models.SettingsStore
 	refreshTokens    *models.RefreshTokenStore
 	passwordResets   *models.PasswordResetStore
@@ -63,6 +64,7 @@ type Config struct {
 	Teams            *models.TeamStore
 	Encounters       *models.EncounterStore
 	Groupings        *models.GroupingStore
+	Members          *models.MemberStore
 	Settings         *models.SettingsStore
 	RefreshTokens    *models.RefreshTokenStore
 	PasswordResets   *models.PasswordResetStore
@@ -81,6 +83,7 @@ func New(c Config) *Server {
 		teams:            c.Teams,
 		encounters:       c.Encounters,
 		groupings:        c.Groupings,
+		members:          c.Members,
 		settings:         c.Settings,
 		refreshTokens:    c.RefreshTokens,
 		passwordResets:   c.PasswordResets,
@@ -133,6 +136,12 @@ func (s *Server) Routes() http.Handler {
 	mux.Handle("DELETE /api/teams/{id}", protected(s.handleDeleteTeam))
 	mux.Handle("POST /api/teams/{id}/share", protected(s.handleShareTeam))
 	mux.Handle("DELETE /api/teams/{id}/members/{userID}", protected(s.handleUnshareTeam))
+
+	// Roster member pool (the /coreteam signup recruitment pool).
+	mux.Handle("GET /api/teams/{id}/roster-members", protected(s.handleListRosterMembers))
+	mux.Handle("POST /api/teams/{id}/roster-members", protected(s.handleCreateRosterMember))
+	mux.Handle("PUT /api/teams/{id}/roster-members/{memberID}", protected(s.handleUpdateRosterMember))
+	mux.Handle("DELETE /api/teams/{id}/roster-members/{memberID}", protected(s.handleDeleteRosterMember))
 
 	// Encounters.
 	mux.Handle("GET /api/teams/{id}/encounters", protected(s.handleListEncounters))

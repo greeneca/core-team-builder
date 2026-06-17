@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Dashboard — Core Team Builder</title>
-  <link rel="stylesheet" href="css/styles.css?v=78" />
+  <link rel="stylesheet" href="css/styles.css?v=90" />
 </head>
 <body>
   <div id="message" class="toast is-hidden" role="alert" aria-live="assertive"></div>
@@ -69,6 +69,7 @@
       <div class="detail-toolbar mt-4">
         <button id="back-btn" class="btn btn--ghost" type="button">← Back to teams</button>
         <div class="form-actions detail-toolbar-actions">
+          <button id="members-btn" class="btn btn--ghost btn--sm" type="button">Members Pool</button>
           <button id="collapse-all-btn" class="btn btn--ghost btn--sm" type="button">Collapse all</button>
           <button id="expand-all-btn" class="btn btn--ghost btn--sm" type="button">Expand all</button>
         </div>
@@ -101,15 +102,28 @@
               <input id="schedule-time" class="input" type="time" />
             </div>
           </div>
-          <div class="form-group mt-6">
-            <label>Team timezones<span class="info-indicator" tabindex="0" role="img" aria-label="Team timezones: The trial time is always set and shown in your own current timezone. Add the timezones your team members are in here so the time can be displayed in each of them." data-tip="The trial time is always set and shown in your own current timezone. Add the timezones your team members are in here so the time can be displayed in each of them.">i</span></label>
-            <div id="team-tz-add"></div>
-            <div id="team-tz-list" class="chip-list mt-2"></div>
-          </div>
         </div>
 
-        <div class="discord-footers mt-6">
-          <h3 class="schedule-heading">Discord bot footers<span class="info-indicator" tabindex="0" role="img" aria-label="Discord bot footers: free-form text the Discord bot appends to its output. The post footer is added to the /coreteam post overview; the DM footer is added to the Get My Build Details direct message. Saved with the team." data-tip="Free-form text the Discord bot appends to its output. The post footer is added to the /coreteam post overview; the DM footer is added to the Get My Build Details direct message. Saved with the team.">i</span></h3>
+        <div class="team-features mt-6">
+          <h3 class="schedule-heading">Team Features</h3>
+          <label class="toggle" id="encounters-enabled-label" title="When off, the encounters section is hidden and only the first encounter is shown.">
+            <input type="checkbox" id="encounters-enabled-toggle" /> Encounters enabled
+          </label>
+        </div>
+        </div>
+      </div>
+
+      <!-- Discord bot footers: free-form text the Discord bot appends to its
+           output, kept in its own section so it can be collapsed independently. -->
+      <div class="card mt-4 collapsible section-collapsible">
+        <div class="section-head collapsible-head">
+          <div class="collapsible-head-main">
+            <button class="collapse-toggle" type="button" aria-expanded="true" aria-label="Collapse section"></button>
+            <h2 style="margin: 0;">Discord Bot Texts<span class="info-indicator" tabindex="0" role="img" aria-label="Discord Bot Texts: free-form text the Discord bot appends to its output. The post footer is added to the /coreteam post overview; the DM footer is added to the Get My Build Details direct message. Saved with the team." data-tip="Free-form text the Discord bot appends to its output. The post footer is added to the /coreteam post overview; the DM footer is added to the Get My Build Details direct message. Saved with the team.">i</span></h2>
+          </div>
+        </div>
+        <div class="collapsible-body">
+        <div class="discord-footers">
           <div class="form-group mt-4">
             <label for="post-footer-input">Post footer<span class="info-indicator" tabindex="0" role="img" aria-label="Post footer: free-form text appended to the bottom of the bot's /coreteam post overview (e.g. raid lead, voice channel, reminders). Saved with the team." data-tip="Free-form text appended to the bottom of the bot's /coreteam post overview (e.g. raid lead, voice channel, reminders). Saved with the team.">i</span></label>
             <textarea id="post-footer-input" class="input" rows="3" maxlength="2000" placeholder="Optional text appended to the bottom of the bot's /coreteam post (e.g. raid lead, voice channel, reminders)."></textarea>
@@ -118,13 +132,10 @@
             <label for="dm-footer-input">Build details DM footer<span class="info-indicator" tabindex="0" role="img" aria-label="Build details DM footer: free-form text appended to the bottom of the Get My Build Details direct message the bot sends each player. Saved with the team." data-tip="Free-form text appended to the bottom of the Get My Build Details direct message the bot sends each player. Saved with the team.">i</span></label>
             <textarea id="dm-footer-input" class="input" rows="3" maxlength="2000" placeholder="Optional text appended to the bottom of the Get My Build Details DM (e.g. reminders, links)."></textarea>
           </div>
-        </div>
-
-        <div class="team-features mt-6">
-          <h3 class="schedule-heading">Team Features</h3>
-          <label class="toggle" id="encounters-enabled-label" title="When off, the encounters section is hidden and only the first encounter is shown.">
-            <input type="checkbox" id="encounters-enabled-toggle" /> Encounters enabled
-          </label>
+          <div class="form-group mt-4">
+            <label for="signup-post-input">Signup post<span class="info-indicator" tabindex="0" role="img" aria-label="Signup post: free-form recruitment text the bot posts with /coreteam signup. Interested users press a button and the bot DMs them to gather availability, roles, and classes. Saved with the team." data-tip="Free-form recruitment text the bot posts with /coreteam signup. Interested users press a button and the bot DMs them to gather availability, roles, and classes. Saved with the team.">i</span></label>
+            <textarea id="signup-post-input" class="input" rows="3" maxlength="2000" placeholder="Optional recruitment text the bot posts with /coreteam signup (e.g. what you're looking for, expectations)."></textarea>
+          </div>
         </div>
         </div>
       </div>
@@ -389,6 +400,73 @@
       </div>
     </div>
 
+    <!-- Member pool view (the /coreteam signup recruitment pool) -->
+    <section id="members-view" class="is-hidden">
+      <div class="detail-toolbar mt-4">
+        <button id="members-back-btn" class="btn btn--ghost" type="button">← Back to team</button>
+        <div class="form-actions detail-toolbar-actions">
+          <button id="member-add-btn" class="btn btn--ghost btn--sm is-hidden" type="button">+ Add member</button>
+        </div>
+      </div>
+
+      <div class="card mt-4">
+        <h1 id="members-team-name" style="margin-top: 0;">…</h1>
+        <p class="text-muted">
+          People who signed up via the Discord bot's <code>/coreteam signup</code> post, plus
+          any added here. Availability times are shown in
+          <strong id="members-local-tz">your local timezone</strong>.
+        </p>
+
+        <!-- Add / edit member form (editors only) -->
+        <form id="member-add-form" class="card card--inset is-hidden mt-4">
+          <h3 id="member-form-title" class="schedule-heading" style="margin-top: 0;">Add member</h3>
+          <div class="member-form-grid">
+            <div class="form-group">
+              <label for="member-name">Display name</label>
+              <input class="input" id="member-name" maxlength="100" required />
+            </div>
+            <div class="form-group">
+              <label for="member-discord">Discord handle</label>
+              <input class="input" id="member-discord" maxlength="100" />
+            </div>
+            <div class="form-group">
+              <label for="member-tz">Timezone</label>
+              <select class="input" id="member-tz"></select>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Availability</label>
+            <div id="member-days" class="member-days"></div>
+          </div>
+          <div class="form-group">
+            <label>Roles &amp; classes</label>
+            <div id="member-roles" class="member-roles"></div>
+          </div>
+          <div class="form-actions">
+            <button id="member-form-submit" class="btn btn--primary" type="submit">Add member</button>
+            <button class="btn btn--ghost" type="button" id="member-add-cancel">Cancel</button>
+          </div>
+        </form>
+
+        <!-- Aggregate role coverage -->
+        <h2 class="members-subhead">Role coverage</h2>
+        <div id="members-roles-summary" class="members-roles-summary"></div>
+
+        <!-- Availability heatmap (days × hours): only slots where everyone
+             shown overlaps (intersection), not the combined union. -->
+        <h2 class="members-subhead">When everyone is available</h2>
+        <div id="members-heatmap" class="members-heatmap"></div>
+
+        <!-- Per-member detail cards -->
+        <h2 class="members-subhead">Members Pool (<span id="members-count">0</span>)</h2>
+        <div id="members-grid" class="members-grid"></div>
+        <p id="members-empty" class="text-muted is-hidden">
+          No members yet. Post <code>/coreteam signup</code> with the Discord bot to start
+          gathering availability, or add someone manually.
+        </p>
+      </div>
+    </section>
+
     <!-- Sharing view (own page) -->
     <section id="share-view" class="is-hidden">
       <button id="share-back-btn" class="btn btn--ghost" type="button">← Back to teams</button>
@@ -413,10 +491,10 @@
     </section>
   </main>
 
-  <script src="js/api.js?v=78"></script>
-  <script src="js/gear-skills.js?v=79"></script>
-  <script src="js/data.js?v=80"></script>
-  <script src="js/components.js?v=77"></script>
-  <script src="js/app.js?v=82"></script>
+  <script src="js/api.js?v=90"></script>
+  <script src="js/gear-skills.js?v=90"></script>
+  <script src="js/data.js?v=90"></script>
+  <script src="js/components.js?v=90"></script>
+  <script src="js/app.js?v=90"></script>
 </body>
 </html>

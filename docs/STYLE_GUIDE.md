@@ -71,7 +71,7 @@ Consistent conventions across the codebase. Keep this in sync with reality.
     coverage calculators. Keys mirror the backend allow-lists in
     `internal/models` (`eso.go`, `encounter.go`).
   - `components.js` — reusable, framework-free UI components
-    (`createSearchableSelect`, `initTooltips`). Tooltips are shown via a
+    (`createSearchableSelect`, `createComboBox`, `initTooltips`). Tooltips are shown via a
     `data-tip` attribute (not native `title`), so they work consistently on any
     element, including dynamically-added chips.
 - These modules expose plain top-level `const`s/functions (no module system);

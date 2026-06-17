@@ -288,6 +288,38 @@ const api = {
     });
   },
 
+  // --- Roster members (the /coreteam signup recruitment pool) ---
+
+  // List a team's member pool: { members: [...] }.
+  listRosterMembers(teamId) {
+    return this.request(`/api/teams/${teamId}/roster-members`);
+  },
+
+  // Manually add a pool entry. body: { display_name, timezone, days,
+  // availability, roles, classes_by_role }.
+  createRosterMember(teamId, body) {
+    return this.request(`/api/teams/${teamId}/roster-members`, {
+      method: "POST",
+      body,
+    });
+  },
+
+  // Edit a pool entry (e.g. set/adjust availability time limits). Same body
+  // shape as createRosterMember.
+  updateRosterMember(teamId, memberId, body) {
+    return this.request(`/api/teams/${teamId}/roster-members/${memberId}`, {
+      method: "PUT",
+      body,
+    });
+  },
+
+  // Remove a pool entry by member id.
+  deleteRosterMember(teamId, memberId) {
+    return this.request(`/api/teams/${teamId}/roster-members/${memberId}`, {
+      method: "DELETE",
+    });
+  },
+
   // --- Encounters ---
 
   listEncounters(teamId) {

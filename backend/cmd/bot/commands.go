@@ -19,6 +19,7 @@ type bot struct {
 	teams      *models.TeamStore
 	encounters *models.EncounterStore
 	groupings  *models.GroupingStore
+	members    *models.MemberStore
 	discord    *models.DiscordStore
 }
 
@@ -89,6 +90,11 @@ var coreTeamCommand = &discordgo.ApplicationCommand{
 		},
 		{
 			Type:        discordgo.ApplicationCommandOptionSubCommand,
+			Name:        "signup",
+			Description: "Post a recruitment signup with an I'm Interested button (gathers availability via DM)",
+		},
+		{
+			Type:        discordgo.ApplicationCommandOptionSubCommand,
 			Name:        "status",
 			Description: "Show which team this channel is bound to",
 		},
@@ -125,6 +131,8 @@ func (b *bot) onCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		b.handleSetup(s, i)
 	case "post":
 		b.handlePost(s, i)
+	case "signup":
+		b.handleSignupPost(s, i)
 	case "status":
 		b.handleStatus(s, i)
 	case "unset":
@@ -134,6 +142,12 @@ func (b *bot) onCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 
 func (b *bot) onComponent(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	id := i.MessageComponentData().CustomID
+	// The signup intake flow encodes context (member id, day, role) in the custom
+	// ID, so dispatch those by prefix before the exact-match cases.
+	if strings.HasPrefix(id, signupPrefix) {
+		b.onSignupComponent(s, i)
+		return
+	}
 	switch id {
 	case "get_my_details":
 		b.handleGetMyDetails(s, i)
@@ -417,6 +431,65 @@ func buildPostEmbed(team *models.Team, primary *models.Encounter, gr []models.Gr
 		Title:       truncate(title, embedTitleLimit),
 		Description: truncate(desc, embedDescriptionLimit),
 		Color:       embedColor,
+	}
+}
+
+// --- /coreteam signup (recruitment post + DM intake) ---
+
+// handleSignupPost posts the team's recruitment signup: an embed with the team's
+// signup body and an "I'm Interested" button that kicks off the DM intake flow.
+func (b *bot) handleSignupPost(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	ctx, cancel := handlerContext()
+	defer cancel()
+
+	teamID, err := b.discord.GetChannelTeam(ctx, i.ChannelID)
+	if errors.Is(err, models.ErrChannelNotBound) {
+		ephemeral(s, i, "This channel isn't bound to a team yet. Run /coreteam setup first.")
+		return
+	}
+	if err != nil {
+		log.Printf("signup: get binding: %v", err)
+		ephemeral(s, i, "Something went wrong. Please try again.")
+		return
+	}
+	team, err := b.teams.Get(ctx, teamID)
+	if err != nil {
+		ephemeral(s, i, "Could not load the team. It may have been deleted; re-run /coreteam setup.")
+		return
+	}
+
+	body := strings.TrimSpace(team.SignupPost)
+	if body == "" {
+		body = "Interested in joining? Press the button below and I'll DM you a few questions about your availability, roles, and classes."
+	}
+	embed := &discordgo.MessageEmbed{
+		Title:       truncate(team.Name+" — Signup", embedTitleLimit),
+		Description: truncate(body, embedDescriptionLimit),
+		Color:       embedColor,
+	}
+	err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Embeds:     []*discordgo.MessageEmbed{embed},
+			Components: signupComponents(),
+		},
+	})
+	if err != nil {
+		log.Printf("signup: respond: %v", err)
+	}
+}
+
+// signupComponents is the button row on a recruitment signup post.
+func signupComponents() []discordgo.MessageComponent {
+	return []discordgo.MessageComponent{
+		discordgo.ActionsRow{Components: []discordgo.MessageComponent{
+			discordgo.Button{
+				Label:    "I'm Interested",
+				Emoji:    &discordgo.ComponentEmoji{Name: "\U0001F64B"}, // 🙋
+				Style:    discordgo.SuccessButton,
+				CustomID: signupJoinID,
+			},
+		}},
 	}
 }
 

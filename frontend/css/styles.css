@@ -741,6 +741,8 @@ a.brand--home:hover {
 .slot-actions {
   display: flex;
   justify-content: flex-end;
+  align-items: center;
+  gap: var(--space-2);
   margin-bottom: calc(-1 * var(--space-2));
 }
 .slot-actions .slot-copy {
@@ -1506,6 +1508,282 @@ a.brand--home:hover {
   white-space: nowrap;
 }
 .admin-user-admin { flex-shrink: 0; }
+
+/* Combobox (createComboBox): open text input + filterable suggestions. Mirrors
+   the searchable-select panel styling but allows free-form values. */
+.cb {
+  position: relative;
+}
+.cb-panel {
+  position: absolute;
+  z-index: 150;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 100%;
+  max-height: 14rem;
+  overflow-y: auto;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.cb-panel.is-hidden { display: none; }
+.cb-option {
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--font-size-sm);
+  white-space: nowrap;
+  cursor: pointer;
+  border-left: 3px solid transparent;
+}
+.cb-option.is-active {
+  background: var(--color-accent);
+  color: var(--color-bg);
+  font-weight: 600;
+  border-left-color: var(--color-accent-hover);
+}
+
+/* Inset card used for the in-page member add form. */
+.card--inset {
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: var(--space-4);
+}
+
+/* "In progress" badge for draft (mid-DM) signups. */
+.badge--draft {
+  color: var(--color-accent);
+  background: rgba(201, 162, 75, 0.12);
+  border: 1px solid rgba(201, 162, 75, 0.35);
+}
+
+/* --- Member pool (recruitment / availability) page --- */
+.members-subhead {
+  margin: var(--space-6) 0 var(--space-3);
+  font-size: var(--font-size-base);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+/* Manual add form layout */
+.member-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: var(--space-4);
+}
+.member-days,
+.member-roles {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.member-day-row,
+.member-role-add {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+.member-day-hours {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.member-day-sep { color: var(--color-text-muted); }
+.member-role-classes-add {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.class-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  user-select: none;
+  font-size: var(--font-size-sm);
+}
+.class-toggle:has(input:checked) {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+.class-toggle input { accent-color: var(--color-accent); cursor: pointer; }
+
+/* Role coverage summary chips */
+.members-roles-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+.role-summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-border);
+  border-radius: var(--radius);
+}
+.role-summary[data-role="tank"]   { border-left-color: var(--role-tank); }
+.role-summary[data-role="healer"] { border-left-color: var(--role-healer); }
+.role-summary[data-role="dps"]    { border-left-color: var(--role-dps); }
+.role-summary-count {
+  font-size: var(--font-size-lg);
+  font-weight: 700;
+  color: var(--color-text);
+}
+.role-summary-label {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+/* Availability heatmap (days × hours) */
+.members-heatmap { overflow-x: auto; }
+.heatmap-table {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 100%;
+}
+.heatmap-row {
+  display: grid;
+  grid-template-columns: 3.5rem repeat(24, 1fr);
+  gap: 2px;
+  align-items: stretch;
+}
+.heatmap-day {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+  display: flex;
+  align-items: center;
+}
+.heatmap-hour {
+  font-size: 0.7rem;
+  color: var(--color-text-muted);
+  text-align: center;
+}
+.heatmap-cell {
+  height: 1.4rem;
+  min-width: 0.75rem;
+  border-radius: 3px;
+  background: var(--color-surface-alt);
+}
+.heatmap-cell.has-availability {
+  /* Availability reads as green ("go"); the heat ramps opacity by share of peak.
+     The floor is high enough that even a single person's slot stands out from an
+     empty cell, and a faint outline keeps low-heat cells legible on dark. */
+  background: rgba(91, 185, 140, calc(0.4 + 0.6 * var(--heat, 0)));
+  box-shadow: inset 0 0 0 1px rgba(91, 185, 140, 0.55);
+  cursor: default;
+}
+
+/* Per-member detail cards */
+.members-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+  gap: var(--space-4);
+}
+.member-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+.member-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.member-card-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  /* Take the remaining width and allow shrinking so a long name wraps instead of
+     overflowing into (overlapping) the action buttons. */
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.member-card-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.member-card-actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+.member-card-meta { font-size: var(--font-size-sm); }
+
+/* Per-member checkbox to include/exclude them from the availability chart. */
+.member-chart-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+.member-chart-toggle input {
+  accent-color: var(--color-accent);
+  cursor: pointer;
+}
+
+.member-avail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.member-avail-row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  font-size: var(--font-size-sm);
+}
+.member-avail-day { color: var(--color-text-muted); }
+.member-avail-time { font-variant-numeric: tabular-nums; }
+
+.member-roles-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.member-role-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-size-sm);
+}
+.member-role-classes { color: var(--color-text-muted); }
+.role-tag {
+  display: inline-block;
+  padding: 2px var(--space-2);
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-left-width: 3px;
+}
+.role-tag[data-role="tank"]   { border-left-color: var(--role-tank); }
+.role-tag[data-role="healer"] { border-left-color: var(--role-healer); }
+.role-tag[data-role="dps"]    { border-left-color: var(--role-dps); }
 
 /* Utility text */
 .text-muted { color: var(--color-text-muted); }

@@ -51,6 +51,7 @@ func run() error {
 		teams:      models.NewTeamStore(pool),
 		encounters: models.NewEncounterStore(pool),
 		groupings:  models.NewGroupingStore(pool),
+		members:    models.NewMemberStore(pool),
 		discord:    models.NewDiscordStore(pool),
 	}
 

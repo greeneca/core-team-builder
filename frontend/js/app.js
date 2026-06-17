@@ -27,6 +27,7 @@
   const teamsView = el("teams-view");
   const detailView = el("team-detail-view");
   const shareView = el("share-view");
+  const membersView = el("members-view");
 
   let currentUser = null;
   let currentTeam = null;
@@ -37,12 +38,17 @@
   // The encounter currently selected on the team page; its per-player loadouts
   // are shown inline in the roster. Always set once a team is open.
   let currentEncounter = null;
-  // The team's extra display timezones (chips); edited on the team page.
-  let teamTimezones = [];
   // The open team's groupings (e.g. ice cages / slayer stacks). Each grouping is
   // { id, name, group_count, position, groups: [{ group_number, name, slots }] }.
   // Edited locally and autosaved per-grouping.
   let currentGroupings = [];
+  // The open team's recruitment/availability pool (team_roster_members), loaded
+  // when a team is opened. Feeds the Members page and the roster Discord-handle
+  // combobox suggestions.
+  let currentRosterMembers = [];
+  // Member ids the viewer has unchecked from the availability heatmap. Members
+  // default to included; this is a view-only client-side filter (not persisted).
+  const heatmapExcluded = new Set();
 
   // Client-side mirrors of the backend caps (the server still enforces these).
   const MAX_GROUPINGS = 10;
@@ -87,6 +93,7 @@
     teamsView.classList.toggle("is-hidden", view !== "teams");
     detailView.classList.toggle("is-hidden", view !== "detail");
     shareView.classList.toggle("is-hidden", view !== "share");
+    membersView.classList.toggle("is-hidden", view !== "members");
     window.scrollTo(0, 0);
   }
 
@@ -236,6 +243,14 @@
       }
       const { groupings } = await api.listGroupings(id);
       currentGroupings = groupings || [];
+      // Load the member pool so the roster's Discord-handle combobox can suggest
+      // known members. Best-effort: a failure here shouldn't block the team page.
+      try {
+        const { members } = await api.listRosterMembers(id);
+        currentRosterMembers = members || [];
+      } catch {
+        currentRosterMembers = [];
+      }
       // Show the detail view *before* rendering so the buff/crit coverage
       // refreshes (which bail when the view is hidden) paint on first load.
       showView("detail");
@@ -278,6 +293,515 @@
     return r === "owner" || r === "editor";
   }
 
+  // --- Members page (recruitment / availability pool) ---
+
+  const pad2 = (n) => String(n).padStart(2, "0");
+
+  // Roles offered in the member pool — the trial's three core roles. "Support
+  // DPS" is a player-build distinction only, so it's excluded here (this also
+  // mirrors the Discord signup intake, which gathers tank/healer/dps).
+  const MEMBER_ROLES = ROLES.filter((r) => r.value !== "support_dps");
+
+  // memberHandleOptions(): combobox suggestions for the roster Discord handle,
+  // drawn from the member pool. Value = the handle stored on the player; the
+  // label adds the display name for context.
+  function memberHandleOptions() {
+    const seen = new Set();
+    const opts = [];
+    currentRosterMembers.forEach((m) => {
+      const handle = (m.discord_username || "").trim();
+      if (!handle || seen.has(handle.toLowerCase())) return;
+      seen.add(handle.toLowerCase());
+      const name = (m.display_name || "").trim();
+      const label =
+        name && name.toLowerCase() !== handle.toLowerCase()
+          ? `${name} (@${handle})`
+          : `@${handle}`;
+      opts.push({ value: handle, label });
+    });
+    return opts;
+  }
+
+  async function openMembers(id) {
+    clearMessage();
+    try {
+      const { members } = await api.listRosterMembers(id);
+      currentRosterMembers = members || [];
+      renderRosterMembers();
+      showView("members");
+    } catch (err) {
+      handleError(err);
+    }
+  }
+
+  function renderRosterMembers() {
+    const editable = canEdit();
+    el("members-team-name").textContent = currentTeam ? currentTeam.name : "Members";
+    el("members-local-tz").textContent = localTimezone();
+
+    const members = currentRosterMembers.slice();
+    el("members-count").textContent = String(members.length);
+    el("members-empty").classList.toggle("is-hidden", members.length > 0);
+
+    el("member-add-btn").classList.toggle("is-hidden", !editable);
+    if (!editable) el("member-add-form").classList.add("is-hidden");
+
+    renderMembersRoleSummary(members);
+    renderMembersHeatmap(members.filter((m) => !heatmapExcluded.has(m.id)));
+    renderMembersCards(members, editable);
+  }
+
+  // Count how many members are comfortable with each role.
+  function renderMembersRoleSummary(members) {
+    const container = el("members-roles-summary");
+    container.innerHTML = "";
+    MEMBER_ROLES.forEach((role) => {
+      const count = members.filter((m) => (m.roles || []).includes(role.value)).length;
+      const chip = document.createElement("div");
+      chip.className = "role-summary";
+      chip.dataset.role = role.value;
+      const c = document.createElement("span");
+      c.className = "role-summary-count";
+      c.textContent = String(count);
+      const l = document.createElement("span");
+      l.className = "role-summary-label";
+      l.textContent = role.label;
+      chip.appendChild(c);
+      chip.appendChild(l);
+      container.appendChild(chip);
+    });
+  }
+
+  // Expand members' availability windows into a viewer-local 7×24 count grid.
+  // Each member records hours in their own timezone; we shift them into the
+  // viewer's zone so the heatmap overlays everyone on a common clock. Recurring
+  // weekly times have no date, so DST conversions can be off by an hour — the
+  // same accepted trade-off as the trial schedule.
+  function availabilityGrid(members) {
+    const grid = Array.from({ length: 7 }, () => new Array(24).fill(0));
+    const now = new Date();
+    const localOff = tzOffsetMinutes(localTimezone(), now);
+    const dayIndex = (d) => DAYS.findIndex((x) => x.value === d);
+
+    members.forEach((m) => {
+      const memberOff = m.timezone ? tzOffsetMinutes(m.timezone, now) : localOff;
+      const diffHours = (localOff - memberOff) / 60;
+      const avail = m.availability || {};
+      (m.days || []).forEach((d) => {
+        const di = dayIndex(d);
+        if (di < 0) return;
+        const w = avail[d];
+        if (!w) return;
+        let end = w.end;
+        if (end <= w.start) end = w.start + 1; // single-hour / malformed window
+        for (let h = w.start; h < end; h++) {
+          const shifted = h + diffHours;
+          const localHour = ((Math.floor(shifted) % 24) + 24) % 24;
+          const dayShift = Math.floor(shifted / 24);
+          const localDay = (((di + dayShift) % 7) + 7) % 7;
+          grid[localDay][localHour] += 1;
+        }
+      });
+    });
+    return grid;
+  }
+
+  function renderMembersHeatmap(members) {
+    const container = el("members-heatmap");
+    container.innerHTML = "";
+    const grid = availabilityGrid(members);
+    // Show only *overlapping* times: a slot counts as available only when every
+    // displayed member is available then (the intersection), not the union. With
+    // the per-member chart checkboxes, this surfaces the windows the selected
+    // group can actually all make. Members with no availability recorded don't
+    // contribute a window, so require at least one to avoid an all-green grid.
+    const withAvailability = members.filter((m) => (m.days || []).length > 0);
+    const needed = withAvailability.length;
+
+    const table = document.createElement("div");
+    table.className = "heatmap-table";
+
+    const header = document.createElement("div");
+    header.className = "heatmap-row heatmap-row--head";
+    const corner = document.createElement("div");
+    corner.className = "heatmap-day heatmap-corner";
+    header.appendChild(corner);
+    for (let h = 0; h < 24; h++) {
+      const c = document.createElement("div");
+      c.className = "heatmap-hour";
+      c.textContent = h % 3 === 0 ? String(h) : "";
+      header.appendChild(c);
+    }
+    table.appendChild(header);
+
+    let overlaps = 0;
+    DAYS.forEach((day, di) => {
+      const row = document.createElement("div");
+      row.className = "heatmap-row";
+      const label = document.createElement("div");
+      label.className = "heatmap-day";
+      label.textContent = day.label;
+      row.appendChild(label);
+      for (let h = 0; h < 24; h++) {
+        const count = grid[di][h];
+        const everyone = needed > 0 && count >= needed;
+        const c = document.createElement("div");
+        c.className = "heatmap-cell";
+        // Overlap is all-or-nothing, so paint matching cells at full strength.
+        c.style.setProperty("--heat", everyone ? "1" : "0");
+        if (everyone) {
+          overlaps++;
+          c.classList.add("has-availability");
+          const who = needed === 1 ? "1 available" : `all ${needed} available`;
+          c.dataset.tip = `${day.label} ${pad2(h)}:00 — ${who}`;
+        }
+        row.appendChild(c);
+      }
+      table.appendChild(row);
+    });
+    container.appendChild(table);
+
+    if (needed === 0) {
+      const note = document.createElement("p");
+      note.className = "text-muted mt-2";
+      note.textContent = "No availability recorded yet.";
+      container.appendChild(note);
+    } else if (overlaps === 0) {
+      const note = document.createElement("p");
+      note.className = "text-muted mt-2";
+      note.textContent =
+        needed === 1
+          ? "No availability recorded yet."
+          : "No time works for everyone shown — uncheck members to find overlaps for a smaller group.";
+      container.appendChild(note);
+    }
+  }
+
+  function renderMembersCards(members, editable) {
+    const grid = el("members-grid");
+    grid.innerHTML = "";
+    members.forEach((m) => {
+      const card = document.createElement("div");
+      card.className = "member-card";
+
+      const head = document.createElement("div");
+      head.className = "member-card-head";
+      const title = document.createElement("div");
+      title.className = "member-card-title";
+      const name = document.createElement("strong");
+      name.className = "member-card-name";
+      name.textContent = (m.display_name || m.discord_username || "Unknown").trim();
+      title.appendChild(name);
+      const source = document.createElement("span");
+      source.className = "badge badge--shared";
+      source.textContent = m.source === "manual" ? "Manual" : "Discord";
+      title.appendChild(source);
+      if (m.status === "draft") {
+        const draft = document.createElement("span");
+        draft.className = "badge badge--draft";
+        draft.textContent = "In progress";
+        title.appendChild(draft);
+      }
+      head.appendChild(title);
+      if (editable) {
+        const actions = document.createElement("div");
+        actions.className = "member-card-actions";
+        const edit = document.createElement("button");
+        edit.className = "btn btn--ghost btn--sm";
+        edit.type = "button";
+        edit.textContent = "Edit";
+        edit.addEventListener("click", () => openMemberForm(m));
+        actions.appendChild(edit);
+        const del = document.createElement("button");
+        del.className = "btn btn--danger btn--sm";
+        del.type = "button";
+        del.textContent = "Remove";
+        del.addEventListener("click", () => deleteMember(m));
+        actions.appendChild(del);
+        head.appendChild(actions);
+      }
+      card.appendChild(head);
+
+      // Per-member toggle to include/exclude them from the availability chart.
+      // Only meaningful for members who actually have availability recorded.
+      if ((m.days || []).length) {
+        const chart = document.createElement("label");
+        chart.className = "member-chart-toggle";
+        const cb = document.createElement("input");
+        cb.type = "checkbox";
+        cb.checked = !heatmapExcluded.has(m.id);
+        cb.addEventListener("change", () => {
+          if (cb.checked) heatmapExcluded.delete(m.id);
+          else heatmapExcluded.add(m.id);
+          renderMembersHeatmap(
+            currentRosterMembers.filter((x) => !heatmapExcluded.has(x.id))
+          );
+        });
+        const span = document.createElement("span");
+        span.textContent = "Show in availability chart";
+        chart.appendChild(cb);
+        chart.appendChild(span);
+        card.appendChild(chart);
+      }
+
+      const bits = [];
+      if (m.discord_username) bits.push(`@${m.discord_username}`);
+      if (m.timezone) bits.push(m.timezone);
+      if (bits.length) {
+        const meta = document.createElement("div");
+        meta.className = "member-card-meta text-muted";
+        meta.textContent = bits.join(" · ");
+        card.appendChild(meta);
+      }
+
+      if ((m.days || []).length) {
+        const avail = document.createElement("div");
+        avail.className = "member-avail";
+        (m.days || []).forEach((d) => {
+          const w = (m.availability || {})[d];
+          const row = document.createElement("div");
+          row.className = "member-avail-row";
+          const dayEl = document.createElement("span");
+          dayEl.className = "member-avail-day";
+          dayEl.textContent = labelFor(DAYS, d);
+          const timeEl = document.createElement("span");
+          timeEl.className = "member-avail-time";
+          timeEl.textContent = w ? `${pad2(w.start)}:00 – ${pad2(w.end)}:00` : "—";
+          row.appendChild(dayEl);
+          row.appendChild(timeEl);
+          avail.appendChild(row);
+        });
+        card.appendChild(avail);
+      }
+
+      if ((m.roles || []).length) {
+        const rolesEl = document.createElement("div");
+        rolesEl.className = "member-roles-list";
+        (m.roles || []).forEach((r) => {
+          const classes = (m.classes_by_role || {})[r] || [];
+          const row = document.createElement("div");
+          row.className = "member-role-row";
+          const tag = document.createElement("span");
+          tag.className = "role-tag";
+          tag.dataset.role = r;
+          tag.textContent = labelFor(ROLES, r);
+          row.appendChild(tag);
+          const classLabels = classes
+            .map((c) => labelFor(CLASSES, c))
+            .filter((x) => x && x !== "—");
+          const cls = document.createElement("span");
+          cls.className = "member-role-classes";
+          cls.textContent = classLabels.length ? classLabels.join(", ") : "Any class";
+          row.appendChild(cls);
+          rolesEl.appendChild(row);
+        });
+        card.appendChild(rolesEl);
+      }
+
+      grid.appendChild(card);
+    });
+  }
+
+  async function deleteMember(m) {
+    if (!currentTeam) return;
+    const who = m.display_name || m.discord_username || "this member";
+    if (!confirm(`Remove ${who} from the member pool?`)) return;
+    try {
+      await api.deleteRosterMember(currentTeam.id, m.id);
+      currentRosterMembers = currentRosterMembers.filter((x) => x.id !== m.id);
+      renderRosterMembers();
+      showMessage("Member removed", "success");
+    } catch (err) {
+      handleError(err);
+    }
+  }
+
+  // Add/edit member form (editors): a compact builder for availability + roles/
+  // classes. Used to add someone who didn't sign up through Discord, and to edit
+  // an existing member (e.g. set or adjust availability time limits).
+  const memberAddForm = el("member-add-form");
+  // null = add mode; otherwise the id of the member currently being edited.
+  let editingMemberId = null;
+
+  // openMemberForm(member|null): open the form in edit mode (prefilled) when a
+  // member is given, otherwise in add mode.
+  function openMemberForm(member) {
+    editingMemberId = member ? member.id : null;
+    buildMemberAddForm(member || null);
+    el("member-form-title").textContent = member ? "Edit member" : "Add member";
+    el("member-form-submit").textContent = member ? "Save changes" : "Add member";
+    memberAddForm.classList.remove("is-hidden");
+    el("member-name").focus();
+    memberAddForm.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+
+  function closeMemberForm() {
+    memberAddForm.classList.add("is-hidden");
+    memberAddForm.reset();
+    editingMemberId = null;
+  }
+
+  el("member-add-btn").addEventListener("click", () => openMemberForm(null));
+  el("member-add-cancel").addEventListener("click", closeMemberForm);
+
+  function hourOptionsHtml(selected) {
+    let out = "";
+    for (let h = 0; h < 24; h++) {
+      out += `<option value="${h}"${h === selected ? " selected" : ""}>${pad2(h)}:00</option>`;
+    }
+    return out;
+  }
+
+  // End-hour options 01:00–24:00 where 24:00 = midnight (end of day), so a window
+  // can run to the end of the day — which a plain 00:00–23:00 list cannot express.
+  function endHourOptionsHtml(selected) {
+    let out = "";
+    for (let h = 1; h <= 24; h++) {
+      const label = h === 24 ? "24:00 (midnight)" : `${pad2(h)}:00`;
+      out += `<option value="${h}"${h === selected ? " selected" : ""}>${label}</option>`;
+    }
+    return out;
+  }
+
+  function buildMemberAddForm(member) {
+    memberAddForm.reset();
+    const avail = (member && member.availability) || {};
+    const memberDays = (member && member.days) || [];
+    const memberRoles = (member && member.roles) || [];
+    const classesByRole = (member && member.classes_by_role) || {};
+
+    el("member-name").value = member ? member.display_name || "" : "";
+    el("member-discord").value = member ? member.discord_username || "" : "";
+
+    const tzSel = el("member-tz");
+    const zones = timezoneList();
+    const local = localTimezone();
+    if (!zones.includes(local)) zones.unshift(local);
+    const memberTz = member && member.timezone;
+    if (memberTz && !zones.includes(memberTz)) zones.unshift(memberTz);
+    tzSel.innerHTML = zones
+      .map((z) => `<option value="${escapeAttr(z)}">${escapeAttr(z)}</option>`)
+      .join("");
+    tzSel.value = memberTz || local;
+
+    const daysEl = el("member-days");
+    daysEl.innerHTML = "";
+    DAYS.forEach((d) => {
+      const w = avail[d.value];
+      const checked = memberDays.includes(d.value);
+      const startVal = w ? w.start : 18;
+      const endVal = w ? w.end : 22;
+      const row = document.createElement("div");
+      row.className = "member-day-row";
+      row.innerHTML = `
+        <label class="day-toggle">
+          <input type="checkbox" data-day="${d.value}"${checked ? " checked" : ""} />
+          <span>${d.label}</span>
+        </label>
+        <div class="member-day-hours${checked ? "" : " is-hidden"}">
+          <select class="input input--sm" data-day-start="${d.value}" aria-label="${d.label} start hour">${hourOptionsHtml(startVal)}</select>
+          <span class="member-day-sep">–</span>
+          <select class="input input--sm" data-day-end="${d.value}" aria-label="${d.label} end hour">${endHourOptionsHtml(endVal)}</select>
+        </div>`;
+      const cb = row.querySelector("input[type=checkbox]");
+      const hours = row.querySelector(".member-day-hours");
+      cb.addEventListener("change", () => hours.classList.toggle("is-hidden", !cb.checked));
+      daysEl.appendChild(row);
+    });
+
+    const rolesEl = el("member-roles");
+    rolesEl.innerHTML = "";
+    MEMBER_ROLES.forEach((role) => {
+      const roleChecked = memberRoles.includes(role.value);
+      const picked = classesByRole[role.value] || [];
+      const row = document.createElement("div");
+      row.className = "member-role-add";
+      const classBoxes = CLASSES.filter((c) => c.value)
+        .map(
+          (c) =>
+            `<label class="class-toggle"><input type="checkbox" data-class="${role.value}:${c.value}"${picked.includes(c.value) ? " checked" : ""} /><span>${c.label}</span></label>`
+        )
+        .join("");
+      row.innerHTML = `
+        <label class="day-toggle">
+          <input type="checkbox" data-role="${role.value}"${roleChecked ? " checked" : ""} />
+          <span>${role.label}</span>
+        </label>
+        <div class="member-role-classes-add${roleChecked ? "" : " is-hidden"}">${classBoxes}</div>`;
+      const cb = row.querySelector("input[data-role]");
+      const classes = row.querySelector(".member-role-classes-add");
+      cb.addEventListener("change", () => classes.classList.toggle("is-hidden", !cb.checked));
+      rolesEl.appendChild(row);
+    });
+  }
+
+  memberAddForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (!currentTeam) return;
+    const displayName = el("member-name").value.trim();
+    if (!displayName) {
+      showMessage("Display name is required");
+      return;
+    }
+
+    const days = [];
+    const availability = {};
+    DAYS.forEach((d) => {
+      const cb = memberAddForm.querySelector(`input[data-day="${d.value}"]`);
+      if (cb && cb.checked) {
+        days.push(d.value);
+        const start = Number(memberAddForm.querySelector(`[data-day-start="${d.value}"]`).value);
+        const end = Number(memberAddForm.querySelector(`[data-day-end="${d.value}"]`).value);
+        availability[d.value] = { start, end };
+      }
+    });
+
+    const roles = [];
+    const classesByRole = {};
+    MEMBER_ROLES.forEach((role) => {
+      const cb = memberAddForm.querySelector(`input[data-role="${role.value}"]`);
+      if (cb && cb.checked) {
+        roles.push(role.value);
+        const picked = Array.from(
+          memberAddForm.querySelectorAll(`input[data-class^="${role.value}:"]`)
+        )
+          .filter((x) => x.checked)
+          .map((x) => x.getAttribute("data-class").split(":")[1]);
+        if (picked.length) classesByRole[role.value] = picked;
+      }
+    });
+
+    const body = {
+      display_name: displayName,
+      discord_username: el("member-discord").value.trim(),
+      timezone: el("member-tz").value,
+      days,
+      availability,
+      roles,
+      classes_by_role: classesByRole,
+    };
+
+    try {
+      if (editingMemberId != null) {
+        const updated = await api.updateRosterMember(currentTeam.id, editingMemberId, body);
+        currentRosterMembers = currentRosterMembers.map((x) =>
+          x.id === updated.id ? updated : x
+        );
+        closeMemberForm();
+        renderRosterMembers();
+        showMessage("Member updated", "success");
+      } else {
+        const created = await api.createRosterMember(currentTeam.id, body);
+        currentRosterMembers.unshift(created);
+        closeMemberForm();
+        renderRosterMembers();
+        showMessage("Member added", "success");
+      }
+    } catch (err) {
+      handleError(err);
+    }
+  });
+
   function renderTeamDetail() {
     const editable = canEdit();
 
@@ -304,6 +828,12 @@
     if (dmFooterInput) {
       dmFooterInput.value = currentTeam.dm_footer || "";
       dmFooterInput.readOnly = !editable;
+    }
+
+    const signupPostInput = el("signup-post-input");
+    if (signupPostInput) {
+      signupPostInput.value = currentTeam.signup_post || "";
+      signupPostInput.readOnly = !editable;
     }
 
     renderSchedule(editable);
@@ -345,65 +875,6 @@
       : "";
     timeInput.disabled = !editable;
     el("schedule-tz-note").textContent = `(in your timezone: ${localZone})`;
-
-    // Extra display timezones the team uses.
-    teamTimezones = (currentTeam.team_timezones || []).slice();
-    populateTeamTzAdd();
-    renderTeamTimezones(editable);
-  }
-
-  // (Re)build the "add timezone" picker — the same searchable select used by
-  // gear/skills — with every known zone not already in the team's list. Viewers
-  // see no picker (they cannot edit).
-  function populateTeamTzAdd() {
-    const mount = el("team-tz-add");
-    mount.innerHTML = "";
-    if (!canEdit()) return;
-    const already = new Set(teamTimezones);
-    const zones = timezoneList().filter((z) => !already.has(z));
-    const select = createSearchableSelect({
-      groups: [{ group: null, items: zones.map((z) => ({ value: z, label: tzLabel(z) })) }],
-      placeholder: "Add a timezone…",
-      onSelect: (tz) => addTeamTimezone(tz),
-    });
-    mount.appendChild(select);
-  }
-
-  // Render the removable chips for the team's display timezones.
-  function renderTeamTimezones(editable) {
-    if (editable === undefined) editable = canEdit();
-    const list = el("team-tz-list");
-    list.innerHTML = "";
-    teamTimezones.forEach((tz) => {
-      const chip = document.createElement("span");
-      chip.className = "chip";
-      chip.innerHTML = `<span class="chip-label">${escapeAttr(tzLabel(tz))}</span>`;
-      if (editable) {
-        const remove = document.createElement("button");
-        remove.type = "button";
-        remove.className = "chip-remove";
-        remove.setAttribute("aria-label", "Remove");
-        remove.textContent = "×";
-        remove.addEventListener("click", () => removeTeamTimezone(tz));
-        chip.appendChild(remove);
-      }
-      list.appendChild(chip);
-    });
-  }
-
-  function addTeamTimezone(tz) {
-    if (!tz || teamTimezones.includes(tz)) return;
-    teamTimezones.push(tz);
-    populateTeamTzAdd();
-    renderTeamTimezones();
-    scheduleAutosave("team");
-  }
-
-  function removeTeamTimezone(tz) {
-    teamTimezones = teamTimezones.filter((z) => z !== tz);
-    populateTeamTzAdd();
-    renderTeamTimezones();
-    scheduleAutosave("team");
   }
 
   function collectScheduleDays() {
@@ -482,6 +953,19 @@
     loadTeams();
   });
 
+  // Members page: open from the team detail toolbar; back returns to the team.
+  el("members-btn").addEventListener("click", () => {
+    if (currentTeam) openMembers(currentTeam.id);
+  });
+  el("members-back-btn").addEventListener("click", () => {
+    if (currentTeam) {
+      showView("detail");
+    } else {
+      showView("teams");
+      loadTeams();
+    }
+  });
+
   // --- Autosave ---
   // Changes are persisted automatically: text inputs fire on `change` (i.e. when
   // the field loses focus after editing — "input finished"); selects, checkboxes,
@@ -555,10 +1039,10 @@
       // The time input is in the viewer's current zone; store it in UTC so any
       // viewer can convert it back to their own zone.
       schedule_time: convertWallTime(el("schedule-time").value, localTimezone(), "UTC"),
-      team_timezones: teamTimezones,
       encounters_enabled: encountersEnabled(),
       post_footer: el("post-footer-input") ? el("post-footer-input").value : "",
       dm_footer: el("dm-footer-input") ? el("dm-footer-input").value : "",
+      signup_post: el("signup-post-input") ? el("signup-post-input").value : "",
       players,
     };
     setSaveStatus("team", "saving");
@@ -588,8 +1072,6 @@
     if (e.target.closest("[data-loadout]")) return;
     // The "Copy to…" control performs its own save; ignore it here.
     if (e.target.closest("[data-copy]")) return;
-    // The team-timezone picker manages its own state + autosave (via onSelect).
-    if (e.target.closest("#team-tz-add")) return;
     // Groupings manage their own per-grouping state + autosave.
     if (e.target.closest("#groupings-card")) return;
     if (e.target.matches("input, select, textarea")) {
@@ -1159,6 +1641,7 @@
             <select class="input slot-copy" data-copy-select aria-label="Copy another player's build and loadout into this slot">
               <option value="">Copy from…</option>
             </select>
+            <button type="button" class="btn btn--ghost btn--sm slot-clear" data-clear-slot aria-label="Clear this player's build and loadout">Clear</button>
           </div>`
         : "";
       slot.innerHTML = `
@@ -1176,7 +1659,7 @@
             </div>
             <div class="form-group">
               <label>Discord handle</label>
-              <input class="input" data-field="discord_handle" maxlength="100" />
+              <div data-discord-combo></div>
             </div>
             <div class="form-group">
               <label>Role</label>
@@ -1287,8 +1770,35 @@
         </div>`;
 
       slot.querySelector('[data-field="name"]').value = player.name;
-      slot.querySelector('[data-field="discord_handle"]').value = player.discord_handle;
       slot.querySelector('[data-field="subclassed"]').checked = player.subclassed;
+
+      // Discord handle: an open combobox whose suggestions are the team's member
+      // pool (free-form text still allowed). The inner input keeps data-field so
+      // it participates in the roster autosave + collectPlayers() like before.
+      const comboHost = slot.querySelector("[data-discord-combo]");
+      const { root: comboRoot } = createComboBox({
+        value: player.discord_handle || "",
+        options: memberHandleOptions(),
+        placeholder: "@handle or name",
+        inputAttrs: { "data-field": "discord_handle", maxlength: "100" },
+        // Picking a known member auto-fills the player's name, but only when the
+        // name is still empty so an existing name is never overwritten.
+        onChoose: (handle) => {
+          if (!editable) return;
+          const nameField = slot.querySelector('[data-field="name"]');
+          if (!nameField || nameField.value.trim()) return;
+          const member = currentRosterMembers.find(
+            (m) => (m.discord_username || "").trim().toLowerCase() === handle.trim().toLowerCase()
+          );
+          const fill = member && (member.display_name || "").trim();
+          if (!fill) return;
+          nameField.value = fill;
+          updateSlotSummary(slot);
+          renderPlayerNav();
+          scheduleAutosave("team");
+        },
+      });
+      comboHost.replaceWith(comboRoot);
 
       // Re-render the conditional build area when subclass or class changes.
       const subCb = slot.querySelector('[data-field="subclassed"]');
@@ -1353,6 +1863,22 @@
           if (!source) return;
           const src = el("roster").querySelector(`.player-slot[data-slot="${source}"]`);
           if (src) copyPlayerToSlot(src, slot);
+        });
+      }
+
+      // "Clear" wipes this player's class/race/build, loadout, and crit/pen
+      // setup for the current encounter. Name, Discord handle, and role are kept.
+      const clearBtn = slot.querySelector("[data-clear-slot]");
+      if (clearBtn) {
+        clearBtn.addEventListener("click", () => {
+          const nameEl = slot.querySelector('[data-field="name"]');
+          const who =
+            nameEl && nameEl.value.trim()
+              ? nameEl.value.trim()
+              : `Slot ${slot.dataset.slot}`;
+          if (!confirm(`Clear ${who}'s name, handle, build, and loadout? Only the role is kept.`))
+            return;
+          clearPlayerSlot(slot);
         });
       }
 
@@ -1484,6 +2010,55 @@
     refreshBuffCoverage();
     refreshCritCoverage();
     refreshPenCoverage();
+
+    // Programmatic value changes don't fire input/change, so persist explicitly.
+    setSaveStatus("team", "saving");
+    setSaveStatus("encounter", "saving");
+    Promise.resolve(saveAll()).then(() => saveLoadouts());
+  }
+
+  // Reset a roster slot to an empty build: clears name, Discord handle,
+  // class/race/subclass + build, the full per-encounter loadout
+  // (gear/skills/potions/CP/crit dmg/pen sources), and the crit/pen setup
+  // fields. Only the role is preserved (it has no empty value and defines the
+  // slot). Operates on the live DOM, then persists both the team and encounter.
+  function clearPlayerSlot(slot) {
+    ["name", "discord_handle", "class", "race"].forEach((f) => {
+      const d = slot.querySelector(`[data-field="${f}"]`);
+      if (d) d.value = "";
+    });
+
+    const sub = slot.querySelector('[data-field="subclassed"]');
+    if (sub) sub.checked = false;
+
+    // Re-render the build area now that class is empty and subclass is off.
+    renderBuild(slot, {});
+
+    // Empty every loadout chip column.
+    slot.querySelectorAll("[data-loadout] .loadout-col [data-list]").forEach((list) => {
+      list.innerHTML = "";
+    });
+
+    // Reset crit/pen setup fields to their neutral defaults.
+    const critEl = slot.querySelector("[data-crit]");
+    if (critEl) {
+      const mundus = critEl.querySelector('[data-crit-field="mundus"]');
+      if (mundus) mundus.value = "";
+      ["armor_heavy", "armor_medium", "armor_light", "weapon_damage"].forEach((f) => {
+        const input = critEl.querySelector(`[data-crit-field="${f}"]`);
+        if (input) input.value = 0;
+      });
+      ["catalyst_elements", "splintered_secrets_skills", "force_of_nature_status"].forEach((f) => {
+        const selEl = critEl.querySelector(`[data-crit-field="${f}"]`);
+        if (selEl) selEl.value = "0";
+      });
+    }
+
+    refreshBuffCoverage();
+    refreshCritCoverage();
+    refreshPenCoverage();
+    updateSlotSummary(slot);
+    renderPlayerNav();
 
     // Programmatic value changes don't fire input/change, so persist explicitly.
     setSaveStatus("team", "saving");

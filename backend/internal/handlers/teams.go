@@ -156,15 +156,15 @@ type updateTeamRequest struct {
 	// ScheduleTime is the recurring trial time in UTC ("HH:MM"); the client
 	// converts from the editor's current timezone before sending.
 	ScheduleTime string `json:"schedule_time"`
-	// TeamTimezones are extra IANA zones the team wants the time shown in.
-	TeamTimezones []string `json:"team_timezones"`
 	// EncountersEnabled toggles whether the team uses multiple encounters.
 	EncountersEnabled bool `json:"encounters_enabled"`
 	// PostFooter is the free-form footer the bot appends to its /coreteam post.
 	PostFooter string `json:"post_footer"`
 	// DMFooter is the free-form footer the bot appends to the build-details DM.
-	DMFooter string          `json:"dm_footer"`
-	Players  []playerPayload `json:"players"`
+	DMFooter string `json:"dm_footer"`
+	// SignupPost is the free-form body the bot posts with /coreteam signup.
+	SignupPost string          `json:"signup_post"`
+	Players    []playerPayload `json:"players"`
 }
 
 type playerPayload struct {
@@ -216,12 +216,6 @@ func (s *Server) handleUpdateTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	teamTimezones, err := normalizeTimezones(req.TeamTimezones)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-
 	// A team has exactly TeamSize slots, so a payload with more player entries
 	// than that is malformed (or abusive) — reject before doing per-row work.
 	if len(req.Players) > models.TeamSize {
@@ -238,6 +232,12 @@ func (s *Server) handleUpdateTeam(w http.ResponseWriter, r *http.Request) {
 	dmFooter := strings.TrimRight(req.DMFooter, " \t\r\n")
 	if len([]rune(dmFooter)) > maxDMFooterLen {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("DM footer too long (max %d characters)", maxDMFooterLen))
+		return
+	}
+
+	signupPost := strings.TrimRight(req.SignupPost, " \t\r\n")
+	if len([]rune(signupPost)) > maxSignupPostLen {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("signup post too long (max %d characters)", maxSignupPostLen))
 		return
 	}
 
@@ -301,7 +301,7 @@ func (s *Server) handleUpdateTeam(w http.ResponseWriter, r *http.Request) {
 		players = append(players, player)
 	}
 
-	if err := s.teams.Save(r.Context(), teamID, req.Name, days, scheduleTime, teamTimezones, req.EncountersEnabled, postFooter, dmFooter, players); err != nil {
+	if err := s.teams.Save(r.Context(), teamID, req.Name, days, scheduleTime, req.EncountersEnabled, postFooter, dmFooter, signupPost, players); err != nil {
 		log.Printf("update team: %v", err)
 		writeError(w, http.StatusInternalServerError, "could not update team")
 		return
@@ -348,34 +348,6 @@ func validTimeOfDay(t string) bool {
 		return false
 	}
 	return parsed.Format("15:04") == t
-}
-
-// normalizeTimezones validates, de-duplicates, and orders a team's timezone
-// list. Each must be a non-empty, loadable IANA name; empties are dropped.
-// Order is preserved (first occurrence wins). The number of distinct zones is
-// capped so a single team can't accumulate an unbounded list (each entry runs a
-// time.LoadLocation on every save).
-func normalizeTimezones(in []string) ([]string, error) {
-	seen := map[string]bool{}
-	out := make([]string, 0, len(in))
-	for _, tz := range in {
-		tz = strings.TrimSpace(tz)
-		if tz == "" {
-			continue
-		}
-		if _, err := time.LoadLocation(tz); err != nil {
-			return nil, errors.New("invalid timezone: " + tz)
-		}
-		if seen[tz] {
-			continue
-		}
-		if len(out) >= maxTeamTimezones {
-			return nil, fmt.Errorf("too many timezones (max %d)", maxTeamTimezones)
-		}
-		seen[tz] = true
-		out = append(out, tz)
-	}
-	return out, nil
 }
 
 func (s *Server) handleDeleteTeam(w http.ResponseWriter, r *http.Request) {

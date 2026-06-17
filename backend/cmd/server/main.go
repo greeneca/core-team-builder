@@ -47,6 +47,7 @@ func run() error {
 	teams := models.NewTeamStore(pool)
 	encounters := models.NewEncounterStore(pool)
 	groupings := models.NewGroupingStore(pool)
+	members := models.NewMemberStore(pool)
 	settings := models.NewSettingsStore(pool)
 	refreshTokens := models.NewRefreshTokenStore(pool)
 	passwordResets := models.NewPasswordResetStore(pool)
@@ -74,6 +75,7 @@ func run() error {
 		Teams:            teams,
 		Encounters:       encounters,
 		Groupings:        groupings,
+		Members:          members,
 		Settings:         settings,
 		RefreshTokens:    refreshTokens,
 		PasswordResets:   passwordResets,

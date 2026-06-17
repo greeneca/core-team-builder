@@ -8,15 +8,18 @@ quickly. Keep it current when the architecture changes.
 `core-team-builder` helps design and organize a **trial core team** for *The
 Elder Scrolls Online*. It provides accounts + login and **teams**: a user can
 own multiple teams and share them with others (viewer/editor roles). Each team
-has a trial schedule (days + a UTC time shown in each viewer's own zone, plus
-optional team display timezones) and a fixed 12-player roster — name,
+has a trial schedule (days + a UTC time shown in each viewer's own zone) and a
+fixed 12-player roster — name,
 discord handle, role, ESO class, and a per-player build (either a subclassed set
 of 3 skill lines or 2 class masteries). Teams also have **encounters** (Default,
 Trash, or a trial boss), each holding a per-player gear/skills loadout, and
 **groupings** (named sets of numbered groups for mechanics, e.g. ice cages or
 slayer stacks). A team can set two **Discord bot footers** (free-form text the
-bot appends to its `/coreteam post` overview and its build-details DM). The UI
-autosaves changes (no Save buttons).
+bot appends to its `/coreteam post` overview and its build-details DM). Each
+team also keeps a **member pool** — prospective players who signed up via the
+bot's `/coreteam signup` post (an interactive DM gathers their availability,
+roles, and classes) or were added manually, visualized on a Members page. The
+UI autosaves changes (no Save buttons).
 
 ## Stack at a glance
 
@@ -117,12 +120,12 @@ column; the `User` JSON model hides it (`json:"-"`).
   (`convertWallTime` / `formatSchedule` in `data.js`); the server just stores the
   UTC `"HH:MM"`. (Earlier the time was stored in a per-team reference zone
   `schedule_timezone`; that column is dropped in `010_drop_schedule_timezone.sql`.)
-  `009_team_timezones.sql` adds `team_timezones TEXT[]` — extra IANA zones the
-  team wants the time shown in (managed via removable chips + a searchable
-  add-picker on the team page). The handler validates + de-dupes them via
-  `normalizeTimezones` (`time.LoadLocation`; the server embeds `time/tzdata` so
-  this works in the Alpine image). Note: recurring weekly times have no date, so conversions
-  near a DST boundary can be off by an hour (acceptable trade-off).
+  The server embeds `time/tzdata` so zone conversions work in the Alpine image.
+  Note: recurring weekly times have no date, so conversions near a DST boundary
+  can be off by an hour (acceptable trade-off). (`009_team_timezones.sql` once
+  added a `team_timezones TEXT[]` list of extra display zones, but it was never
+  read for display — viewers always see their own zone — so it is dropped in
+  `031_drop_team_timezones.sql`.)
 - **Access**: a single `team_members` lookup yields the caller's role —
   `owner`, `editor`, or `viewer`. Owners and editors can rename a team and edit
   players; **viewers are read-only**; **only the owner** can delete the team or
@@ -207,8 +210,8 @@ column; the `User` JSON model hides it (`json:"-"`).
   are consumed by the bot only (`discordfmt.BuildPost` / `discordfmt.PlayerDetail`);
   the old web-app clipboard export (detailed post / condensed list) was removed.
 - **Save-all**: `PUT /api/teams/{id}` is the single "save everything" call —
-  body is `{ name, schedule_days, schedule_time, team_timezones,
-  encounters_enabled, post_footer, dm_footer, players: [{slot,name,discord_handle,role,class,subclassed,skill_line_1..3,mastery_1..2}] }`
+  body is `{ name, schedule_days, schedule_time,
+  encounters_enabled, post_footer, dm_footer, signup_post, players: [{slot,name,discord_handle,role,class,subclassed,skill_line_1..3,mastery_1..2}] }`
   and the backend (`TeamStore.Save`) updates team meta + roster in one
   transaction (there is no per-player save endpoint). `schedule_time` is sent in
   UTC (the UI converts from the viewer's current zone,
@@ -391,6 +394,10 @@ column; the `User` JSON model hides it (`json:"-"`).
     **✅ Coming**, **❌ Not coming** (RSVP), and **Get My Build Details**. Built by
     `discordfmt.BuildPost`; the bot wraps the parts in the embed and attaches the
     buttons via `postComponents()`.
+  - `signup` — posts the team's **recruitment signup** as an embed (the team's
+    free-form `signup_post` body, or a default prompt) with a single **I'm
+    Interested** button. Pressing it starts an interactive **DM intake flow**
+    (see Member pool below). Built by `handleSignupPost` / `signupComponents`.
   - `status` / `unset` — show / remove the channel's team binding.
   - **Get My Build Details** button (`get_my_details`) → matches the presser to a
     roster slot (by Discord ID/mention in `players.discord_handle`, else
@@ -446,6 +453,66 @@ column; the `User` JSON model hides it (`json:"-"`).
   `docker compose --profile bot up`. See `docs/DEPLOYMENT.md` for the Discord
   developer-portal setup (create app + bot, invite with the `bot` and
   `applications.commands` scopes).
+
+## Member pool / recruitment (current)
+
+The **member pool** (`team_roster_members`) is a per-team list of prospective
+players, **separate** from the 12 fixed roster slots (`players`) and from
+app-account sharing (`team_members`). It captures availability/role/class
+interest gathered via Discord, plus manual web entries.
+
+- **Schema** (`030_team_members_pool.sql`): adds `teams.signup_post TEXT` (the
+  free-form `/coreteam signup` body) and the `team_roster_members` table —
+  `discord_user_id` (NULL for manual entries), `discord_username`,
+  `display_name`, `timezone` (IANA; the zone the hours are expressed in), `days
+  TEXT[]` (`mon..sun`), `availability JSONB` (`{ "mon": { "start": 18, "end":
+  22 } }`, where `start` is 0–23 and `end` is 1–24 in `timezone`; **24 means
+  midnight / end of day** so a window can run to the day's end), `roles TEXT[]`,
+  `classes_by_role JSONB`
+  (`{ "tank": ["dragonknight"] }`), `status` (`draft` while the DM intake is in
+  progress → `complete`), `step` (current intake step), and `source`
+  (`discord`/`manual`). A partial unique index on `(team_id, discord_user_id)`
+  means re-running signup **updates** the same row; manual entries are
+  unconstrained. Standard `set_updated_at` trigger.
+- **Backend**: `models.RosterMember` + `MemberStore`
+  (`backend/internal/models/member.go`) own persistence and the intake
+  step/status constants (`MemberStatus*`, `MemberStep*`). Web endpoints
+  (`backend/internal/handlers/members.go`, all JWT-protected, capped at
+  `maxRosterMembers = 200`): `GET /api/teams/{id}/roster-members` (any team
+  role), `POST /api/teams/{id}/roster-members` (editors; manual add),
+  `PUT /api/teams/{id}/roster-members/{memberID}` (editors; edit any member's
+  availability/roles/classes — `MemberStore.Update`, leaving intake
+  status/step/source untouched), and
+  `DELETE /api/teams/{id}/roster-members/{memberID}` (editors). Days/roles/
+  classes are normalized/validated against the same allow-lists as the roster;
+  availability start hours clamp to 0–23 and end hours to 1–24.
+- **Discord DM intake** (`backend/cmd/bot/intake.go`): the **I'm Interested**
+  button (`onSignupComponent`/`handleSignupJoin`) creates or reuses the user's
+  draft row and walks a **5-step**, component-only questionnaire (select menus —
+  no privileged message intents): **1** days → **2** timezone (options show the
+  current UTC offset via `tzOffsetLabel`) → **3** start/end hours per chosen day
+  (start 00:00–23:00; end 01:00–**24:00**, where 24:00 = midnight) plus
+  quick-apply buttons (`signup_span` — an **All day** preset and one button per
+  distinct window already entered on an earlier day, via `quickSpanRows`) → **4**
+  roles → **5** classes per chosen role, then a
+  summary and `status = complete`. Each step persists progress; the component
+  custom IDs (prefixed `signupPrefix`) carry the member row id plus the current
+  day/role so each stateless interaction can resume.
+- **Frontend — Members page**: a **Members** button on the team detail toolbar
+  opens `#members-view` (`showView("members")` / `openMembers` /
+  `renderRosterMembers` in `app.js`). It shows aggregate **role coverage**
+  chips, an **availability heatmap** (days × 24h, each member's hours shifted
+  from their timezone into the **viewer's** local zone and summed — same DST
+  caveat as the trial schedule), and per-member **cards** (availability +
+  roles/classes, with a Discord/Manual/“In progress” badge; editors can **edit**
+  or remove each one). Editors can **add a member manually** or **edit** any
+  member (including Discord-sourced ones — e.g. to set/adjust availability time
+  limits) via the same in-page form (timezone, day windows with start 00:00–23:00
+  and end 01:00–24:00, role/class checkboxes). The pool is also loaded on `openTeam` so the
+  roster's **Discord handle** field is an open **combobox** (`createComboBox` in
+  `components.js`) — its suggestions come from the pool but free-form text is
+  still allowed. New CSS lives under the "Combobox" / "Member pool" blocks in
+  `styles.css` (heatmap, role chips, member cards, combobox panel).
 
 ## Detail page layout (collapsible sections)
 
