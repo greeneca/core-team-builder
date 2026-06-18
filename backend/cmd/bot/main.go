@@ -53,6 +53,7 @@ func run() error {
 		groupings:  models.NewGroupingStore(pool),
 		members:    models.NewMemberStore(pool),
 		discord:    models.NewDiscordStore(pool),
+		appBaseURL: cfg.AppBaseURL,
 	}
 
 	session, err := discordgo.New("Bot " + cfg.Discord.BotToken)

@@ -222,6 +222,7 @@ rows. Managed via `PasswordResetStore`.
 | post_footer    | text              | Discord bot `/coreteam post` footer (default `''`); `018_team_signup_note.sql` → `029_team_bot_footers.sql` |
 | dm_footer      | text              | Discord bot build-details DM footer (default `''`); `019_team_detailed_header.sql` → `029_team_bot_footers.sql` |
 | signup_post    | text              | Discord bot `/coreteam signup` recruitment body (default `''`); `030_team_members_pool.sql` |
+| auto_share_pool_viewers | boolean  | auto-grant viewer access to member-pool app accounts; default `false`; `034_team_auto_share_pool.sql` |
 | created_at     | timestamptz       | default `now()`                            |
 | updated_at     | timestamptz       | auto-updated via trigger                   |
 
@@ -236,6 +237,10 @@ multi-encounter UI (off → only the first encounter shows); `post_footer` /
 overview and its build-details DM respectively (see `docs/AGENT_CONTEXT.md`
 "Discord bot footers"); `signup_post` is the free-form body the bot posts with
 `/coreteam signup` to recruit new members (see "Member pool" below).
+`auto_share_pool_viewers`, when true, auto-grants viewer access (in
+`team_members`) to the app accounts of everyone in the team's member pool —
+current and future — once their Discord identity is tied to an account (see
+`docs/AGENT_CONTEXT.md` "Auto-share with member pool").
 
 ### `team_members` (sharing)
 

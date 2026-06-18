@@ -182,6 +182,14 @@ func (s *Server) handleDiscordOAuthCallback(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// Grant viewer access to any auto-share team whose member pool lists this
+	// Discord identity, so the user immediately sees the teams they signed up
+	// for. Idempotent (never downgrades a role); a failure here shouldn't block
+	// sign-in, so it's logged and ignored.
+	if err := s.teams.ShareAutoTeamsForDiscord(r.Context(), du.ID, user.ID); err != nil {
+		log.Printf("discord oauth: auto-share pool teams: %v", err)
+	}
+
 	token, refreshToken, expiresIn, err := s.issueTokens(r.Context(), user)
 	if err != nil {
 		log.Printf("discord oauth: issue tokens: %v", err)

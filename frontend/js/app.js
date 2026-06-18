@@ -840,6 +840,7 @@
     renderEncountersBar();
     renderEncounterControls();
     applyEncountersMode();
+    applyAutoSharePoolMode();
     renderRoster();
     renderGroupings();
     refreshBuffCoverage();
@@ -1048,6 +1049,7 @@
       post_footer: el("post-footer-input") ? el("post-footer-input").value : "",
       dm_footer: el("dm-footer-input") ? el("dm-footer-input").value : "",
       signup_post: el("signup-post-input") ? el("signup-post-input").value : "",
+      auto_share_pool_viewers: autoSharePoolViewers(),
       players,
     };
     setSaveStatus("team", "saving");
@@ -2212,6 +2214,23 @@
     el("encounters-sentinel").classList.toggle("is-hidden", !enabled);
   }
 
+  // Whether the open team auto-shares with its member pool. Disabled by default:
+  // only an explicit true enables it.
+  function autoSharePoolViewers() {
+    return !!currentTeam && currentTeam.auto_share_pool_viewers === true;
+  }
+
+  // Sync the auto-share checkbox with the team's flag and gate editing to those
+  // who can edit the team. The generic detail-view change handler persists the
+  // new value via the team autosave.
+  function applyAutoSharePoolMode() {
+    const toggle = el("auto-share-pool-toggle");
+    if (toggle) {
+      toggle.checked = autoSharePoolViewers();
+      toggle.disabled = !canEdit();
+    }
+  }
+
   // The encounters bar lets you pick the *current* encounter (whose per-player
   // loadouts are shown inline in the roster) and add new ones. There is no
   // separate encounter page anymore.
@@ -2352,6 +2371,17 @@
     renderEncountersBar();
     renderEncounterControls();
     applyEncountersMode();
+  });
+
+  // Toggle auto-sharing the team with its member pool as viewers. The generic
+  // detail-view change handler persists the flag via the team autosave, and the
+  // backend reconciles the pool into viewer shares when it's enabled.
+  el("auto-share-pool-toggle").addEventListener("change", (e) => {
+    if (!canEdit()) {
+      e.target.checked = autoSharePoolViewers();
+      return;
+    }
+    currentTeam.auto_share_pool_viewers = e.target.checked;
   });
   addEncounterForm.addEventListener("submit", async (e) => {
     e.preventDefault();

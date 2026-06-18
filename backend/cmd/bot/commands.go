@@ -21,6 +21,9 @@ type bot struct {
 	groupings  *models.GroupingStore
 	members    *models.MemberStore
 	discord    *models.DiscordStore
+	// appBaseURL is the public base URL of the web app (APP_BASE_URL), used to
+	// build sign-in links the bot sends to users. Empty when unconfigured.
+	appBaseURL string
 }
 
 // Discord embed limits (and the post's accent color, Discord blurple).
@@ -202,6 +205,12 @@ func (b *bot) handleLink(s *discordgo.Session, i *discordgo.InteractionCreate, s
 		log.Printf("link: link user: %v", err)
 		ephemeral(s, i, "Something went wrong linking your account. Please try again.")
 		return
+	}
+	// Now that this Discord identity is tied to an app account, grant viewer
+	// access to any auto-share team whose member pool lists them. Idempotent;
+	// failures are logged, not surfaced.
+	if err := b.teams.ShareAutoTeamsForDiscord(ctx, user.ID, userID); err != nil {
+		log.Printf("link: auto-share pool teams: %v", err)
 	}
 	ephemeral(s, i, "Your Discord account is now linked to Core Team Builder. You can run /coreteam setup.")
 }

@@ -151,6 +151,8 @@ services:
       # The bot still loads the shared config, which requires JWT_SECRET to be
       # present even though the bot does not issue tokens.
       JWT_SECRET: ${JWT_SECRET}
+      # Public web-app URL so the bot can link users to sign-in after signup.
+      APP_BASE_URL: ${APP_BASE_URL}
       DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN}
       DISCORD_APP_ID: ${DISCORD_APP_ID}
       DISCORD_GUILD_ID: ${DISCORD_GUILD_ID}

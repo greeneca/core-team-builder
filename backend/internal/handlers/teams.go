@@ -163,8 +163,11 @@ type updateTeamRequest struct {
 	// DMFooter is the free-form footer the bot appends to the build-details DM.
 	DMFooter string `json:"dm_footer"`
 	// SignupPost is the free-form body the bot posts with /coreteam signup.
-	SignupPost string          `json:"signup_post"`
-	Players    []playerPayload `json:"players"`
+	SignupPost string `json:"signup_post"`
+	// AutoSharePoolViewers, when true, auto-grants viewer access to the app
+	// accounts of everyone in the team's member pool (current and future).
+	AutoSharePoolViewers bool            `json:"auto_share_pool_viewers"`
+	Players              []playerPayload `json:"players"`
 }
 
 type playerPayload struct {
@@ -301,11 +304,22 @@ func (s *Server) handleUpdateTeam(w http.ResponseWriter, r *http.Request) {
 		players = append(players, player)
 	}
 
-	if err := s.teams.Save(r.Context(), teamID, req.Name, days, scheduleTime, req.EncountersEnabled, postFooter, dmFooter, signupPost, players); err != nil {
+	if err := s.teams.Save(r.Context(), teamID, req.Name, days, scheduleTime, req.EncountersEnabled, postFooter, dmFooter, signupPost, req.AutoSharePoolViewers, players); err != nil {
 		log.Printf("update team: %v", err)
 		writeError(w, http.StatusInternalServerError, "could not update team")
 		return
 	}
+
+	// When auto-share is on, reconcile the member pool into viewer shares so
+	// enabling it (or saving while it's on) immediately shares with every current
+	// pool member who has an app account. Idempotent and non-destructive; a
+	// failure here shouldn't fail the save, so it's logged and ignored.
+	if req.AutoSharePoolViewers {
+		if err := s.teams.SharePoolMembers(r.Context(), teamID); err != nil {
+			log.Printf("auto-share pool members: %v", err)
+		}
+	}
+
 	team, err := s.teams.Get(r.Context(), teamID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not load team")

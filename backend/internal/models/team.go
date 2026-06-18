@@ -94,11 +94,16 @@ type Team struct {
 	DMFooter string `json:"dm_footer"`
 	// SignupPost is the free-form body the Discord bot posts with /coreteam
 	// signup to recruit new members. Editable from the team detail page.
-	SignupPost string       `json:"signup_post"`
-	CreatedAt  time.Time    `json:"created_at"`
-	UpdatedAt  time.Time    `json:"updated_at"`
-	Players    []Player     `json:"players,omitempty"`
-	Members    []TeamMember `json:"members,omitempty"`
+	SignupPost string `json:"signup_post"`
+	// AutoSharePoolViewers, when true, automatically grants viewer access to the
+	// app accounts of everyone in the team's member pool — current and future. A
+	// pool member is shared with only once their Discord identity is tied to an
+	// app account. Disabling it never revokes existing shares.
+	AutoSharePoolViewers bool         `json:"auto_share_pool_viewers"`
+	CreatedAt            time.Time    `json:"created_at"`
+	UpdatedAt            time.Time    `json:"updated_at"`
+	Players              []Player     `json:"players,omitempty"`
+	Members              []TeamMember `json:"members,omitempty"`
 }
 
 // TeamStore provides data access for teams, their members, and players.
@@ -131,12 +136,12 @@ func (s *TeamStore) Create(ctx context.Context, ownerID int64, name string, copy
 	if copyFromTeamID != 0 {
 		// Copy the source team's schedule onto the new team.
 		const insertTeamCopy = `
-			INSERT INTO teams (name, owner_id, schedule_days, schedule_time, encounters_enabled, post_footer, dm_footer, signup_post)
-			SELECT $1, $2, schedule_days, schedule_time, encounters_enabled, post_footer, dm_footer, signup_post
+			INSERT INTO teams (name, owner_id, schedule_days, schedule_time, encounters_enabled, post_footer, dm_footer, signup_post, auto_share_pool_viewers)
+			SELECT $1, $2, schedule_days, schedule_time, encounters_enabled, post_footer, dm_footer, signup_post, auto_share_pool_viewers
 			FROM teams WHERE id = $3
-			RETURNING id, name, owner_id, schedule_days, schedule_time, encounters_enabled, post_footer, dm_footer, signup_post, created_at, updated_at`
+			RETURNING id, name, owner_id, schedule_days, schedule_time, encounters_enabled, post_footer, dm_footer, signup_post, auto_share_pool_viewers, created_at, updated_at`
 		if err := tx.QueryRow(ctx, insertTeamCopy, name, ownerID, copyFromTeamID).Scan(
-			&team.ID, &team.Name, &team.OwnerID, &team.ScheduleDays, &team.ScheduleTime, &team.EncountersEnabled, &team.PostFooter, &team.DMFooter, &team.SignupPost, &team.CreatedAt, &team.UpdatedAt,
+			&team.ID, &team.Name, &team.OwnerID, &team.ScheduleDays, &team.ScheduleTime, &team.EncountersEnabled, &team.PostFooter, &team.DMFooter, &team.SignupPost, &team.AutoSharePoolViewers, &team.CreatedAt, &team.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -144,9 +149,9 @@ func (s *TeamStore) Create(ctx context.Context, ownerID int64, name string, copy
 		const insertTeam = `
 			INSERT INTO teams (name, owner_id)
 			VALUES ($1, $2)
-			RETURNING id, name, owner_id, schedule_days, schedule_time, encounters_enabled, post_footer, dm_footer, signup_post, created_at, updated_at`
+			RETURNING id, name, owner_id, schedule_days, schedule_time, encounters_enabled, post_footer, dm_footer, signup_post, auto_share_pool_viewers, created_at, updated_at`
 		if err := tx.QueryRow(ctx, insertTeam, name, ownerID).Scan(
-			&team.ID, &team.Name, &team.OwnerID, &team.ScheduleDays, &team.ScheduleTime, &team.EncountersEnabled, &team.PostFooter, &team.DMFooter, &team.SignupPost, &team.CreatedAt, &team.UpdatedAt,
+			&team.ID, &team.Name, &team.OwnerID, &team.ScheduleDays, &team.ScheduleTime, &team.EncountersEnabled, &team.PostFooter, &team.DMFooter, &team.SignupPost, &team.AutoSharePoolViewers, &team.CreatedAt, &team.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -209,7 +214,7 @@ func (s *TeamStore) CountOwned(ctx context.Context, ownerID int64) (int, error) 
 // most recently updated first. Players and members are not populated here.
 func (s *TeamStore) ListForUser(ctx context.Context, userID int64) ([]Team, error) {
 	const q = `
-		SELECT t.id, t.name, t.owner_id, t.schedule_days, t.schedule_time, t.encounters_enabled, t.post_footer, t.dm_footer, t.signup_post, t.created_at, t.updated_at
+		SELECT t.id, t.name, t.owner_id, t.schedule_days, t.schedule_time, t.encounters_enabled, t.post_footer, t.dm_footer, t.signup_post, t.auto_share_pool_viewers, t.created_at, t.updated_at
 		FROM teams t
 		JOIN team_members m ON m.team_id = t.id
 		WHERE m.user_id = $1
@@ -224,7 +229,7 @@ func (s *TeamStore) ListForUser(ctx context.Context, userID int64) ([]Team, erro
 	teams := []Team{}
 	for rows.Next() {
 		var t Team
-		if err := rows.Scan(&t.ID, &t.Name, &t.OwnerID, &t.ScheduleDays, &t.ScheduleTime, &t.EncountersEnabled, &t.PostFooter, &t.DMFooter, &t.SignupPost, &t.CreatedAt, &t.UpdatedAt); err != nil {
+		if err := rows.Scan(&t.ID, &t.Name, &t.OwnerID, &t.ScheduleDays, &t.ScheduleTime, &t.EncountersEnabled, &t.PostFooter, &t.DMFooter, &t.SignupPost, &t.AutoSharePoolViewers, &t.CreatedAt, &t.UpdatedAt); err != nil {
 			return nil, err
 		}
 		teams = append(teams, t)
@@ -236,10 +241,10 @@ func (s *TeamStore) ListForUser(ctx context.Context, userID int64) ([]Team, erro
 func (s *TeamStore) Get(ctx context.Context, teamID int64) (*Team, error) {
 	team := &Team{}
 	const teamQ = `
-		SELECT id, name, owner_id, schedule_days, schedule_time, encounters_enabled, post_footer, dm_footer, signup_post, created_at, updated_at
+		SELECT id, name, owner_id, schedule_days, schedule_time, encounters_enabled, post_footer, dm_footer, signup_post, auto_share_pool_viewers, created_at, updated_at
 		FROM teams WHERE id = $1`
 	err := s.pool.QueryRow(ctx, teamQ, teamID).Scan(
-		&team.ID, &team.Name, &team.OwnerID, &team.ScheduleDays, &team.ScheduleTime, &team.EncountersEnabled, &team.PostFooter, &team.DMFooter, &team.SignupPost, &team.CreatedAt, &team.UpdatedAt,
+		&team.ID, &team.Name, &team.OwnerID, &team.ScheduleDays, &team.ScheduleTime, &team.EncountersEnabled, &team.PostFooter, &team.DMFooter, &team.SignupPost, &team.AutoSharePoolViewers, &team.CreatedAt, &team.UpdatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrTeamNotFound
@@ -307,11 +312,11 @@ func (s *TeamStore) Access(ctx context.Context, teamID, userID int64) (found boo
 }
 
 // Save updates a team's name, trial schedule (days and the UTC time), the
-// encounters-enabled flag, the bot footers, the signup post, and (when players
-// is non-nil) the roster, all within a single transaction. Each player in
-// players must have a valid Slot (1..TeamSize); slots not present are left
-// unchanged.
-func (s *TeamStore) Save(ctx context.Context, teamID int64, name string, days []string, scheduleTime string, encountersEnabled bool, postFooter string, dmFooter string, signupPost string, players []Player) error {
+// encounters-enabled flag, the bot footers, the signup post, the auto-share flag,
+// and (when players is non-nil) the roster, all within a single transaction. Each
+// player in players must have a valid Slot (1..TeamSize); slots not present are
+// left unchanged.
+func (s *TeamStore) Save(ctx context.Context, teamID int64, name string, days []string, scheduleTime string, encountersEnabled bool, postFooter string, dmFooter string, signupPost string, autoSharePoolViewers bool, players []Player) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -320,9 +325,9 @@ func (s *TeamStore) Save(ctx context.Context, teamID int64, name string, days []
 
 	const updateTeam = `
 		UPDATE teams
-		SET name = $1, schedule_days = $2, schedule_time = $3, encounters_enabled = $4, post_footer = $5, dm_footer = $6, signup_post = $7
-		WHERE id = $8`
-	if _, err := tx.Exec(ctx, updateTeam, name, days, scheduleTime, encountersEnabled, postFooter, dmFooter, signupPost, teamID); err != nil {
+		SET name = $1, schedule_days = $2, schedule_time = $3, encounters_enabled = $4, post_footer = $5, dm_footer = $6, signup_post = $7, auto_share_pool_viewers = $8
+		WHERE id = $9`
+	if _, err := tx.Exec(ctx, updateTeam, name, days, scheduleTime, encountersEnabled, postFooter, dmFooter, signupPost, autoSharePoolViewers, teamID); err != nil {
 		return err
 	}
 
@@ -369,5 +374,60 @@ func (s *TeamStore) AddMember(ctx context.Context, teamID, userID int64, role st
 func (s *TeamStore) RemoveMember(ctx context.Context, teamID, userID int64) error {
 	const q = `DELETE FROM team_members WHERE team_id = $1 AND user_id = $2 AND role <> 'owner'`
 	_, err := s.pool.Exec(ctx, q, teamID, userID)
+	return err
+}
+
+// AutoSharePoolEnabled reports whether the team has member-pool auto-sharing
+// turned on. Returns false (no error) when the team doesn't exist.
+func (s *TeamStore) AutoSharePoolEnabled(ctx context.Context, teamID int64) (bool, error) {
+	var enabled bool
+	err := s.pool.QueryRow(ctx, `SELECT auto_share_pool_viewers FROM teams WHERE id = $1`, teamID).Scan(&enabled)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return enabled, nil
+}
+
+// SharePoolMembers grants viewer access to the app accounts of everyone in the
+// team's member pool, but only when the team has auto-share enabled. A pool
+// member counts only once their Discord identity is tied to an app account
+// (users.discord_user_id), since sharing needs a real user row. Idempotent and
+// safe to call repeatedly: ON CONFLICT DO NOTHING leaves existing roles (owner,
+// editor, prior viewer) untouched, so it never downgrades anyone. It is a no-op
+// when the flag is off, so callers may invoke it unconditionally.
+func (s *TeamStore) SharePoolMembers(ctx context.Context, teamID int64) error {
+	const q = `
+		INSERT INTO team_members (team_id, user_id, role)
+		SELECT trm.team_id, u.id, 'viewer'
+		FROM team_roster_members trm
+		JOIN teams t ON t.id = trm.team_id AND t.auto_share_pool_viewers = true
+		JOIN users u ON u.discord_user_id = trm.discord_user_id
+		WHERE trm.team_id = $1 AND trm.discord_user_id IS NOT NULL
+		ON CONFLICT (team_id, user_id) DO NOTHING`
+	_, err := s.pool.Exec(ctx, q, teamID)
+	return err
+}
+
+// ShareAutoTeamsForDiscord grants the given app user viewer access to every team
+// that has auto-share enabled and lists their Discord identity in its member
+// pool. Used when a user signs in / links via Discord so they immediately see
+// the teams whose pools they belong to. Idempotent; ON CONFLICT DO NOTHING
+// preserves any existing (owner/editor/viewer) role. A no-op when discordUserID
+// is empty.
+func (s *TeamStore) ShareAutoTeamsForDiscord(ctx context.Context, discordUserID string, userID int64) error {
+	if discordUserID == "" {
+		return nil
+	}
+	const q = `
+		INSERT INTO team_members (team_id, user_id, role)
+		SELECT trm.team_id, $2, 'viewer'
+		FROM team_roster_members trm
+		JOIN teams t ON t.id = trm.team_id AND t.auto_share_pool_viewers = true
+		WHERE trm.discord_user_id = $1
+		ON CONFLICT (team_id, user_id) DO NOTHING`
+	_, err := s.pool.Exec(ctx, q, discordUserID, userID)
 	return err
 }

@@ -273,16 +273,47 @@ func (b *bot) signupFinish(s *discordgo.Session, i *discordgo.InteractionCreate,
 	if err := b.members.SaveProgress(ctx, m); err != nil {
 		log.Printf("signup: finish: %v", err)
 	}
-	err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+	// Only when the team auto-shares with its member pool do we grant this member
+	// viewer access and invite them to the web app (where signing in links their
+	// account and surfaces the team). Without auto-share, an account wouldn't gain
+	// them anything here, so the link is omitted.
+	autoShare, err := b.teams.AutoSharePoolEnabled(ctx, m.TeamID)
+	if err != nil {
+		log.Printf("signup: finish auto-share check: %v", err)
+	}
+	invite := ""
+	if autoShare {
+		// Idempotent; a no-op unless the member's Discord identity is tied to an
+		// app account. Failures are logged, not surfaced.
+		if err := b.teams.SharePoolMembers(ctx, m.TeamID); err != nil {
+			log.Printf("signup: finish auto-share: %v", err)
+		}
+		invite = b.signupWebAppInvite()
+	}
+	err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseUpdateMessage,
 		Data: &discordgo.InteractionResponseData{
-			Content:    signupSummary(m),
+			Content:    signupSummary(m) + invite,
 			Components: []discordgo.MessageComponent{},
 		},
 	})
 	if err != nil {
 		log.Printf("signup: finish respond: %v", err)
 	}
+}
+
+// signupWebAppInvite returns a closing line inviting the user to finish signing
+// up in the web app, linking to APP_BASE_URL. Empty when no base URL is
+// configured. Signing in with "Continue with Discord" links their account
+// automatically (and shares any auto-share teams whose pool they're in).
+func (b *bot) signupWebAppInvite() string {
+	if b.appBaseURL == "" {
+		return ""
+	}
+	loginURL := strings.TrimRight(b.appBaseURL, "/") + "/login.html"
+	return "\n\n**Optional:** if you'd like, you can also create an account in the " +
+		"web app — use \"Continue with Discord\" and it links automatically. " +
+		"You don't need to; your signup is already recorded.\n" + loginURL
 }
 
 // --- step renderers (content + components) ---

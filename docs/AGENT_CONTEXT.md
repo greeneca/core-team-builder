@@ -223,6 +223,21 @@ column; the `User` JSON model hides it (`json:"-"`).
   selector are hidden and only the first encounter is shown; the team still keeps
   ≥1 encounter in the DB. An editor opts in per team via the topbar/section
   toggle.
+- **Auto-share with member pool** (`034_team_auto_share_pool.sql`):
+  `teams.auto_share_pool_viewers BOOLEAN` (default **false**) — a "Team Features"
+  checkbox. When **on**, the team is automatically shared as **viewer** with the
+  app accounts of everyone in its **member pool** (`team_roster_members`), current
+  and future. A pool member only becomes a viewer once their Discord identity is
+  tied to an app account (i.e. they've signed in / linked via Discord), since
+  sharing needs a real `users` row. Reconciliation happens at three points, all
+  idempotent and **non-destructive** (`ON CONFLICT DO NOTHING`, so owner/editor
+  roles are never downgraded): on team save while the flag is on
+  (`TeamStore.SharePoolMembers`), when a user signs in / links via Discord
+  (`TeamStore.ShareAutoTeamsForDiscord`, called from the OAuth callback and bot
+  `/coreteam link`), and when a member finishes the bot signup flow
+  (`SharePoolMembers` from `cmd/bot` `signupFinish`). Turning the flag **off**
+  does nothing — it never revokes already-granted shares; it just stops new pool
+  members from being shared with unless re-enabled.
 - **Discord bot footers** (`018_team_signup_note.sql`,
   `019_team_detailed_header.sql`, renamed by `029_team_bot_footers.sql`): each
   team carries `post_footer TEXT` (appended to the bot's `/coreteam post`
@@ -233,7 +248,7 @@ column; the `User` JSON model hides it (`json:"-"`).
   the old web-app clipboard export (detailed post / condensed list) was removed.
 - **Save-all**: `PUT /api/teams/{id}` is the single "save everything" call —
   body is `{ name, schedule_days, schedule_time,
-  encounters_enabled, post_footer, dm_footer, signup_post, players: [{slot,name,discord_handle,role,class,subclassed,skill_line_1..3,mastery_1..2}] }`
+  encounters_enabled, post_footer, dm_footer, signup_post, auto_share_pool_viewers, players: [{slot,name,discord_handle,role,class,subclassed,skill_line_1..3,mastery_1..2}] }`
   and the backend (`TeamStore.Save`) updates team meta + roster in one
   transaction (there is no per-player save endpoint). `schedule_time` is sent in
   UTC (the UI converts from the viewer's current zone,
@@ -486,7 +501,9 @@ column; the `User` JSON model hides it (`json:"-"`).
   ./internal/esoref`) whenever that frontend data changes, then commit the result.
 - **Config**: `DISCORD_BOT_TOKEN` (required to run the bot), optional
   `DISCORD_APP_ID` and `DISCORD_GUILD_ID` (set the guild ID for instant,
-  dev-friendly command registration; empty = global). Loaded in `config.go`
+  dev-friendly command registration; empty = global), and `APP_BASE_URL` (the
+  public web-app URL the bot links to when inviting a finished signup to sign in;
+  stored as `bot.appBaseURL`). Loaded in `config.go`
   (`Config.Discord`), wired via `docker-compose.yml` + `.env`. Run the bot with
   `docker compose --profile bot up`. See `docs/DEPLOYMENT.md` for the Discord
   developer-portal setup (create app + bot, invite with the `bot` and
@@ -500,7 +517,9 @@ column; the `User` JSON model hides it (`json:"-"`).
 The **member pool** (`team_roster_members`) is a per-team list of prospective
 players, **separate** from the 12 fixed roster slots (`players`) and from
 app-account sharing (`team_members`). It captures availability/role/class
-interest gathered via Discord, plus manual web entries.
+interest gathered via Discord, plus manual web entries. (A team can opt into
+**auto-sharing** the team as viewer with everyone in this pool — see
+`auto_share_pool_viewers` under Teams above.)
 
 - **Schema** (`030_team_members_pool.sql`): adds `teams.signup_post TEXT` (the
   free-form `/coreteam signup` body) and the `team_roster_members` table —
@@ -536,7 +555,12 @@ interest gathered via Discord, plus manual web entries.
   quick-apply buttons (`signup_span` — an **All day** preset and one button per
   distinct window already entered on an earlier day, via `quickSpanRows`) → **4**
   roles → **5** classes per chosen role, then a
-  summary and `status = complete`. Each step persists progress; the component
+  summary and `status = complete`. When the team has **auto-share** enabled
+  (`AutoSharePoolEnabled`), the summary closes with an **optional** link to the web
+  app (`APP_BASE_URL/login.html`, via `signupWebAppInvite`) inviting the user to
+  create their account with "Continue with Discord" (which links automatically and
+  surfaces the team); omitted when auto-share is off or `APP_BASE_URL` is unset.
+  Each step persists progress; the component
   custom IDs (prefixed `signupPrefix`) carry the member row id plus the current
   day/role so each stateless interaction can resume.
 - **Frontend — Members page**: a **Members** button on the team detail toolbar

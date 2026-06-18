@@ -53,7 +53,7 @@ Full variable reference:
 | `JWT_TTL`           | backend   | Access-token lifetime (default `15m`)              |
 | `REFRESH_TTL`       | backend   | Refresh-token lifetime (default `720h`)            |
 | `CORS_ORIGIN`       | backend   | **Public `https://` origin**                       |
-| `APP_BASE_URL`      | backend   | Public site URL for email links (default `CORS_ORIGIN`) |
+| `APP_BASE_URL`      | backend/bot | Public site URL for email links + the bot's post-signup sign-in link (default `CORS_ORIGIN`) |
 | `PASSWORD_RESET_TTL`| backend   | Reset-link lifetime (default `1h`)                 |
 | `SMTP_HOST`         | backend   | SMTP relay host (empty → reset emails only logged) |
 | `SMTP_PORT`         | backend   | SMTP port (default `587`; `465` = implicit TLS)    |
