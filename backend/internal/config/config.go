@@ -46,6 +46,32 @@ type Config struct {
 	// Discord holds the Discord bot configuration. Only the bot binary requires
 	// these; the API server ignores them.
 	Discord DiscordConfig
+
+	// DiscordOAuth holds the "Sign in with Discord" OAuth2 settings. Only the API
+	// server uses these; the bot ignores them. When ClientID/ClientSecret are
+	// empty the API simply omits the Discord sign-in option.
+	DiscordOAuth DiscordOAuthConfig
+}
+
+// DiscordOAuthConfig holds the settings for browser "Sign in with Discord"
+// (OAuth2 authorization-code flow). The redirect URL must exactly match a
+// redirect registered for the application in the Discord developer portal.
+type DiscordOAuthConfig struct {
+	// ClientID is the Discord application's OAuth2 client ID (same value as the
+	// application/AppID). Required to enable Discord sign-in.
+	ClientID string
+	// ClientSecret is the application's OAuth2 client secret. Required to enable
+	// Discord sign-in. Never logged.
+	ClientSecret string
+	// RedirectURL is the absolute, publicly reachable URL Discord redirects back
+	// to after authorization (this API's /api/auth/discord/callback). It must be
+	// registered verbatim in the Discord portal.
+	RedirectURL string
+}
+
+// Enabled reports whether enough is configured to offer Discord sign-in.
+func (c DiscordOAuthConfig) Enabled() bool {
+	return c.ClientID != "" && c.ClientSecret != "" && c.RedirectURL != ""
 }
 
 // DiscordConfig holds the Discord bot settings.
@@ -124,6 +150,15 @@ func Load() (*Config, error) {
 	// The reset link points at the frontend; fall back to the CORS origin when
 	// APP_BASE_URL is not set explicitly.
 	cfg.AppBaseURL = getEnv("APP_BASE_URL", cfg.CORSOrigin)
+
+	// Discord sign-in (OAuth2). The redirect URL defaults to the API callback
+	// under the public app base URL, but can be overridden when the API is hosted
+	// on a different host/path than the frontend.
+	cfg.DiscordOAuth = DiscordOAuthConfig{
+		ClientID:     getEnv("DISCORD_CLIENT_ID", ""),
+		ClientSecret: getEnv("DISCORD_CLIENT_SECRET", ""),
+		RedirectURL:  getEnv("DISCORD_OAUTH_REDIRECT_URL", cfg.AppBaseURL+"/api/auth/discord/callback"),
+	}
 
 	if cfg.DatabaseURL == "" {
 		return nil, fmt.Errorf("DATABASE_URL is required")

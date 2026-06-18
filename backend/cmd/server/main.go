@@ -85,7 +85,18 @@ func run() error {
 		CORSOrigin:       cfg.CORSOrigin,
 		AppBaseURL:       cfg.AppBaseURL,
 		PasswordResetTTL: cfg.PasswordResetTTL,
+		DiscordOAuth: handlers.DiscordOAuthConfig{
+			ClientID:     cfg.DiscordOAuth.ClientID,
+			ClientSecret: cfg.DiscordOAuth.ClientSecret,
+			RedirectURL:  cfg.DiscordOAuth.RedirectURL,
+		},
 	})
+
+	if cfg.DiscordOAuth.Enabled() {
+		log.Printf("auth: Discord sign-in enabled (redirect %s)", cfg.DiscordOAuth.RedirectURL)
+	} else {
+		log.Print("auth: Discord sign-in disabled (set DISCORD_CLIENT_ID/DISCORD_CLIENT_SECRET to enable)")
+	}
 
 	httpServer := &http.Server{
 		Addr:              cfg.HTTPAddr,

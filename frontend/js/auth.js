@@ -18,9 +18,42 @@
   const forgotForm = document.getElementById("forgot-form");
   const message = document.getElementById("message");
   const registerTab = document.querySelector('.tab[data-tab="register"]');
+  const discordAuth = document.getElementById("discord-auth");
 
-  // Hide the Register tab when an admin has disabled self-registration. The
-  // backend still enforces this; this is just to avoid a dead-end form.
+  // Human-readable messages for the error codes the Discord OAuth callback can
+  // redirect back with (?discord_error=...).
+  const DISCORD_ERRORS = {
+    access_denied: "Discord sign-in was cancelled.",
+    invalid_state: "Discord sign-in expired or was interrupted. Please try again.",
+    invalid_request: "Discord sign-in failed. Please try again.",
+    no_email:
+      "Your Discord account didn't share an email. Add a verified email to Discord, or register with a password.",
+    email_unverified:
+      "An account with your Discord email already exists. Sign in with your password, then link Discord from settings.",
+    already_linked_other:
+      "That account is already linked to a different Discord account. Sign in with your password instead.",
+    registration_disabled: "New sign-ups are currently disabled.",
+    server_error: "Something went wrong signing in with Discord. Please try again.",
+  };
+
+  // Surface a Discord sign-in error passed back as a query parameter, then strip
+  // it from the URL so a refresh doesn't repeat the message.
+  const params = new URLSearchParams(window.location.search);
+  const discordError = params.get("discord_error");
+  if (discordError) {
+    showMessage(DISCORD_ERRORS[discordError] || DISCORD_ERRORS.server_error);
+    params.delete("discord_error");
+    const qs = params.toString();
+    window.history.replaceState(
+      {},
+      "",
+      window.location.pathname + (qs ? "?" + qs : "")
+    );
+  }
+
+  // Hide the Register tab when an admin has disabled self-registration, and
+  // reveal the Discord sign-in button when the backend has it configured. The
+  // backend still enforces both; this is just UX.
   api
     .registrationStatus()
     .then((status) => {
@@ -28,6 +61,9 @@
         registerTab.classList.add("is-hidden");
         registerForm.classList.add("is-hidden");
         activateTab("login");
+      }
+      if (status && status.discord_enabled && discordAuth) {
+        discordAuth.classList.remove("is-hidden");
       }
     })
     .catch(() => {

@@ -2,8 +2,10 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"time"
@@ -56,6 +58,7 @@ type Server struct {
 	corsOrigin       string
 	appBaseURL       string
 	passwordResetTTL time.Duration
+	discordOAuth     DiscordOAuthConfig
 }
 
 // Config bundles the values needed to construct a Server.
@@ -74,6 +77,21 @@ type Config struct {
 	CORSOrigin       string
 	AppBaseURL       string
 	PasswordResetTTL time.Duration
+	DiscordOAuth     DiscordOAuthConfig
+}
+
+// DiscordOAuthConfig holds the "Sign in with Discord" settings the API needs.
+// It mirrors config.DiscordOAuthConfig but is redeclared here so the handlers
+// package doesn't depend on the config package.
+type DiscordOAuthConfig struct {
+	ClientID     string
+	ClientSecret string
+	RedirectURL  string
+}
+
+// Enabled reports whether Discord sign-in is configured.
+func (c DiscordOAuthConfig) Enabled() bool {
+	return c.ClientID != "" && c.ClientSecret != "" && c.RedirectURL != ""
 }
 
 // New constructs a Server from the given configuration.
@@ -93,6 +111,7 @@ func New(c Config) *Server {
 		corsOrigin:       c.CORSOrigin,
 		appBaseURL:       c.AppBaseURL,
 		passwordResetTTL: c.PasswordResetTTL,
+		discordOAuth:     c.DiscordOAuth,
 	}
 }
 
@@ -108,6 +127,11 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/logout", s.handleLogout)
 	mux.HandleFunc("POST /api/forgot-password", s.handleForgotPassword)
 	mux.HandleFunc("POST /api/reset-password", s.handleResetPassword)
+
+	// Discord sign-in / sign-up (OAuth2). Full-page redirects, so these are GET
+	// navigations rather than JSON endpoints.
+	mux.HandleFunc("GET /api/auth/discord/login", s.handleDiscordOAuthLogin)
+	mux.HandleFunc("GET /api/auth/discord/callback", s.handleDiscordOAuthCallback)
 
 	// Protected routes.
 	protected := func(h http.HandlerFunc) http.Handler {
@@ -220,7 +244,10 @@ func (s *Server) handleRegistrationStatus(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusInternalServerError, "could not read settings")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]bool{"enabled": enabled})
+	writeJSON(w, http.StatusOK, map[string]bool{
+		"enabled":         enabled,
+		"discord_enabled": s.discordOAuth.Enabled(),
+	})
 }
 
 func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
@@ -326,23 +353,30 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, user)
 }
 
-func (s *Server) issueAndRespond(w http.ResponseWriter, r *http.Request, user *models.User) {
-	token, err := s.tokens.Issue(user.ID, user.Username)
+// issueTokens mints a new access token and a persisted refresh token for the
+// user. It is the shared core behind both the JSON auth endpoints and the
+// Discord OAuth redirect flow.
+func (s *Server) issueTokens(ctx context.Context, user *models.User) (token, refreshToken string, expiresIn int, err error) {
+	token, err = s.tokens.Issue(user.ID, user.Username)
 	if err != nil {
-		log.Printf("issue token: %v", err)
-		writeError(w, http.StatusInternalServerError, "could not issue token")
-		return
+		return "", "", 0, fmt.Errorf("issue access token: %w", err)
 	}
 
 	refreshToken, refreshHash, err := auth.GenerateRefreshToken()
 	if err != nil {
-		log.Printf("generate refresh token: %v", err)
-		writeError(w, http.StatusInternalServerError, "could not issue token")
-		return
+		return "", "", 0, fmt.Errorf("generate refresh token: %w", err)
 	}
 	expiresAt := time.Now().Add(s.tokens.RefreshTTL())
-	if err := s.refreshTokens.Create(r.Context(), user.ID, refreshHash, expiresAt); err != nil {
-		log.Printf("persist refresh token: %v", err)
+	if err := s.refreshTokens.Create(ctx, user.ID, refreshHash, expiresAt); err != nil {
+		return "", "", 0, fmt.Errorf("persist refresh token: %w", err)
+	}
+	return token, refreshToken, int(s.tokens.AccessTTL().Seconds()), nil
+}
+
+func (s *Server) issueAndRespond(w http.ResponseWriter, r *http.Request, user *models.User) {
+	token, refreshToken, expiresIn, err := s.issueTokens(r.Context(), user)
+	if err != nil {
+		log.Printf("issue tokens: %v", err)
 		writeError(w, http.StatusInternalServerError, "could not issue token")
 		return
 	}
@@ -350,7 +384,7 @@ func (s *Server) issueAndRespond(w http.ResponseWriter, r *http.Request, user *m
 	writeJSON(w, http.StatusOK, authResponse{
 		Token:        token,
 		RefreshToken: refreshToken,
-		ExpiresIn:    int(s.tokens.AccessTTL().Seconds()),
+		ExpiresIn:    expiresIn,
 		User:         user,
 	})
 }

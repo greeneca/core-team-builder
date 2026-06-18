@@ -67,6 +67,9 @@ Full variable reference:
 | `DISCORD_BOT_TOKEN` | bot       | Discord bot token (only needed to run the bot)     |
 | `DISCORD_APP_ID`    | bot       | Discord application/client ID (optional)           |
 | `DISCORD_GUILD_ID`  | bot       | Register commands to one guild (optional; empty = global) |
+| `DISCORD_CLIENT_ID` | backend   | Discord OAuth2 client ID for "Sign in with Discord" (empty → button hidden) |
+| `DISCORD_CLIENT_SECRET` | backend | Discord OAuth2 client **secret** (keep secret)   |
+| `DISCORD_OAUTH_REDIRECT_URL` | backend | OAuth callback URL; must match a portal redirect (default `APP_BASE_URL` + `/api/auth/discord/callback`) |
 
 ---
 
@@ -242,6 +245,29 @@ Run it:
 > Treat `DISCORD_BOT_TOKEN` like any other secret (keep it in `.env`, `chmod 600`).
 > Rotating it in the developer portal requires updating `.env` and restarting the
 > bot container.
+
+### Sign in with Discord (OAuth2, optional)
+
+This is a **backend** feature (served by `cmd/server`, independent of the bot) that
+adds a "Continue with Discord" button to the login page. Signing up this way stores
+the user's Discord ID on their account, so they can use the bot's `/coreteam`
+commands **without** running `/coreteam link`.
+
+- [ ] In the same Discord application, open **OAuth2** and copy the **Client ID**
+      into `DISCORD_CLIENT_ID` and the **Client Secret** into `DISCORD_CLIENT_SECRET`.
+- [ ] Under **OAuth2 → Redirects**, add your callback URL **exactly**:
+      `https://teams.example.com/api/auth/discord/callback` (it must match
+      `DISCORD_OAUTH_REDIRECT_URL`; when unset it defaults to `APP_BASE_URL` +
+      `/api/auth/discord/callback`).
+- [ ] The flow requests the `identify` and `email` scopes. An existing account is
+      auto-linked only when the Discord email is **verified**; new sign-ups honor the
+      `registration_enabled` toggle.
+- [ ] Restart the backend. With the secrets set, the login page shows the button
+      (verify via `GET /api/registration-status` → `"discord_enabled": true`).
+
+> The client secret is as sensitive as `JWT_SECRET`. The OAuth callback issues the
+> app's own tokens via the URL **fragment** (never sent to the server), and a
+> short-lived HttpOnly state cookie guards against CSRF.
 
 ---
 

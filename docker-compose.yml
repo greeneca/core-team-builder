@@ -75,6 +75,12 @@ services:
       SMTP_USERNAME: ${SMTP_USERNAME}
       SMTP_PASSWORD: ${SMTP_PASSWORD}
       SMTP_FROM: ${SMTP_FROM}
+      # Sign in with Discord (OAuth2). Empty CLIENT_ID/SECRET → the login page
+      # hides the "Continue with Discord" button. Defaults via :- keep the
+      # backend bootable when these aren't set in .env.
+      DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID:-}
+      DISCORD_CLIENT_SECRET: ${DISCORD_CLIENT_SECRET:-}
+      DISCORD_OAUTH_REDIRECT_URL: ${DISCORD_OAUTH_REDIRECT_URL:-}
     depends_on:
       db:
         condition: service_healthy

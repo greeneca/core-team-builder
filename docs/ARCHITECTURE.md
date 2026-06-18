@@ -23,7 +23,8 @@ Core Team Builder is a three-tier application:
             │   • /api/register, /api/login, /api/refresh,  │
             │     /api/logout, /api/forgot-password,        │
             │     /api/reset-password,                      │
-            │     /api/registration-status (public)        │
+            │     /api/registration-status,                │
+            │     /api/auth/discord/* (OAuth, public)      │
             │   • /api/me, /api/teams, .../encounters,      │
             │     .../groupings, .../roster-members,        │
             │     /api/discord/*, /api/admin/* (JWT)        │
@@ -146,9 +147,9 @@ PostgreSQL. The schema in `migrations/*.sql` (e.g. `001_init.sql`,
 | id             | bigint (IDENTITY) | primary key                    |
 | username       | varchar(50)   | unique, not null                   |
 | email          | varchar(255)  | unique, not null                   |
-| password_hash  | text          | bcrypt hash, not null              |
+| password_hash  | text          | bcrypt hash, not null (unusable sentinel for Discord-only accounts) |
 | is_admin       | boolean       | default `false`; `015_admin_and_settings.sql` |
-| discord_user_id  | text        | linked Discord user ID, unique when set; `027_discord.sql` |
+| discord_user_id  | text        | linked Discord user ID, unique when set; `027_discord.sql`; set by `/coreteam link` **or** Discord sign-up |
 | discord_username | text        | linked Discord display name (default `''`); `027_discord.sql` |
 | created_at     | timestamptz   | default `now()`                    |
 | updated_at     | timestamptz   | auto-updated via trigger           |

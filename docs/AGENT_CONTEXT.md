@@ -69,6 +69,25 @@ UI autosaves changes (no Save buttons).
    live in `backend/internal/handlers/password_reset.go`; persistence in
    `PasswordResetStore` (`backend/internal/models/password_reset.go`).
 
+6. **Sign in with Discord** (OAuth2; `backend/internal/handlers/discord_oauth.go`):
+   when `DISCORD_CLIENT_ID`/`DISCORD_CLIENT_SECRET` are set the login page shows a
+   "Continue with Discord" button. `GET /api/auth/discord/login` sets a short-lived
+   HttpOnly CSRF **state cookie** and redirects to Discord;
+   `GET /api/auth/discord/callback` verifies the state, exchanges the code for the
+   Discord identity (`identify email` scopes), then resolves the app account:
+   (a) if the Discord ID is **already linked**, sign that user in; (b) else if the
+   Discord **email (verified)** matches an existing account, **auto-link** and sign
+   in (refused if that account is already linked to a different Discord, or if the
+   email is unverified); (c) else **create a new account** (honoring the
+   registration toggle; first-ever user still bootstraps as admin). New accounts
+   are **passwordless** (`UserStore.CreateDiscordUser` stores an unusable
+   `password_hash`; users can set one later via forgot-password) and have their
+   `discord_user_id` set, so **the bot's `/coreteam` commands work with no manual
+   `/coreteam link`**. The callback redirects to `<APP_BASE_URL>/discord.html#…`
+   with the freshly issued tokens in the **URL fragment** (never sent to a server);
+   `frontend/js/discord.js` stores the session and continues into the app. Errors
+   come back as `login.html?discord_error=<code>`.
+
 Passwords: bcrypt cost 12, min length 8. Hashes only ever leave via `password_hash`
 column; the `User` JSON model hides it (`json:"-"`).
 
@@ -88,7 +107,10 @@ column; the `User` JSON model hides it (`json:"-"`).
   reads/writes it. `POST /api/register` honors the toggle for every account after
   the first (returns `403` when disabled). The unauthenticated
   `GET /api/registration-status` lets the login page hide the Register tab when
-  it's off (the backend still enforces it).
+  it's off (the backend still enforces it). The same response includes
+  `discord_enabled` so the page can show/hide the "Continue with Discord" button.
+  Discord sign-up also honors the toggle (new Discord accounts are blocked when
+  registration is disabled; existing/linked users can still sign in).
 - **Admin endpoints** (JWT-protected; `requireAdmin` in
   `backend/internal/handlers/admin.go` returns `403` for non-admins):
   - `GET /api/admin/users` — list all users.
@@ -441,7 +463,9 @@ column; the `User` JSON model hides it (`json:"-"`).
   (15-min TTL, mirrors `password_resets`); the bot's `/coreteam link` consumes it
   (`DiscordStore.ConsumeLinkCode` → `LinkUser`). `GET`/`DELETE /api/discord/link`
   report/clear the link. The hourly `startTokenCleanup` sweep also prunes expired
-  link codes.
+  link codes. **Note**: accounts created via "Sign in with Discord" (see the auth
+  section) already have `discord_user_id` set, so they skip the link-code step
+  entirely; the code flow remains for password accounts that want to link.
 - **Channel bindings**: `discord_channels` maps `channel_id` → `team_id` (upsert;
   `DiscordStore.BindChannel`/`GetChannelTeam`/`UnbindChannel`).
 - **RSVPs**: `discord_rsvps` (`028_discord_rsvps.sql`) stores one row per
@@ -466,7 +490,10 @@ column; the `User` JSON model hides it (`json:"-"`).
   (`Config.Discord`), wired via `docker-compose.yml` + `.env`. Run the bot with
   `docker compose --profile bot up`. See `docs/DEPLOYMENT.md` for the Discord
   developer-portal setup (create app + bot, invite with the `bot` and
-  `applications.commands` scopes).
+  `applications.commands` scopes). "Sign in with Discord" is a **separate,
+  server-side** feature configured with `DISCORD_CLIENT_ID` /
+  `DISCORD_CLIENT_SECRET` / `DISCORD_OAUTH_REDIRECT_URL` (`config.DiscordOAuth`,
+  used by `cmd/server`, not the bot).
 
 ## Member pool / recruitment (current)
 

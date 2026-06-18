@@ -52,6 +52,31 @@ func (s *UserStore) Create(ctx context.Context, username, email, passwordHash st
 	return u, nil
 }
 
+// noLoginPasswordHash is stored in password_hash for accounts created via an
+// external identity (Discord) that have never set a password. It is not a valid
+// bcrypt hash, so CheckPassword can never succeed against it — such accounts can
+// only sign in via Discord until they set a password through the reset flow.
+const noLoginPasswordHash = "!"
+
+// CreateDiscordUser inserts a new account that authenticates via a linked
+// Discord identity instead of a password. The Discord ID is stored on the row,
+// so the bot's GetUserByDiscordID resolves the user with no manual link step.
+func (s *UserStore) CreateDiscordUser(ctx context.Context, username, email, discordUserID, discordUsername string, isAdmin bool) (*User, error) {
+	const q = `
+		INSERT INTO users (username, email, password_hash, is_admin, discord_user_id, discord_username)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING id, username, email, password_hash, is_admin, created_at, updated_at`
+
+	u := &User{}
+	err := s.pool.QueryRow(ctx, q, username, email, noLoginPasswordHash, isAdmin, discordUserID, discordUsername).Scan(
+		&u.ID, &u.Username, &u.Email, &u.PasswordHash, &u.IsAdmin, &u.CreatedAt, &u.UpdatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return u, nil
+}
+
 // GetByUsername looks up a user by their unique username.
 func (s *UserStore) GetByUsername(ctx context.Context, username string) (*User, error) {
 	const q = `

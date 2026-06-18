@@ -315,6 +315,31 @@ a.brand--home:hover {
   padding: var(--space-2) var(--space-3);
   font-size: var(--font-size-sm);
 }
+/* Discord brand button for "Sign in with Discord" (Discord blurple). */
+.btn--discord {
+  background: #5865f2;
+  color: #fff;
+}
+.btn--discord:hover {
+  background: #4752c4;
+}
+
+/* "or" separator between the password form and the Discord sign-in button. */
+.auth-sep {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: var(--space-5) 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+.auth-sep::before,
+.auth-sep::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--color-border);
+}
 
 /* Tabs */
 .tabs {
