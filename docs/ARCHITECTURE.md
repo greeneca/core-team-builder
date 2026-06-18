@@ -221,8 +221,12 @@ rows. Managed via `PasswordResetStore`.
 | encounters_enabled | boolean       | surface multi-encounter UI; default `false`; `017_team_encounters_enabled.sql` |
 | post_footer    | text              | Discord bot `/coreteam post` footer (default `''`); `018_team_signup_note.sql` → `029_team_bot_footers.sql` |
 | dm_footer      | text              | Discord bot build-details DM footer (default `''`); `019_team_detailed_header.sql` → `029_team_bot_footers.sql` |
-| signup_post    | text              | Discord bot `/coreteam signup` recruitment body (default `''`); `030_team_members_pool.sql` |
+| signup_post    | text              | Discord bot `/coreteam recruit` recruitment body (default `''`); `030_team_members_pool.sql` |
 | auto_share_pool_viewers | boolean  | auto-grant viewer access to member-pool app accounts; default `false`; `034_team_auto_share_pool.sql` |
+| pre_made       | boolean           | one-off pre-made trial run mode; default `false`; `035_team_premade.sql` |
+| premade_post   | text              | body the bot prepends to a `/coreteam signup` post (default `''`); `035_team_premade.sql` |
+| simple_signup  | boolean           | pre-made role-based "simple" signup (hides class/gear + details, claims first matching slot); default `false`; `037_team_simple_signup.sql` |
+| waitlist_enabled | boolean         | pre-made per-role waitlist (auto-promote on freed slot); default `false`; `038_premade_waitlist.sql` |
 | created_at     | timestamptz       | default `now()`                            |
 | updated_at     | timestamptz       | auto-updated via trigger                   |
 
@@ -236,11 +240,22 @@ multi-encounter UI (off → only the first encounter shows); `post_footer` /
 `dm_footer` are free-form footers the Discord bot appends to its `/coreteam post`
 overview and its build-details DM respectively (see `docs/AGENT_CONTEXT.md`
 "Discord bot footers"); `signup_post` is the free-form body the bot posts with
-`/coreteam signup` to recruit new members (see "Member pool" below).
+`/coreteam recruit` to recruit new members (see "Member pool" below).
 `auto_share_pool_viewers`, when true, auto-grants viewer access (in
 `team_members`) to the app accounts of everyone in the team's member pool —
 current and future — once their Discord identity is tied to an account (see
-`docs/AGENT_CONTEXT.md` "Auto-share with member pool").
+`docs/AGENT_CONTEXT.md` "Auto-share with member pool"). `pre_made` turns the team
+into a one-off **pre-made trial run** posted via the bot's `/coreteam signup`
+command; `premade_post` is the free-form body prepended to that post (see
+`premade_runs` below and `docs/AGENT_CONTEXT.md` "Pre-made trial runs").
+`simple_signup` (only meaningful with `pre_made`) switches that run from
+per-slot "specific" signups to role-based "simple" signups: the post hides each
+slot's class/gear and the build-details dropdown, players pick a **role**, and
+claiming takes the first open slot matching it. `waitlist_enabled` (also pre-made
+only) lets players join a **per-role** waitlist once a role is full; when a slot
+of that role frees up, the head of that role's queue is auto-promoted into it and
+DM'd (see `premade_waitlist` below and `docs/AGENT_CONTEXT.md` "Pre-made trial
+runs").
 
 ### `team_members` (sharing)
 
@@ -362,7 +377,7 @@ Managed via `GroupingStore`; see `docs/AGENT_CONTEXT.md` "Groupings model".
 A per-team list of prospective players (`030_team_members_pool.sql`), **separate**
 from the 12 fixed `players` slots and from app-account sharing (`team_members`).
 It captures availability/role/class interest gathered via the Discord
-`/coreteam signup` DM intake, plus manual web entries.
+`/coreteam recruit` DM intake, plus manual web entries.
 
 | column           | type        | notes                                          |
 |------------------|-------------|------------------------------------------------|
@@ -431,6 +446,60 @@ buttons on a posted overview — one row per `(message_id, discord_user_id)`:
 
 Managed via `DiscordStore`; the hourly sweep prunes expired/used link codes. See
 `docs/AGENT_CONTEXT.md` "Discord bot".
+
+`premade_runs` (`036_premade_runs.sql`) — one row per posted **pre-made trial
+run**. The bookkeeping timestamps drive the bot's scheduler (thread 15 min
+before, cleanup 2 h after) and make those actions fire exactly once / catch up
+after a restart:
+
+| column            | type        | notes                                       |
+|-------------------|-------------|---------------------------------------------|
+| id                | bigint      | primary key                                 |
+| team_id           | bigint      | FK → `teams(id)`, cascade                   |
+| guild_id          | text        | guild the run was posted in                 |
+| channel_id        | text        | channel the post is in                      |
+| message_id        | text        | the announcement message (set after posting)|
+| thread_id         | text        | the run thread (set 15 min before)          |
+| title             | text        | run title from the modal                    |
+| scheduled_at      | timestamptz | trial start, **UTC** (from runner's zone)   |
+| created_by        | bigint      | FK → `users(id)`, set null on delete        |
+| thread_started_at | timestamptz | NULL until the thread is created            |
+| cleaned_up_at     | timestamptz | NULL until the post/thread are deleted      |
+| created_at        | timestamptz | default `now()`                             |
+| updated_at        | timestamptz | auto-updated via trigger                    |
+
+`premade_signups` (`036_premade_runs.sql`) — one row per claimed slot. A unique
+`(run_id, slot)` locks a slot to one claimant; a unique `(run_id, discord_user_id)`
+enforces one slot per user (switching releases the prior claim in the same tx):
+
+| column           | type        | notes                                     |
+|------------------|-------------|-------------------------------------------|
+| id               | bigint      | primary key                               |
+| run_id           | bigint      | FK → `premade_runs(id)`, cascade          |
+| slot             | smallint    | 1–12; unique per run                      |
+| discord_user_id  | text        | claimant; unique per run                  |
+| discord_username | text        | display name at claim time                |
+| created_at       | timestamptz | default `now()`                           |
+
+`premade_waitlist` (`038_premade_waitlist.sql`) — one row per user waiting for a
+**role** on a run (only used when the team's `waitlist_enabled` is on). A unique
+`(run_id, discord_user_id)` enforces one waitlist entry per user; `created_at`
+orders each role's FIFO queue. When a claimed slot is freed, `PromoteToSlot`
+moves the head of that slot's role queue into the open slot (transactionally,
+`FOR UPDATE SKIP LOCKED`) and the bot DMs them:
+
+| column           | type        | notes                                     |
+|------------------|-------------|-------------------------------------------|
+| id               | bigint      | primary key                               |
+| run_id           | bigint      | FK → `premade_runs(id)`, cascade          |
+| role             | text        | role they're waiting for                  |
+| discord_user_id  | text        | waiter; unique per run                    |
+| discord_username | text        | display name at join time                 |
+| created_at       | timestamptz | default `now()`; FIFO order               |
+
+Managed via `PremadeStore`; the bot's background scheduler (`cmd/bot/scheduler.go`,
+the only time-based worker) acts on due runs. See `docs/AGENT_CONTEXT.md`
+"Pre-made trial runs".
 
 ## Authentication & security
 

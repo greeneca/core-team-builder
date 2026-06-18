@@ -241,7 +241,7 @@ in `docs/AGENT_CONTEXT.md`):
   output — `post_footer` to the `/coreteam post` overview, `dm_footer` to the
   "Get My Build Details" DM.
 - `signup_post` is free-form text (same limits) the Discord bot posts as the body
-  of its `/coreteam signup` recruitment embed.
+  of its `/coreteam recruit` recruitment embed.
 - `players` is optional; omitted slots are left unchanged. Invalid slot/role/
   class/skill-line/mastery returns `400` and the whole save is rolled back.
 

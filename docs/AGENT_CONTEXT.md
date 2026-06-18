@@ -17,7 +17,7 @@ Trash, or a trial boss), each holding a per-player gear/skills loadout, and
 slayer stacks). A team can set two **Discord bot footers** (free-form text the
 bot appends to its `/coreteam post` overview and its build-details DM). Each
 team also keeps a **member pool** — prospective players who signed up via the
-bot's `/coreteam signup` post (an interactive DM gathers their availability,
+bot's `/coreteam recruit` post (an interactive DM gathers their availability,
 roles, and classes) or were added manually, visualized on a Members page. The
 UI autosaves changes (no Save buttons).
 
@@ -238,6 +238,30 @@ column; the `User` JSON model hides it (`json:"-"`).
   (`SharePoolMembers` from `cmd/bot` `signupFinish`). Turning the flag **off**
   does nothing — it never revokes already-granted shares; it just stops new pool
   members from being shared with unless re-enabled.
+- **Pre-made trial run** (`035_team_premade.sql`): `teams.pre_made BOOLEAN`
+  (default **false**) + `teams.premade_post TEXT` (default `''`, ≤2000 runes) — a
+  "Team Features" checkbox plus its own "Pre-made Run Post" card. When **on**, the
+  team becomes a one-off run posted via the bot's `/coreteam signup` command and
+  the UI **hides** (non-destructively) the trial schedule, Discord Bot Texts,
+  per-player Discord handles, the Members Pool button, and the auto-share toggle —
+  none of that applies to a pre-made run. The hidden data is preserved and
+  reappears if the flag is turned back off. The bot side (signups, scheduling) is
+  documented under "Discord bot" → "Pre-made trial runs" below.
+- **Simple signup** (`037_team_simple_signup.sql`): `teams.simple_signup BOOLEAN`
+  (default **false**) — a "Team Features" checkbox shown only when **Pre-made** is
+  on. Off = "specific" signup (current behavior: the post shows each slot's
+  class/gear, a "get build details" dropdown is offered, and players claim an
+  exact slot). On = "simple" signup: the post hides class/gear and the details
+  dropdown, the claim select lists **roles** (with open counts), and claiming
+  takes the first open slot matching the chosen role (`handlePremadeClaim` →
+  `claimSimple`, retrying on slot races).
+- **Waitlist** (`038_premade_waitlist.sql`): `teams.waitlist_enabled BOOLEAN`
+  (default **false**) — a "Team Features" checkbox shown only when **Pre-made** is
+  on. When on, a "Join a waitlist (role is full)" select appears on the post for
+  any **full** role; joining queues the user (`premade_waitlist`, FIFO per role).
+  When a claimed slot frees up (`handlePremadeLeave`), `PromoteToSlot` moves the
+  head of that slot's role queue into the open slot and the bot DMs them. Holding
+  a slot supersedes waiting (claiming clears your waitlist entry).
 - **Discord bot footers** (`018_team_signup_note.sql`,
   `019_team_detailed_header.sql`, renamed by `029_team_bot_footers.sql`): each
   team carries `post_footer TEXT` (appended to the bot's `/coreteam post`
@@ -248,7 +272,7 @@ column; the `User` JSON model hides it (`json:"-"`).
   the old web-app clipboard export (detailed post / condensed list) was removed.
 - **Save-all**: `PUT /api/teams/{id}` is the single "save everything" call —
   body is `{ name, schedule_days, schedule_time,
-  encounters_enabled, post_footer, dm_footer, signup_post, auto_share_pool_viewers, players: [{slot,name,discord_handle,role,class,subclassed,skill_line_1..3,mastery_1..2}] }`
+  encounters_enabled, post_footer, dm_footer, signup_post, auto_share_pool_viewers, pre_made, premade_post, simple_signup, waitlist_enabled, players: [{slot,name,discord_handle,role,class,subclassed,skill_line_1..3,mastery_1..2}] }`
   and the backend (`TeamStore.Save`) updates team meta + roster in one
   transaction (there is no per-player save endpoint). `schedule_time` is sent in
   UTC (the UI converts from the viewer's current zone,
@@ -445,10 +469,15 @@ column; the `User` JSON model hides it (`json:"-"`).
     **✅ Coming**, **❌ Not coming** (RSVP), and **Get My Build Details**. Built by
     `discordfmt.BuildPost`; the bot wraps the parts in the embed and attaches the
     buttons via `postComponents()`.
-  - `signup` — posts the team's **recruitment signup** as an embed (the team's
+  - `recruit` — posts the team's **recruitment post** as an embed (the team's
     free-form `signup_post` body, or a default prompt) with a single **I'm
     Interested** button. Pressing it starts an interactive **DM intake flow**
     (see Member pool below). Built by `handleSignupPost` / `signupComponents`.
+    (Formerly named `signup`; the command's internal `signup_*` component custom
+    IDs and `signup_post` column are unchanged.)
+  - `signup` — posts a one-off **pre-made trial run** (see "Pre-made trial runs"
+    below). Implemented in `backend/cmd/bot/premade.go`. (Formerly named
+    `premade`; the internal `premade_*` custom IDs and tables are unchanged.)
   - `status` / `unset` — show / remove the channel's team binding.
   - **Get My Build Details** button (`get_my_details`) → matches the presser to a
     roster slot (by Discord ID/mention in `players.discord_handle`, else
@@ -512,6 +541,63 @@ column; the `User` JSON model hides it (`json:"-"`).
   `DISCORD_CLIENT_SECRET` / `DISCORD_OAUTH_REDIRECT_URL` (`config.DiscordOAuth`,
   used by `cmd/server`, not the bot).
 
+## Pre-made trial runs (current)
+
+A **pre-made trial run** is a one-off, scheduled event built from a team that has
+the `pre_made` flag on (see "Pre-made trial run" under Teams). Tables in
+`036_premade_runs.sql`; store in `backend/internal/models/premade.go`
+(`PremadeStore`); bot flow + scheduler in `backend/cmd/bot/premade.go` and
+`backend/cmd/bot/scheduler.go`.
+
+- **Command** (`/coreteam signup`, `handlePremade`): resolves the runner's
+  **linked** app account (`GetUserByDiscordID`), lists their **pre-made teams they
+  own or can edit** (`listEditablePremadeTeams`), and walks a component flow whose
+  custom IDs carry context: ephemeral **team select** (`premade_team`) → ephemeral
+  **timezone select** (`premade_tz:<teamID>`, reusing the signup intake's
+  `signupTimezones`/`tzOffsetLabel`) → a **modal** (`premade_modal:<teamID>:<tz>`)
+  capturing **title**, **date** (`YYYY-MM-DD`), and **time** (`HH:MM`, 24h). The
+  modal submit parses the date/time **in the chosen IANA zone**, converts to UTC,
+  creates the run, and posts the announcement publicly in the current channel via
+  `ChannelMessageSendComplex` (so the message id is captured immediately).
+- **Post** (`discordfmt.BuildPremadePost`): title + a single `<t:unix:F>`/`:R`
+  schedule timestamp + the team's `premade_post` body + a per-slot roster showing
+  each slot's name/role/class and either the claimant's mention or "open".
+  Controls (`premadeComponents`): a **claim** select listing only open slots
+  (`premade_claim`; disabled "all taken" placeholder when full), a **details**
+  select listing all slots (`premade_details`), and a **Leave my slot** button
+  (`premade_leave`).
+- **Simple signup** (`teams.simple_signup`, see Teams above): when on, the post
+  hides class/gear (`premadeRosterLines`) and drops the **details** select; the
+  **claim** select instead lists **roles** with open counts
+  (`premadeSimpleComponents`) and claiming a role takes the first open matching
+  slot (`claimSimple` → `firstOpenSlotForRole`, retrying on `ErrSlotTaken`).
+- **Waitlist** (`teams.waitlist_enabled`, see Teams above): when on,
+  `premadeWaitlistRow` adds a **join waitlist** select (`premade_wait`) listing
+  roles that are currently full; the post shows a per-role "__Waitlist__" block
+  (`premadeWaitlistLines`). `handlePremadeWaitlist` queues the user
+  (`JoinWaitlist`; refuses if they already hold a slot). On **leave**
+  (`handlePremadeLeave`), the freed slot's role queue is auto-promoted via
+  `PromoteToSlot` and the promotee is DM'd (`dmPromoted`). The 15-min thread
+  still tags **claimed** players only.
+- **Claims** (`PremadeStore.ClaimSlot`): per-slot, **one slot per user** —
+  claiming releases the user's prior claim in the same transaction; the
+  `(run_id, slot)` unique index locks a slot (a clash returns `ErrSlotTaken` →
+  ephemeral "already taken"). **Leave** drops the claim. **Details** DMs that
+  slot's `discordfmt.PlayerDetail` (ephemeral fallback if DMs are closed). Claim
+  and leave re-render the post in place (`InteractionResponseUpdateMessage`).
+- **Scheduler** (`runScheduler`, started as a goroutine from `cmd/bot/main.go`,
+  tied to the shutdown context) — the bot's **only** time-based worker. It polls
+  every `schedulerInterval` (60s, plus an immediate pass on startup):
+  - **15 min before** (`DueThreadRuns`): creates a thread off the post
+    (`MessageThreadStartComplex`) and posts a message tagging every signup;
+    `MarkThreadStarted`.
+  - **2 h after** (`DueCleanupRuns`): deletes the thread + post; `MarkCleanedUp`.
+  Both are tracked by timestamp columns on `premade_runs`, so each fires **exactly
+  once** and **catches up** if the bot was offline at the trigger time (cleanups
+  are processed before threads, so a long-offline finished run is removed rather
+  than getting a late thread). The bot needs **Create Public Threads / Manage
+  Threads / Manage Messages** permissions for these (see `docs/DEPLOYMENT.md`).
+
 ## Member pool / recruitment (current)
 
 The **member pool** (`team_roster_members`) is a per-team list of prospective
@@ -522,7 +608,7 @@ interest gathered via Discord, plus manual web entries. (A team can opt into
 `auto_share_pool_viewers` under Teams above.)
 
 - **Schema** (`030_team_members_pool.sql`): adds `teams.signup_post TEXT` (the
-  free-form `/coreteam signup` body) and the `team_roster_members` table —
+  free-form `/coreteam recruit` body) and the `team_roster_members` table —
   `discord_user_id` (NULL for manual entries), `discord_username`,
   `display_name`, `timezone` (IANA; the zone the hours are expressed in), `days
   TEXT[]` (`mon..sun`), `availability JSONB` (`{ "mon": { "start": 18, "end":

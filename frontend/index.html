@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Dashboard — Core Team Builder</title>
-  <link rel="stylesheet" href="css/styles.css?v=96" />
+  <link rel="stylesheet" href="css/styles.css?v=100" />
 </head>
 <body>
   <div id="message" class="toast is-hidden" role="alert" aria-live="assertive"></div>
@@ -90,7 +90,7 @@
         </div>
 
         <div class="collapsible-body">
-        <div class="schedule mt-6">
+        <div id="schedule-section" class="schedule mt-6">
           <h3 class="schedule-heading">Trial schedule</h3>
           <div class="form-group">
               <label>Days of the Week</label>
@@ -106,19 +106,45 @@
 
         <div class="team-features mt-6">
           <h3 class="schedule-heading">Team Features</h3>
-          <label class="toggle" id="encounters-enabled-label" title="When off, the encounters section is hidden and only the first encounter is shown.">
-            <input type="checkbox" id="encounters-enabled-toggle" /> Encounters Enabled
+          <label class="toggle" id="pre-made-label" title="When on, this team becomes a one-off pre-made trial run: players claim individual slots through the Discord bot's /coreteam signup command. The trial schedule, Discord bot texts, per-player Discord handles, and member pool are hidden (their data is kept and reappears if you turn this back off).">
+            <input type="checkbox" id="pre-made-toggle" /> Signup Template
+          </label>
+          <label class="toggle" id="simple-signup-label" title="Only applies to a pre-made trial run. Off (specific): the post shows each slot's class and gear, players can request a slot's build details, and they claim an exact slot. On (simple): class, gear, and the details dropdown are hidden; players pick a role and are placed in the first open slot matching it.">
+            <input type="checkbox" id="simple-signup-toggle" /> Simple signup (roles only)
+          </label>
+          <label class="toggle" id="waitlist-label" title="Only applies to a pre-made trial run. When on, players can join a per-role waitlist once a role is full; when a slot of that role opens up, the next person on that role's waitlist is automatically moved in and notified by DM.">
+            <input type="checkbox" id="waitlist-toggle" /> Allow waitlist (per role)
           </label>
           <label class="toggle" id="auto-share-pool-label" title="When on, everyone in the member pool is automatically given viewer access to this team — current and future members — once their account is linked via Discord. Turning it off does not remove access already granted.">
             <input type="checkbox" id="auto-share-pool-toggle" /> Auto-share with member pool (viewer)
+          </label>
+          <label class="toggle" id="encounters-enabled-label" title="When off, the encounters section is hidden and only the first encounter is shown.">
+            <input type="checkbox" id="encounters-enabled-toggle" /> Encounters Enabled
           </label>
         </div>
         </div>
       </div>
 
+      <!-- Pre-made run post body: shown only when the team is a pre-made trial
+           run. The bot prepends this text to the /coreteam signup announcement. -->
+      <div id="premade-post-card" class="card mt-4 collapsible section-collapsible is-hidden">
+        <div class="section-head collapsible-head">
+          <div class="collapsible-head-main">
+            <button class="collapse-toggle" type="button" aria-expanded="true" aria-label="Collapse section"></button>
+            <h2 style="margin: 0;">Pre-made Run Post<span class="info-indicator" tabindex="0" role="img" aria-label="Pre-made run post: free-form text the Discord bot prepends to a /coreteam signup run announcement. Saved with the team." data-tip="Free-form text the Discord bot prepends to a /coreteam signup run announcement (e.g. requirements, expectations). Saved with the team.">i</span></h2>
+          </div>
+        </div>
+        <div class="collapsible-body">
+          <div class="form-group mt-4">
+            <label for="premade-post-input">Announcement Body</label>
+            <textarea id="premade-post-input" class="input" rows="3" maxlength="2000" placeholder="Optional text the bot prepends to a pre-made run post (e.g. requirements, expectations, what to bring)."></textarea>
+          </div>
+        </div>
+      </div>
+
       <!-- Discord bot footers: free-form text the Discord bot appends to its
            output, kept in its own section so it can be collapsed independently. -->
-      <div class="card mt-4 collapsible section-collapsible">
+      <div id="discord-bot-texts-card" class="card mt-4 collapsible section-collapsible">
         <div class="section-head collapsible-head">
           <div class="collapsible-head-main">
             <button class="collapse-toggle" type="button" aria-expanded="true" aria-label="Collapse section"></button>
@@ -136,8 +162,8 @@
             <textarea id="dm-footer-input" class="input" rows="3" maxlength="2000" placeholder="Optional text appended to the bottom of the Get My Build Details DM (e.g. reminders, links)."></textarea>
           </div>
           <div class="form-group mt-4">
-            <label for="signup-post-input">Signup Post<span class="info-indicator" tabindex="0" role="img" aria-label="Signup post: free-form recruitment text the bot posts with /coreteam signup. Interested users press a button and the bot DMs them to gather availability, roles, and classes. Saved with the team." data-tip="Free-form recruitment text the bot posts with /coreteam signup. Interested users press a button and the bot DMs them to gather availability, roles, and classes. Saved with the team.">i</span></label>
-            <textarea id="signup-post-input" class="input" rows="3" maxlength="2000" placeholder="Optional recruitment text the bot posts with /coreteam signup (e.g. what you're looking for, expectations)."></textarea>
+            <label for="signup-post-input">Recruit Post<span class="info-indicator" tabindex="0" role="img" aria-label="Recruit post: free-form recruitment text the bot posts with /coreteam recruit. Interested users press a button and the bot DMs them to gather availability, roles, and classes. Saved with the team." data-tip="Free-form recruitment text the bot posts with /coreteam recruit. Interested users press a button and the bot DMs them to gather availability, roles, and classes. Saved with the team.">i</span></label>
+            <textarea id="signup-post-input" class="input" rows="3" maxlength="2000" placeholder="Optional recruitment text the bot posts with /coreteam recruit (e.g. what you're looking for, expectations)."></textarea>
           </div>
         </div>
         </div>
@@ -403,7 +429,7 @@
       </div>
     </div>
 
-    <!-- Member pool view (the /coreteam signup recruitment pool) -->
+    <!-- Member pool view (the /coreteam recruit recruitment pool) -->
     <section id="members-view" class="is-hidden">
       <div class="detail-toolbar mt-4">
         <button id="members-back-btn" class="btn btn--ghost" type="button">← Back to team</button>
@@ -415,7 +441,7 @@
       <div class="card mt-4">
         <h1 id="members-team-name" style="margin-top: 0;">…</h1>
         <p class="text-muted">
-          People who signed up via the Discord bot's <code>/coreteam signup</code> post, plus
+          People who signed up via the Discord bot's <code>/coreteam recruit</code> post, plus
           any added here. Availability times are shown in
           <strong id="members-local-tz">your local timezone</strong>.
         </p>
@@ -464,7 +490,7 @@
         <h2 class="members-subhead">Members Pool (<span id="members-count">0</span>)</h2>
         <div id="members-grid" class="members-grid"></div>
         <p id="members-empty" class="text-muted is-hidden">
-          No members yet. Post <code>/coreteam signup</code> with the Discord bot to start
+          No members yet. Post <code>/coreteam recruit</code> with the Discord bot to start
           gathering availability, or add someone manually.
         </p>
       </div>
@@ -494,10 +520,10 @@
     </section>
   </main>
 
-  <script src="js/api.js?v=96"></script>
-  <script src="js/gear-skills.js?v=96"></script>
-  <script src="js/data.js?v=96"></script>
-  <script src="js/components.js?v=96"></script>
-  <script src="js/app.js?v=96"></script>
+  <script src="js/api.js?v=100"></script>
+  <script src="js/gear-skills.js?v=100"></script>
+  <script src="js/data.js?v=100"></script>
+  <script src="js/components.js?v=100"></script>
+  <script src="js/app.js?v=101"></script>
 </body>
 </html>

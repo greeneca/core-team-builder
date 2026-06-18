@@ -288,7 +288,7 @@ const api = {
     });
   },
 
-  // --- Roster members (the /coreteam signup recruitment pool) ---
+  // --- Roster members (the /coreteam recruit recruitment pool) ---
 
   // List a team's member pool: { members: [...] }.
   listRosterMembers(teamId) {

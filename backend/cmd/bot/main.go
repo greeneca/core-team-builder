@@ -53,6 +53,7 @@ func run() error {
 		groupings:  models.NewGroupingStore(pool),
 		members:    models.NewMemberStore(pool),
 		discord:    models.NewDiscordStore(pool),
+		premade:    models.NewPremadeStore(pool),
 		appBaseURL: cfg.AppBaseURL,
 	}
 
@@ -82,6 +83,10 @@ func run() error {
 		scope = "to guild " + cfg.Discord.GuildID
 	}
 	log.Printf("bot ready as %s; /coreteam registered %s", session.State.User.Username, scope)
+
+	// Background loop for pre-made trial runs (thread 15 min before, cleanup 2 h
+	// after). Stops when ctx is cancelled on shutdown.
+	go b.runScheduler(ctx, session)
 
 	<-ctx.Done()
 	log.Println("shutting down")

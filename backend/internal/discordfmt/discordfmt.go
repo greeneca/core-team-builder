@@ -66,6 +66,173 @@ func BuildPost(team *models.Team, primary *models.Encounter, groupings []models.
 	return title, description
 }
 
+// BuildPremadePost renders a pre-made trial run announcement into embed-ready
+// parts. title is the run's title (falling back to the team name); description
+// holds the scheduled time as a per-viewer Discord timestamp, the team's
+// free-form premade post body, and the per-slot roster showing each slot's
+// role/class and either the claimant's mention or "open".
+//
+// claimants maps a slot number to the claiming user's Discord ID; an empty/absent
+// entry renders the slot as open.
+func BuildPremadePost(team *models.Team, title string, scheduledUnix int64, primary *models.Encounter, claimants map[int]string, waitlist []models.PremadeWaitlistEntry) (string, string) {
+	if strings.TrimSpace(title) == "" {
+		title = team.Name
+	}
+
+	var L []string
+	if scheduledUnix > 0 {
+		L = append(L, fmt.Sprintf("\U0001F5D3\uFE0F  <t:%d:F> (<t:%d:R>)", scheduledUnix, scheduledUnix))
+	}
+	if body := strings.TrimSpace(team.PremadePost); body != "" {
+		if len(L) > 0 {
+			L = append(L, "")
+		}
+		L = append(L, body)
+	}
+	if rl := premadeRosterLines(team, primary, claimants); len(rl) > 0 {
+		if len(L) > 0 {
+			L = append(L, "")
+		}
+		L = append(L, rl...)
+	}
+	if wl := premadeWaitlistLines(waitlist); len(wl) > 0 {
+		L = append(L, "")
+		L = append(L, wl...)
+	}
+	footer := "_Use the menus below to claim a slot or get a slot's build details. Claiming a new slot releases your previous one._"
+	if team.WaitlistEnabled {
+		footer = "_Use the menus below to claim a slot or get a slot's build details. Claiming a new slot releases your previous one. If a role is full you can join its waitlist — you'll be moved in automatically when a slot opens._"
+	}
+	L = append(L, "", footer)
+	return title, strings.TrimSpace(strings.Join(L, "\n"))
+}
+
+// premadeWaitlistLines renders the per-role waitlist block (FIFO mentions per
+// role). Returns nil when nobody is waiting.
+func premadeWaitlistLines(waitlist []models.PremadeWaitlistEntry) []string {
+	if len(waitlist) == 0 {
+		return nil
+	}
+	byRole := map[string][]string{}
+	for _, w := range waitlist {
+		byRole[w.Role] = append(byRole[w.Role], "<@"+w.DiscordUserID+">")
+	}
+	L := []string{"__Waitlist__"}
+	seen := map[string]bool{}
+	emit := func(role string) {
+		if seen[role] {
+			return
+		}
+		seen[role] = true
+		if ids := byRole[role]; len(ids) > 0 {
+			L = append(L, premadeRoleLabel(role)+": "+strings.Join(ids, ", "))
+		}
+	}
+	for _, r := range []string{"tank", "healer", "support_dps", "dps"} {
+		emit(r)
+	}
+	// Any other roles, in queue order of first appearance.
+	for _, w := range waitlist {
+		emit(w.Role)
+	}
+	return L
+}
+
+// premadeRoleLabel returns a display label for a role key used in pre-made posts.
+func premadeRoleLabel(role string) string {
+	switch role {
+	case "tank":
+		return "Tank"
+	case "healer":
+		return "Healer"
+	case "support_dps":
+		return "Support DPS"
+	case "dps":
+		return "DPS"
+	case "":
+		return "Other"
+	default:
+		return role
+	}
+}
+
+// premadeRosterLines renders the roster grouped by role for a pre-made run: each
+// slot shows its number, the slot's roster name, class, and either the
+// claimant's mention or "open".
+func premadeRosterLines(team *models.Team, primary *models.Encounter, claimants map[int]string) []string {
+	bySlot := map[int]models.Loadout{}
+	if primary != nil {
+		for _, lo := range primary.Loadouts {
+			bySlot[lo.Slot] = lo
+		}
+	}
+	players := sortedPlayers(team)
+	if len(players) == 0 {
+		return nil
+	}
+	type row struct{ role, line string }
+	rows := make([]row, 0, len(players))
+	for _, p := range players {
+		claim := "_open_"
+		if id := claimants[p.Slot]; id != "" {
+			claim = "<@" + id + ">"
+		}
+		var parts []string
+		if team.SimpleSignup {
+			// Simple signup: roles only — hide class and gear.
+			parts = []string{fmt.Sprintf("%d.", p.Slot), nameOrSlot(p), claim}
+		} else {
+			parts = []string{
+				fmt.Sprintf("%d.", p.Slot),
+				nameOrSlot(p),
+				classOrDash(p.Class),
+				gearAbbrevList(bySlot[p.Slot].Gear),
+				claim,
+			}
+		}
+		rows = append(rows, row{role: p.Role, line: strings.Join(parts, " · ")})
+	}
+
+	order := []struct{ label, value string }{
+		{"Tank", "tank"}, {"Healer", "healer"}, {"Support DPS", "support_dps"}, {"DPS", "dps"},
+	}
+	known := map[string]bool{"tank": true, "healer": true, "support_dps": true, "dps": true}
+	groups := append([]struct{ label, value string }{}, order...)
+	for _, r := range rows {
+		if !known[r.role] {
+			groups = append(groups, struct{ label, value string }{"Other", ""})
+			break
+		}
+	}
+
+	var L []string
+	first := true
+	for _, g := range groups {
+		var grp []row
+		for _, r := range rows {
+			if g.value == "" {
+				if !known[r.role] {
+					grp = append(grp, r)
+				}
+			} else if r.role == g.value {
+				grp = append(grp, r)
+			}
+		}
+		if len(grp) == 0 {
+			continue
+		}
+		if !first {
+			L = append(L, "")
+		}
+		first = false
+		L = append(L, "__"+g.label+"__")
+		for _, r := range grp {
+			L = append(L, r.line)
+		}
+	}
+	return L
+}
+
 // rosterLines renders the roster grouped by role (Tank, Healer, Support DPS,
 // DPS, then any "Other") as Markdown lines. Each player is one line prefixed by
 // an RSVP icon (✅ coming / ❌ not coming / ▫️ no response) followed by slot,
@@ -242,6 +409,15 @@ func who(p models.Player) string {
 	}
 	if p.Name != "" {
 		return p.Name
+	}
+	return fmt.Sprintf("Slot %d", p.Slot)
+}
+
+// nameOrSlot returns a player's roster name, falling back to "Slot N" when it's
+// blank. Used by the pre-made post (which doesn't surface Discord handles).
+func nameOrSlot(p models.Player) string {
+	if n := strings.TrimSpace(p.Name); n != "" {
+		return n
 	}
 	return fmt.Sprintf("Slot %d", p.Slot)
 }

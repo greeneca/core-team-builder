@@ -21,6 +21,7 @@ type bot struct {
 	groupings  *models.GroupingStore
 	members    *models.MemberStore
 	discord    *models.DiscordStore
+	premade    *models.PremadeStore
 	// appBaseURL is the public base URL of the web app (APP_BASE_URL), used to
 	// build sign-in links the bot sends to users. Empty when unconfigured.
 	appBaseURL string
@@ -93,8 +94,13 @@ var coreTeamCommand = &discordgo.ApplicationCommand{
 		},
 		{
 			Type:        discordgo.ApplicationCommandOptionSubCommand,
+			Name:        "recruit",
+			Description: "Post a recruitment post with an I'm Interested button (gathers availability via DM)",
+		},
+		{
+			Type:        discordgo.ApplicationCommandOptionSubCommand,
 			Name:        "signup",
-			Description: "Post a recruitment signup with an I'm Interested button (gathers availability via DM)",
+			Description: "Post a scheduled run from one of your pre-made teams (per-slot signups)",
 		},
 		{
 			Type:        discordgo.ApplicationCommandOptionSubCommand,
@@ -134,8 +140,10 @@ func (b *bot) onCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		b.handleSetup(s, i)
 	case "post":
 		b.handlePost(s, i)
-	case "signup":
+	case "recruit":
 		b.handleSignupPost(s, i)
+	case "signup":
+		b.handlePremade(s, i)
 	case "status":
 		b.handleStatus(s, i)
 	case "unset":
@@ -151,6 +159,10 @@ func (b *bot) onComponent(s *discordgo.Session, i *discordgo.InteractionCreate) 
 		b.onSignupComponent(s, i)
 		return
 	}
+	if strings.HasPrefix(id, premadePrefix) {
+		b.onPremadeComponent(s, i)
+		return
+	}
 	switch id {
 	case "get_my_details":
 		b.handleGetMyDetails(s, i)
@@ -164,8 +176,13 @@ func (b *bot) onComponent(s *discordgo.Session, i *discordgo.InteractionCreate) 
 }
 
 func (b *bot) onModalSubmit(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	if i.ModalSubmitData().CustomID == "setup_create_modal" {
+	id := i.ModalSubmitData().CustomID
+	if id == "setup_create_modal" {
 		b.handleSetupCreate(s, i)
+		return
+	}
+	if strings.HasPrefix(id, premadeModalPrefix) {
+		b.handlePremadeModalSubmit(s, i)
 	}
 }
 
@@ -251,8 +268,12 @@ func (b *bot) handleSetup(s *discordgo.Session, i *discordgo.InteractionCreate) 
 
 	options := make([]discordgo.SelectMenuOption, 0, len(teams)+1)
 	// Discord allows at most 25 options; reserve one for "create new".
-	for idx, t := range teams {
-		if idx >= 24 {
+	for _, t := range teams {
+		// Skip signup-template teams: they aren't bound to a channel directly.
+		if t.PreMade {
+			continue
+		}
+		if len(options) >= 24 {
 			break
 		}
 		options = append(options, discordgo.SelectMenuOption{
@@ -443,7 +464,7 @@ func buildPostEmbed(team *models.Team, primary *models.Encounter, gr []models.Gr
 	}
 }
 
-// --- /coreteam signup (recruitment post + DM intake) ---
+// --- /coreteam recruit (recruitment post + DM intake) ---
 
 // handleSignupPost posts the team's recruitment signup: an embed with the team's
 // signup body and an "I'm Interested" button that kicks off the DM intake flow.

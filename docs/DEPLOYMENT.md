@@ -228,8 +228,11 @@ Discord-side setup (one-time):
       (optional — the bot falls back to its own user ID for command registration).
 - [ ] Invite the bot to your server with the **`bot`** and
       **`applications.commands`** OAuth2 scopes (the developer portal's URL
-      generator builds the invite link). No special gateway intents/permissions
-      are required beyond sending messages and using slash commands.
+      generator builds the invite link). Beyond sending messages and using slash
+      commands, the **pre-made trial run** feature (`/coreteam signup`) needs the
+      **Create Public Threads**, **Manage Threads**, and **Manage Messages**
+      permissions in the channels where runs are posted (to open the run thread
+      15 min before and delete the post + thread 2 h after).
 - [ ] (Dev/fast) set `DISCORD_GUILD_ID` to your server's ID so `/coreteam`
       registers instantly to that guild. Leave it empty in production to register
       globally (the first global registration can take up to ~1h to appear).
@@ -239,8 +242,10 @@ Run it:
 - [ ] `docker compose --profile bot up -d bot` (after `db`/migrations are up).
 - [ ] In Discord, a user runs `/coreteam link code:<code>` with a code generated
       from the web UI ("Link Discord" button), then `/coreteam setup` in a channel
-      to bind a team, and `/coreteam post` to share the trial. See
-      `docs/AGENT_CONTEXT.md` "Discord bot".
+      to bind a team, and `/coreteam post` to share the trial. To run a pre-made
+      event, mark a team as **Pre-made** in the web UI (Team Features) and run
+      `/coreteam signup`. See `docs/AGENT_CONTEXT.md` "Discord bot" and "Pre-made
+      trial runs".
 
 > Treat `DISCORD_BOT_TOKEN` like any other secret (keep it in `.env`, `chmod 600`).
 > Rotating it in the developer portal requires updating `.env` and restarting the

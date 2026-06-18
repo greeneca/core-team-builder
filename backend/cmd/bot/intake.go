@@ -12,7 +12,7 @@ import (
 	"github.com/core-team-builder/backend/internal/models"
 )
 
-// The /coreteam signup recruitment flow gathers a prospective member's
+// The /coreteam recruit recruitment flow gathers a prospective member's
 // availability through an interactive DM questionnaire built entirely from
 // message components (select menus) — no privileged message intents are needed.
 // Progress is persisted on a draft team_roster_members row after each answer;

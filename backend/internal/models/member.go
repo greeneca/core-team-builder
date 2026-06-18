@@ -38,7 +38,7 @@ type DayWindow struct {
 
 // RosterMember is one person in a team's recruitment/availability pool, distinct
 // from the 12 fixed player slots and from team_members (app-account sharing).
-// Discord-sourced members are gathered by the bot's /coreteam signup DM flow;
+// Discord-sourced members are gathered by the bot's /coreteam recruit DM flow;
 // manual members are added in the web app.
 type RosterMember struct {
 	ID              int64                `json:"id"`

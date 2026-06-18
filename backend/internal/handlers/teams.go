@@ -162,12 +162,23 @@ type updateTeamRequest struct {
 	PostFooter string `json:"post_footer"`
 	// DMFooter is the free-form footer the bot appends to the build-details DM.
 	DMFooter string `json:"dm_footer"`
-	// SignupPost is the free-form body the bot posts with /coreteam signup.
+	// SignupPost is the free-form body the bot posts with /coreteam recruit.
 	SignupPost string `json:"signup_post"`
 	// AutoSharePoolViewers, when true, auto-grants viewer access to the app
 	// accounts of everyone in the team's member pool (current and future).
-	AutoSharePoolViewers bool            `json:"auto_share_pool_viewers"`
-	Players              []playerPayload `json:"players"`
+	AutoSharePoolViewers bool `json:"auto_share_pool_viewers"`
+	// PreMade turns the team into a one-off pre-made trial run (slot signups via
+	// the Discord bot's /coreteam signup flow).
+	PreMade bool `json:"pre_made"`
+	// PremadePost is the free-form body the bot prepends to a pre-made run post.
+	PremadePost string `json:"premade_post"`
+	// SimpleSignup switches a pre-made run to role-based "simple" signups (hides
+	// class/gear and the details dropdown; claiming takes the first matching slot).
+	SimpleSignup bool `json:"simple_signup"`
+	// WaitlistEnabled lets players join a per-role waitlist on a pre-made run;
+	// freed slots auto-promote the head of that role's waitlist.
+	WaitlistEnabled bool            `json:"waitlist_enabled"`
+	Players         []playerPayload `json:"players"`
 }
 
 type playerPayload struct {
@@ -244,6 +255,12 @@ func (s *Server) handleUpdateTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	premadePost := strings.TrimRight(req.PremadePost, " \t\r\n")
+	if len([]rune(premadePost)) > maxPremadePostLen {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("pre-made post too long (max %d characters)", maxPremadePostLen))
+		return
+	}
+
 	players := make([]models.Player, 0, len(req.Players))
 	for _, p := range req.Players {
 		if p.Slot < 1 || p.Slot > models.TeamSize {
@@ -304,7 +321,7 @@ func (s *Server) handleUpdateTeam(w http.ResponseWriter, r *http.Request) {
 		players = append(players, player)
 	}
 
-	if err := s.teams.Save(r.Context(), teamID, req.Name, days, scheduleTime, req.EncountersEnabled, postFooter, dmFooter, signupPost, req.AutoSharePoolViewers, players); err != nil {
+	if err := s.teams.Save(r.Context(), teamID, req.Name, days, scheduleTime, req.EncountersEnabled, postFooter, dmFooter, signupPost, req.AutoSharePoolViewers, req.PreMade, premadePost, req.SimpleSignup, req.WaitlistEnabled, players); err != nil {
 		log.Printf("update team: %v", err)
 		writeError(w, http.StatusInternalServerError, "could not update team")
 		return

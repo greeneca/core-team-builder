@@ -34,6 +34,8 @@ const (
 	maxDMFooterLen = 2000
 	// maxSignupPostLen caps the free-form Discord bot signup post body (in runes).
 	maxSignupPostLen = 2000
+	// maxPremadePostLen caps the free-form pre-made run post body (in runes).
+	maxPremadePostLen = 2000
 	// maxGroupingsPerTeam caps how many groupings a team may hold.
 	maxGroupingsPerTeam = 10
 	// maxGroupingNameLen caps a grouping's name (in runes).
@@ -161,7 +163,7 @@ func (s *Server) Routes() http.Handler {
 	mux.Handle("POST /api/teams/{id}/share", protected(s.handleShareTeam))
 	mux.Handle("DELETE /api/teams/{id}/members/{userID}", protected(s.handleUnshareTeam))
 
-	// Roster member pool (the /coreteam signup recruitment pool).
+	// Roster member pool (the /coreteam recruit recruitment pool).
 	mux.Handle("GET /api/teams/{id}/roster-members", protected(s.handleListRosterMembers))
 	mux.Handle("POST /api/teams/{id}/roster-members", protected(s.handleCreateRosterMember))
 	mux.Handle("PUT /api/teams/{id}/roster-members/{memberID}", protected(s.handleUpdateRosterMember))

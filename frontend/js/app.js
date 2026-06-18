@@ -836,12 +836,20 @@
       signupPostInput.readOnly = !editable;
     }
 
+    const premadePostInput = el("premade-post-input");
+    if (premadePostInput) {
+      premadePostInput.value = currentTeam.premade_post || "";
+      premadePostInput.readOnly = !editable;
+    }
+
     renderSchedule(editable);
     renderEncountersBar();
     renderEncounterControls();
     applyEncountersMode();
     applyAutoSharePoolMode();
+    applyPreMadeMode();
     renderRoster();
+    applySimpleSignupMode();
     renderGroupings();
     refreshBuffCoverage();
   }
@@ -1050,6 +1058,10 @@
       dm_footer: el("dm-footer-input") ? el("dm-footer-input").value : "",
       signup_post: el("signup-post-input") ? el("signup-post-input").value : "",
       auto_share_pool_viewers: autoSharePoolViewers(),
+      pre_made: preMade(),
+      premade_post: el("premade-post-input") ? el("premade-post-input").value : "",
+      simple_signup: simpleSignup(),
+      waitlist_enabled: waitlistEnabled(),
       players,
     };
     setSaveStatus("team", "saving");
@@ -1664,7 +1676,7 @@
               <label>Name</label>
               <input class="input" data-field="name" maxlength="100" />
             </div>
-            <div class="form-group">
+            <div class="form-group player-discord-field${preMade() ? " is-hidden" : ""}">
               <label>Discord Handle</label>
               <div data-discord-combo></div>
             </div>
@@ -1672,11 +1684,11 @@
               <label>Role</label>
               <select class="input" data-field="role">${optionsHtml(ROLES, player.role)}</select>
             </div>
-            <div class="form-group">
+            <div class="form-group" data-class-field>
               <label>Class</label>
               <select class="input" data-field="class">${optionsHtml(CLASSES, player.class)}</select>
             </div>
-            <div class="form-group">
+            <div class="form-group" data-race-field>
               <label>Race</label>
               <select class="input" data-field="race">${optionsHtml(RACES, player.race)}</select>
             </div>
@@ -2231,6 +2243,80 @@
     }
   }
 
+  // Whether the open team is a pre-made trial run. Disabled by default.
+  function preMade() {
+    return !!currentTeam && currentTeam.pre_made === true;
+  }
+
+  // Apply pre-made mode: in pre-made mode the recurring schedule, Discord bot
+  // texts, member pool, and per-player Discord handles don't apply, so they are
+  // hidden; the pre-made run post body card is shown instead. Hiding is purely
+  // presentational — the underlying data is preserved and reappears if turned
+  // off. The roster is re-rendered so the Discord-handle fields hide/show.
+  function applyPreMadeMode() {
+    const on = preMade();
+    const toggle = el("pre-made-toggle");
+    if (toggle) {
+      toggle.checked = on;
+      toggle.disabled = !canEdit();
+    }
+    const scheduleSection = el("schedule-section");
+    if (scheduleSection) scheduleSection.classList.toggle("is-hidden", on);
+    const botTexts = el("discord-bot-texts-card");
+    if (botTexts) botTexts.classList.toggle("is-hidden", on);
+    const premadeCard = el("premade-post-card");
+    if (premadeCard) premadeCard.classList.toggle("is-hidden", !on);
+    const membersBtn = el("members-btn");
+    if (membersBtn) membersBtn.classList.toggle("is-hidden", on);
+    // Auto-share targets the member pool, which is hidden in pre-made mode, so
+    // hide that toggle too (its value is preserved either way).
+    const autoShareLabel = el("auto-share-pool-label");
+    if (autoShareLabel) autoShareLabel.classList.toggle("is-hidden", on);
+    // Simple-vs-specific signup only applies to pre-made runs, so only surface
+    // its toggle in pre-made mode.
+    const simpleLabel = el("simple-signup-label");
+    if (simpleLabel) simpleLabel.classList.toggle("is-hidden", !on);
+    const simpleToggle = el("simple-signup-toggle");
+    if (simpleToggle) {
+      simpleToggle.checked = simpleSignup();
+      simpleToggle.disabled = !canEdit();
+    }
+    // The per-role waitlist also only applies to pre-made runs.
+    const waitlistLabel = el("waitlist-label");
+    if (waitlistLabel) waitlistLabel.classList.toggle("is-hidden", !on);
+    const waitlistToggle = el("waitlist-toggle");
+    if (waitlistToggle) {
+      waitlistToggle.checked = waitlistEnabled();
+      waitlistToggle.disabled = !canEdit();
+    }
+  }
+
+  function simpleSignup() {
+    return !!currentTeam && currentTeam.simple_signup === true;
+  }
+
+  // Simple-signup pre-made runs only collect names + roles, so the build-analysis
+  // UI is irrelevant: hide the Group Stats section (and its jump-nav link) plus
+  // each player's class/race, skill lines/masteries, and per-encounter loadout.
+  // Elements stay in the DOM so their values survive switching back to specific
+  // signup. Only applies in pre-made mode, where the simple-signup toggle lives.
+  function applySimpleSignupMode() {
+    const on = preMade() && simpleSignup();
+    const groupStats = el("group-stats-card");
+    if (groupStats) groupStats.classList.toggle("is-hidden", on);
+    const buffsNav = document.querySelector('.player-nav-link[data-nav="buffs"]');
+    if (buffsNav) buffsNav.classList.toggle("is-hidden", on);
+    document
+      .querySelectorAll(
+        "#roster .player-build, #roster [data-loadout], #roster [data-class-field], #roster [data-race-field]"
+      )
+      .forEach((node) => node.classList.toggle("is-hidden", on));
+  }
+
+  function waitlistEnabled() {
+    return !!currentTeam && currentTeam.waitlist_enabled === true;
+  }
+
   // The encounters bar lets you pick the *current* encounter (whose per-player
   // loadouts are shown inline in the roster) and add new ones. There is no
   // separate encounter page anymore.
@@ -2382,6 +2468,37 @@
       return;
     }
     currentTeam.auto_share_pool_viewers = e.target.checked;
+  });
+
+  // Toggle pre-made trial run mode. Updates currentTeam and re-applies the mode
+  // (hiding schedule/bot-texts/member-pool/handles, showing the run-post card);
+  // the generic detail-view change handler persists the flag via team autosave.
+  el("pre-made-toggle").addEventListener("change", (e) => {
+    if (!canEdit()) {
+      e.target.checked = preMade();
+      return;
+    }
+    currentTeam.pre_made = e.target.checked;
+    applyPreMadeMode();
+    renderRoster();
+    applySimpleSignupMode();
+  });
+  // Toggle simple (role-based) vs specific (per-slot) signup for pre-made runs.
+  el("simple-signup-toggle").addEventListener("change", (e) => {
+    if (!canEdit()) {
+      e.target.checked = simpleSignup();
+      return;
+    }
+    currentTeam.simple_signup = e.target.checked;
+    applySimpleSignupMode();
+  });
+  // Toggle the per-role waitlist for pre-made runs.
+  el("waitlist-toggle").addEventListener("change", (e) => {
+    if (!canEdit()) {
+      e.target.checked = waitlistEnabled();
+      return;
+    }
+    currentTeam.waitlist_enabled = e.target.checked;
   });
   addEncounterForm.addEventListener("submit", async (e) => {
     e.preventDefault();
