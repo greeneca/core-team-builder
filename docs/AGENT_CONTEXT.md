@@ -185,8 +185,9 @@ column; the `User` JSON model hides it (`json:"-"`).
     `ValidRoleBases` (empty base derives from the key, else `DefaultRoleBase`).
     Add/remove roles from the **Main panel** ("Roster Roles"); the add row has a
     base/color picker, and each role chip is accented with its base color. A role
-    can't be removed while a player is assigned to it. The editor is hidden for
-    simple-signup pre-made runs. The **Discord post flows** are role-aware: both
+    can't be removed while a player is assigned to it. The editor is shown in
+    every mode, including simple-signup pre-made runs (players pick one of the
+    team's roster roles to be auto-placed against). The **Discord post flows** are role-aware: both
     the `/coreteam post` overview and the pre-made `/coreteam signup` post +
     controls render each role using the team's own role set via `Team.RoleLabel`,
     `Team.OrderedRoleKeys`, and `Team.EffectiveRoles` (see `cmd/bot/premade.go`
@@ -255,8 +256,10 @@ column; the `User` JSON model hides it (`json:"-"`).
   manually-added werewolf-line skill.
 - **Endpoints** (all JWT-protected): `GET/POST /api/teams`,
   `GET/PUT/DELETE /api/teams/{id}`, `POST /api/teams/{id}/share`,
-  `DELETE /api/teams/{id}/members/{userID}`. Mutations return the full refreshed
-  team.
+  `DELETE /api/teams/{id}/members/{userID}` (owner removes a member),
+  `DELETE /api/teams/{id}/membership` (a shared member leaves the team
+  themselves; the owner can't — they delete it instead; returns 204). Mutations
+  return the full refreshed team.
 - **Encounters toggle** (`017_team_encounters_enabled.sql`):
   `teams.encounters_enabled BOOLEAN` (default **false**) controls whether the UI
   surfaces the multi-encounter section. When off, the encounters card + chip
@@ -305,7 +308,9 @@ column; the `User` JSON model hides it (`json:"-"`).
   (default **false**) — a "Team Features" checkbox shown only when **Pre-made** is
   on. When on, a "Join a waitlist (role is full)" select appears on the post for
   any **full** role; joining queues the user (`premade_waitlist`, FIFO per role).
-  When a claimed slot frees up (`handlePremadeLeave`), `PromoteToSlot` moves the
+  When a claimed slot frees up — on **leave** (`handlePremadeLeave`) **or** when a
+  user **switches** to a different slot (`handlePremadeClaim`/`claimSimple`, which
+  vacates their prior slot) — `promoteFreedSlot` calls `PromoteToSlot` to move the
   head of that slot's role queue into the open slot and the bot DMs them. Holding
   a slot supersedes waiting (claiming clears your waitlist entry).
 - **Discord bot footers** (`018_team_signup_note.sql`,
@@ -647,9 +652,11 @@ the `pre_made` flag on (see "Pre-made trial run" under Teams). Tables in
   `premadeWaitlistRow` adds a **join waitlist** select (`premade_wait`) listing
   roles that are currently full; the post shows a per-role "__Waitlist__" block
   (`premadeWaitlistLines`). `handlePremadeWaitlist` queues the user
-  (`JoinWaitlist`; refuses if they already hold a slot). On **leave**
-  (`handlePremadeLeave`), the freed slot's role queue is auto-promoted via
-  `PromoteToSlot` and the promotee is DM'd (`dmPromoted`). The 15-min thread
+  (`JoinWaitlist`; refuses if they already hold a slot). When a slot frees up —
+  on **leave** (`handlePremadeLeave`) or when a user **switches** to a different
+  slot (`handlePremadeClaim`/`claimSimple`) — the freed slot's role queue is
+  auto-promoted via `promoteFreedSlot`→`PromoteToSlot` and the promotee is DM'd
+  (`dmPromoted`). The 15-min thread
   still tags **claimed** players only.
 - **Claims** (`PremadeStore.ClaimSlot`): per-slot, **one slot per user** —
   claiming releases the user's prior claim in the same transaction; the
@@ -867,11 +874,59 @@ interest gathered via Discord, plus manual web entries. (A team can opt into
   `scribed_buffs` (a grimoire skill is slotted), and `banner_bearer_focus`
   (the Banner Bearer grimoire is slotted).
 
+## Live collaboration (current)
+
+Multiple editors can work on the same team at once; everyone's view stays fresh
+and concurrent edits don't silently clobber each other. Three cooperating pieces:
+
+- **Live refresh (SSE + Postgres LISTEN/NOTIFY)**. Migration 044 adds a
+  `notify_team_change()` trigger on every collaborative table (teams, players,
+  encounters, encounter_loadouts, groupings + groups/members, team_members,
+  team_roster_members). Each write `pg_notify`s the `team_changed` channel with
+  `{team_id, kind}` where `kind` is the coarse area that changed
+  (`team`/`encounter`/`grouping`/`members`/`pool`). The payload is row-agnostic
+  so Postgres collapses the many per-row notifications of a bulk save into one.
+  Because the **trigger** does the publishing, writes from *any* process count —
+  including the **Discord bot**, a separate process. `internal/realtime.Hub`
+  (started in `cmd/server`) LISTENs on a dedicated connection and fans each
+  notification out to the per-team **Server-Sent Events** subscribers. The
+  endpoint is `GET /api/teams/{id}/events`; since `EventSource` can't send an
+  `Authorization` header it authenticates via the `access_token` query param
+  (validated in `handlers/events.go`, not the bearer middleware). nginx has a
+  dedicated `location` for it with buffering off + a long read timeout; the
+  server sends a `: ping` keepalive every 25s and clears its write deadline for
+  that connection. The client (`app.js`) holds one `EventSource` while a team is
+  open, and on a change event **refetches + re-renders** — but only when the user
+  isn't mid-edit (`isBusyEditing`), so a collaborator's change never interrupts
+  in-progress typing. It ignores the brief echo of its own just-saved write
+  (`localSaveQuietUntil`) and reconnects with a refreshed token if the stream
+  drops (e.g. token expiry).
+- **Presence**. The Hub tracks who is connected per team (username from the SSE
+  token) and broadcasts a `kind:"presence"` event (the viewer list) whenever the
+  set changes. The client shows a small `#presence-indicator` badge ("N others
+  here"). In-process only — fine for the single-backend deployment.
+- **Optimistic concurrency**. `teams`, `players`, and `encounter_loadouts` each
+  have an `updated_at` token. Version-checked saves (`TeamStore.Save`,
+  `TeamStore.SavePlayer`, `EncounterStore.SaveLoadoutSlot`) update only if the
+  caller's `expected_updated_at` still matches, else return
+  `models.ErrVersionConflict` → **409**. The client sends the token it last saw
+  and, on 409, discards its now-superseded local edits and reloads the latest.
+- **Finer-grained autosave (fewer conflicts)**. The client tracks dirty areas
+  separately (`dirtyMeta`, `dirtyPlayerSlots`, `dirtyLoadoutSlots`) and saves
+  only what changed via per-slot endpoints — `PUT /api/teams/{id}/players/{slot}`
+  and `PUT /api/teams/{id}/encounters/{eid}/loadouts/{slot}` — plus a meta-only
+  team `PUT` (empty `players`). The old whole-team / whole-encounter PUTs still
+  exist (back-compat) but the UI no longer uses them. So two editors changing
+  *different* slots never collide. A request also carries an `X-Client-Id` header
+  (a per-tab id, useful for correlation).
+
 ## Request flow
 
 Browser → nginx (`frontend`, port 80→`FRONTEND_PORT`) → `/api/*` proxied to
 `backend:8080` → `db:5432`. Because `/api` is same-origin via the proxy, CORS is
-generally not triggered (the backend still sets CORS headers as defense).
+generally not triggered (the backend still sets CORS headers as defense). The
+live-collaboration SSE stream (`/api/teams/{id}/events`) is a long-lived
+streaming response on the same path, proxied with buffering off.
 
 ## Where to make changes
 

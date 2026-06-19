@@ -182,6 +182,10 @@ type updateTeamRequest struct {
 	// omitted/empty the server falls back to the default role set.
 	Roles   []models.TeamRole `json:"roles"`
 	Players []playerPayload   `json:"players"`
+	// ExpectedUpdatedAt, when set, enables optimistic concurrency: the save is
+	// rejected with 409 if the team was modified by someone else since the
+	// client loaded it. Omitted by older clients (last-write-wins).
+	ExpectedUpdatedAt *time.Time `json:"expected_updated_at"`
 }
 
 type playerPayload struct {
@@ -279,66 +283,23 @@ func (s *Server) handleUpdateTeam(w http.ResponseWriter, r *http.Request) {
 
 	players := make([]models.Player, 0, len(req.Players))
 	for _, p := range req.Players {
-		if p.Slot < 1 || p.Slot > models.TeamSize {
-			writeError(w, http.StatusBadRequest, "invalid player slot")
+		player, verr := validatePlayer(p, validRole)
+		if verr != nil {
+			writeError(w, http.StatusBadRequest, verr.Error())
 			return
 		}
-		role := strings.TrimSpace(p.Role)
-		class := strings.TrimSpace(p.Class)
-		race := strings.TrimSpace(p.Race)
-		if !validRole[role] {
-			writeError(w, http.StatusBadRequest, "invalid role")
-			return
-		}
-		if !models.ValidClasses[class] {
-			writeError(w, http.StatusBadRequest, "invalid class")
-			return
-		}
-		if !models.ValidRace(race) {
-			writeError(w, http.StatusBadRequest, "invalid race")
-			return
-		}
-
-		player := models.Player{
-			Slot:          p.Slot,
-			Name:          strings.TrimSpace(p.Name),
-			DiscordHandle: strings.TrimSpace(p.DiscordHandle),
-			Role:          role,
-			Class:         class,
-			Race:          race,
-			Subclassed:    p.Subclassed,
-			Werewolf:      p.Werewolf,
-		}
-
-		// The subclass flag selects which build set applies. Validate only the
-		// active set and clear the inactive one so stored data stays consistent.
-		if p.Subclassed {
-			s1 := strings.TrimSpace(p.SkillLine1)
-			s2 := strings.TrimSpace(p.SkillLine2)
-			s3 := strings.TrimSpace(p.SkillLine3)
-			if !models.ValidSkillLine(s1) || !models.ValidSkillLine(s2) || !models.ValidSkillLine(s3) {
-				writeError(w, http.StatusBadRequest, "invalid skill line")
-				return
-			}
-			if err := models.ValidateSkillLines(class, []string{s1, s2, s3}); err != nil {
-				writeError(w, http.StatusBadRequest, err.Error())
-				return
-			}
-			player.SkillLine1, player.SkillLine2, player.SkillLine3 = s1, s2, s3
-		} else {
-			m1 := strings.TrimSpace(p.Mastery1)
-			m2 := strings.TrimSpace(p.Mastery2)
-			if !models.ValidMastery(class, m1) || !models.ValidMastery(class, m2) {
-				writeError(w, http.StatusBadRequest, "invalid class mastery")
-				return
-			}
-			player.Mastery1, player.Mastery2 = m1, m2
-		}
-
 		players = append(players, player)
 	}
 
-	if err := s.teams.Save(r.Context(), teamID, req.Name, days, scheduleTime, req.EncountersEnabled, postFooter, dmFooter, signupPost, req.AutoSharePoolViewers, req.PreMade, premadePost, req.SimpleSignup, req.WaitlistEnabled, roles, players); err != nil {
+	var expected time.Time
+	if req.ExpectedUpdatedAt != nil {
+		expected = *req.ExpectedUpdatedAt
+	}
+	if err := s.teams.Save(r.Context(), teamID, req.Name, days, scheduleTime, req.EncountersEnabled, postFooter, dmFooter, signupPost, req.AutoSharePoolViewers, req.PreMade, premadePost, req.SimpleSignup, req.WaitlistEnabled, roles, players, expected); err != nil {
+		if errors.Is(err, models.ErrVersionConflict) {
+			writeError(w, http.StatusConflict, "this team was changed by someone else; reload to get the latest")
+			return
+		}
 		log.Printf("update team: %v", err)
 		writeError(w, http.StatusInternalServerError, "could not update team")
 		return
@@ -360,6 +321,134 @@ func (s *Server) handleUpdateTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, team)
+}
+
+// validatePlayer validates and normalizes one player payload against the team's
+// valid role set, returning the model ready to save. It enforces the same rules
+// for the bulk team save and the per-slot save so both stay consistent. The
+// returned error message is safe to surface to the client (400).
+func validatePlayer(p playerPayload, validRole map[string]bool) (models.Player, error) {
+	if p.Slot < 1 || p.Slot > models.TeamSize {
+		return models.Player{}, errors.New("invalid player slot")
+	}
+	role := strings.TrimSpace(p.Role)
+	class := strings.TrimSpace(p.Class)
+	race := strings.TrimSpace(p.Race)
+	if !validRole[role] {
+		return models.Player{}, errors.New("invalid role")
+	}
+	if !models.ValidClasses[class] {
+		return models.Player{}, errors.New("invalid class")
+	}
+	if !models.ValidRace(race) {
+		return models.Player{}, errors.New("invalid race")
+	}
+
+	player := models.Player{
+		Slot:          p.Slot,
+		Name:          strings.TrimSpace(p.Name),
+		DiscordHandle: strings.TrimSpace(p.DiscordHandle),
+		Role:          role,
+		Class:         class,
+		Race:          race,
+		Subclassed:    p.Subclassed,
+		Werewolf:      p.Werewolf,
+	}
+
+	// The subclass flag selects which build set applies. Validate only the active
+	// set and clear the inactive one so stored data stays consistent.
+	if p.Subclassed {
+		s1 := strings.TrimSpace(p.SkillLine1)
+		s2 := strings.TrimSpace(p.SkillLine2)
+		s3 := strings.TrimSpace(p.SkillLine3)
+		if !models.ValidSkillLine(s1) || !models.ValidSkillLine(s2) || !models.ValidSkillLine(s3) {
+			return models.Player{}, errors.New("invalid skill line")
+		}
+		if err := models.ValidateSkillLines(class, []string{s1, s2, s3}); err != nil {
+			return models.Player{}, err
+		}
+		player.SkillLine1, player.SkillLine2, player.SkillLine3 = s1, s2, s3
+	} else {
+		m1 := strings.TrimSpace(p.Mastery1)
+		m2 := strings.TrimSpace(p.Mastery2)
+		if !models.ValidMastery(class, m1) || !models.ValidMastery(class, m2) {
+			return models.Player{}, errors.New("invalid class mastery")
+		}
+		player.Mastery1, player.Mastery2 = m1, m2
+	}
+	return player, nil
+}
+
+// savePlayerRequest is the per-slot roster save payload: one player plus an
+// optional optimistic-concurrency token.
+type savePlayerRequest struct {
+	playerPayload
+	ExpectedUpdatedAt *time.Time `json:"expected_updated_at"`
+}
+
+// handleSavePlayer updates a single roster slot. It is the finer-grained
+// counterpart to handleUpdateTeam's bulk roster save, so two editors changing
+// different slots don't overwrite each other. The slot comes from the path; the
+// optional expected_updated_at guards against clobbering a concurrent edit (409).
+func (s *Server) handleSavePlayer(w http.ResponseWriter, r *http.Request) {
+	teamID, _, role, ok := s.teamAccess(w, r)
+	if !ok {
+		return
+	}
+	if !canEdit(role) {
+		writeError(w, http.StatusForbidden, "viewers cannot edit this team")
+		return
+	}
+
+	slot, err := strconv.Atoi(r.PathValue("slot"))
+	if err != nil || slot < 1 || slot > models.TeamSize {
+		writeError(w, http.StatusBadRequest, "invalid player slot")
+		return
+	}
+
+	var req savePlayerRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	req.Slot = slot // the path is authoritative
+
+	roles, err := s.teams.GetRoles(r.Context(), teamID)
+	if err != nil {
+		log.Printf("save player roles: %v", err)
+		writeError(w, http.StatusInternalServerError, "could not update player")
+		return
+	}
+	validRole := make(map[string]bool, len(roles))
+	for _, rl := range roles {
+		validRole[rl.Key] = true
+	}
+
+	player, verr := validatePlayer(req.playerPayload, validRole)
+	if verr != nil {
+		writeError(w, http.StatusBadRequest, verr.Error())
+		return
+	}
+
+	var expected time.Time
+	if req.ExpectedUpdatedAt != nil {
+		expected = *req.ExpectedUpdatedAt
+	}
+	saved, err := s.teams.SavePlayer(r.Context(), teamID, player, expected)
+	if errors.Is(err, models.ErrVersionConflict) {
+		writeError(w, http.StatusConflict, "this slot was changed by someone else; reload to get the latest")
+		return
+	}
+	if errors.Is(err, models.ErrTeamNotFound) {
+		writeError(w, http.StatusNotFound, "player not found")
+		return
+	}
+	if err != nil {
+		log.Printf("save player: %v", err)
+		writeError(w, http.StatusInternalServerError, "could not update player")
+		return
+	}
+	writeJSON(w, http.StatusOK, saved)
 }
 
 // normalizeDays lower-cases, validates, and de-duplicates day keys, returning
@@ -585,4 +674,26 @@ func (s *Server) handleUnshareTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, team)
+}
+
+// handleLeaveTeam lets a shared member (editor/viewer) remove their own access
+// to a team. The owner cannot leave their own team (they delete it instead).
+// Returns 204 since the caller no longer has access to the team afterward.
+func (s *Server) handleLeaveTeam(w http.ResponseWriter, r *http.Request) {
+	teamID, userID, role, ok := s.teamAccess(w, r)
+	if !ok {
+		return
+	}
+	if role == models.RoleOwner {
+		writeError(w, http.StatusForbidden, "the owner cannot leave their own team")
+		return
+	}
+
+	if err := s.teams.RemoveMember(r.Context(), teamID, userID); err != nil {
+		log.Printf("leave team: %v", err)
+		writeError(w, http.StatusInternalServerError, "could not leave team")
+		return
+	}
+	log.Printf("audit: member left: user=%d team=%d", userID, teamID)
+	w.WriteHeader(http.StatusNoContent)
 }

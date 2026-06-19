@@ -304,13 +304,210 @@
       } catch {
         currentRosterMembers = [];
       }
+      // Opening a fresh team: nothing is dirty yet.
+      dirtyMeta = false;
+      dirtyPlayerSlots.clear();
+      dirtyLoadoutSlots.clear();
       // Show the detail view *before* rendering so the buff/crit coverage
       // refreshes (which bail when the view is hidden) paint on first load.
       showView("detail");
       renderTeamDetail();
+      // Start the live feed so collaborators' changes (and the Discord bot's)
+      // refresh this page automatically.
+      openEventStream(id);
     } catch (err) {
       handleError(err);
     }
+  }
+
+  // --- Live collaboration (Server-Sent Events) ---
+  //
+  // While a team is open we hold one EventSource to /api/teams/{id}/events. The
+  // backend pushes a small "something in area X changed" ping (emitted by DB
+  // triggers, so the Discord bot's writes count too) plus presence updates. On a
+  // change we refetch + re-render, but only when the user isn't mid-edit, so a
+  // collaborator's change never interrupts in-progress typing.
+  let eventSource = null;
+  let eventReconnectTimer = null;
+  let eventReconnectDelay = 2000;
+  let presenceUsers = [];
+  let liveReloadTimer = null;
+  let liveReloadQueued = false;
+
+  function openEventStream(teamId) {
+    closeEventStream();
+    if (!window.EventSource) return;
+    try {
+      const es = new EventSource(api.teamEventsURL(teamId));
+      es.onmessage = (e) => onLiveEvent(teamId, e);
+      es.onopen = () => {
+        eventReconnectDelay = 2000;
+      };
+      es.onerror = () => {
+        // The browser auto-retries transient drops (readyState CONNECTING). A
+        // hard close (e.g. the access token expired → 401) won't retry, so we
+        // refresh the token and reopen ourselves.
+        if (es.readyState === EventSource.CLOSED) {
+          es.onmessage = null;
+          es.onerror = null;
+          if (eventSource === es) eventSource = null;
+          scheduleEventReconnect(teamId);
+        }
+      };
+      eventSource = es;
+    } catch {
+      eventSource = null;
+    }
+  }
+
+  function closeEventStream() {
+    clearTimeout(eventReconnectTimer);
+    eventReconnectTimer = null;
+    if (eventSource) {
+      eventSource.onmessage = null;
+      eventSource.onerror = null;
+      eventSource.close();
+      eventSource = null;
+    }
+    presenceUsers = [];
+    renderPresence();
+  }
+
+  function scheduleEventReconnect(teamId) {
+    clearTimeout(eventReconnectTimer);
+    eventReconnectTimer = setTimeout(async () => {
+      if (!currentTeam || currentTeam.id !== teamId) return;
+      if (detailView.classList.contains("is-hidden")) return;
+      // The token may have expired; refresh before reconnecting.
+      await api.tryRefresh();
+      if (!currentTeam || currentTeam.id !== teamId) return;
+      eventReconnectDelay = Math.min(eventReconnectDelay * 2, 30000);
+      openEventStream(teamId);
+    }, eventReconnectDelay);
+  }
+
+  function onLiveEvent(teamId, e) {
+    if (!currentTeam || currentTeam.id !== teamId) return;
+    let ev;
+    try {
+      ev = JSON.parse(e.data);
+    } catch {
+      return;
+    }
+    if (ev.kind === "presence") {
+      presenceUsers = ev.users || [];
+      renderPresence();
+      return;
+    }
+    // A change event. Ignore the brief echo of our own just-saved write.
+    if (Date.now() < localSaveQuietUntil) return;
+    scheduleLiveReload();
+  }
+
+  // True while the user is actively editing — we defer live re-renders until
+  // they pause so a collaborator's change never yanks the page out from under
+  // an in-progress edit.
+  function isBusyEditing() {
+    if (!canEdit()) return false;
+    if (autosaveTimer || pendingScopes.size) return true;
+    if (dirtyMeta || dirtyPlayerSlots.size || dirtyLoadoutSlots.size) return true;
+    if (isGroupingsInteracting()) return true;
+    const a = document.activeElement;
+    if (a && detailView.contains(a) && a.matches("input, select, textarea, [contenteditable]")) {
+      return true;
+    }
+    return false;
+  }
+
+  function scheduleLiveReload() {
+    liveReloadQueued = true;
+    clearTimeout(liveReloadTimer);
+    liveReloadTimer = setTimeout(runLiveReloadIfIdle, 300);
+  }
+
+  function runLiveReloadIfIdle() {
+    if (!currentTeam || detailView.classList.contains("is-hidden")) {
+      liveReloadQueued = false;
+      return;
+    }
+    if (isBusyEditing()) {
+      // Retry shortly; flushAutosave also re-triggers this once writes settle.
+      clearTimeout(liveReloadTimer);
+      liveReloadTimer = setTimeout(runLiveReloadIfIdle, 800);
+      return;
+    }
+    liveReloadQueued = false;
+    liveReloadNow(false);
+  }
+
+  // Refetch the open team (roster, encounters, groupings, pool) and re-render,
+  // preserving the selected encounter and scroll position. force=true re-renders
+  // even if the user just resumed editing (used after a 409 conflict).
+  async function liveReloadNow(force) {
+    if (!currentTeam || detailView.classList.contains("is-hidden")) return;
+    const teamId = currentTeam.id;
+    const encId = currentEncounter && currentEncounter.id;
+    const scrollY = window.scrollY;
+    try {
+      const team = await api.getTeam(teamId);
+      if (!currentTeam || currentTeam.id !== teamId) return; // navigated away
+      currentTeam = team;
+      const { encounters } = await api.listEncounters(teamId);
+      currentEncounters = encounters || [];
+      const enc =
+        currentEncounters.find((x) => x.id === encId) || currentEncounters[0];
+      currentEncounter = enc ? await api.getEncounter(teamId, enc.id) : null;
+      const { groupings } = await api.listGroupings(teamId);
+      currentGroupings = groupings || [];
+      try {
+        const { members } = await api.listRosterMembers(teamId);
+        currentRosterMembers = members || [];
+      } catch {
+        /* keep previous pool on failure */
+      }
+      if (!currentTeam || currentTeam.id !== teamId) return;
+      if (!force && isBusyEditing()) {
+        // The user started editing again while we were fetching; try later.
+        scheduleLiveReload();
+        return;
+      }
+      renderTeamDetail();
+      window.scrollTo(0, scrollY);
+      renderPresence();
+    } catch (err) {
+      // Live refresh is best-effort; don't disrupt the user with an error.
+      console.warn("live reload failed", err);
+    }
+  }
+
+  function renderPresence() {
+    const node = el("presence-indicator");
+    if (!node) return;
+    const me = currentUser ? currentUser.username : "";
+    // De-duplicate (a user may have several tabs) and put "you" last.
+    const others = [];
+    const seen = new Set();
+    let includesMe = false;
+    presenceUsers.forEach((u) => {
+      if (u === me) {
+        includesMe = true;
+        return;
+      }
+      const k = (u || "").toLowerCase();
+      if (seen.has(k)) return;
+      seen.add(k);
+      others.push(u);
+    });
+    if (!presenceUsers.length || (others.length === 0 && includesMe)) {
+      // Only us (or no data yet): nothing useful to show.
+      node.classList.add("is-hidden");
+      node.textContent = "";
+      node.removeAttribute("title");
+      return;
+    }
+    node.classList.remove("is-hidden");
+    node.textContent = `● ${others.length} other${others.length === 1 ? "" : "s"} here`;
+    node.title = `Also viewing: ${others.join(", ")}`;
   }
 
   // --- Share page ---
@@ -1086,12 +1283,14 @@
   }
 
   el("back-btn").addEventListener("click", () => {
+    closeEventStream();
     currentTeam = null;
     showView("teams");
     loadTeams();
   });
 
   el("share-back-btn").addEventListener("click", () => {
+    closeEventStream();
     currentTeam = null;
     showView("teams");
     loadTeams();
@@ -1131,7 +1330,26 @@
   // and in-progress edits (e.g. adding multiple chips) are never interrupted.
   const AUTOSAVE_DELAY = 700;
   let autosaveTimer = null;
-  let autosavePending = null; // "team" | "encounter"
+  // Scopes with pending unsaved changes. Both can be queued from a single
+  // interaction (e.g. the werewolf toggle changes a player field AND its
+  // loadout), so this is a set rather than a single last-wins value.
+  const pendingScopes = new Set(); // "team" | "encounter"
+
+  // Finer-grained dirty tracking (Phase 3): only the slots/areas the user
+  // actually changed are saved, so two editors working on different slots don't
+  // overwrite each other. dirtyMeta covers the team's non-roster fields
+  // (name/schedule/flags/roles/footers).
+  const dirtyPlayerSlots = new Set();
+  const dirtyLoadoutSlots = new Set();
+  let dirtyMeta = false;
+
+  // After a successful local save we briefly ignore the live-update echo of our
+  // own write (the DB trigger NOTIFY comes back to us too), so we don't reload
+  // and disrupt the user right after they saved.
+  let localSaveQuietUntil = 0;
+  function markLocalSaved() {
+    localSaveQuietUntil = Date.now() + 1500;
+  }
 
   function setSaveStatus(scope, state) {
     const node = el(scope === "encounter" ? "encounter-save-status" : "team-save-status");
@@ -1153,49 +1371,39 @@
 
   function scheduleAutosave(scope) {
     if (!canEdit()) return;
-    autosavePending = scope;
+    pendingScopes.add(scope);
     setSaveStatus(scope, "saving");
     clearTimeout(autosaveTimer);
     autosaveTimer = setTimeout(flushAutosave, AUTOSAVE_DELAY);
   }
 
   // Flush any pending debounced autosave immediately. Returns a promise that
-  // resolves once the in-flight save (if any) completes, so callers can await it
-  // before doing something that would otherwise clobber the unsaved changes.
+  // resolves once the in-flight saves complete, so callers can await it before
+  // doing something that would otherwise clobber the unsaved changes. The team
+  // (roster) scope is saved before the encounter (loadout) scope so a change
+  // touching both (e.g. werewolf) settles in a consistent order.
   function flushAutosave() {
     clearTimeout(autosaveTimer);
     autosaveTimer = null;
-    const scope = autosavePending;
-    autosavePending = null;
-    if (scope === "encounter") return saveLoadouts();
-    if (scope === "team") return saveAll();
-    return Promise.resolve();
+    const scopes = new Set(pendingScopes);
+    pendingScopes.clear();
+    let chain = Promise.resolve();
+    if (scopes.has("team")) chain = chain.then(() => saveAll());
+    if (scopes.has("encounter")) chain = chain.then(() => saveLoadouts());
+    return chain.then(() => {
+      // A live refresh deferred while the user was editing can run now.
+      if (liveReloadQueued) scheduleLiveReload();
+    });
   }
 
-  async function saveAll() {
-    // Only saveable from the team detail view as an editor/owner.
-    if (!currentTeam || detailView.classList.contains("is-hidden") || !canEdit()) {
-      return;
-    }
-    const name = el("team-name-input").value.trim();
-    if (!name) {
-      setSaveStatus("team", "error");
-      showMessage("Team name cannot be empty");
-      return;
-    }
-    const players = collectPlayers();
-    const buildError = validateBuilds(players);
-    if (buildError) {
-      setSaveStatus("team", "error");
-      showMessage(buildError);
-      return;
-    }
+  // Build the team's non-roster save payload (everything except players).
+  function metaPayload(name) {
     // The time input is in the viewer's current zone; store it (and the days) in
     // UTC so any viewer can convert back to their own zone. When the time
     // crosses midnight on conversion, shift the days by the same delta so the
     // stored UTC day/time pair stays consistent.
     const scheduleConv = convertWallTimeFull(scheduleTimeValue(), localTimezone(), "UTC");
-    const payload = {
+    return {
       name,
       schedule_days: shiftDayKeys(collectScheduleDays(), scheduleConv.dayDelta),
       schedule_time: scheduleConv.time,
@@ -1209,12 +1417,100 @@
       simple_signup: simpleSignup(),
       waitlist_enabled: waitlistEnabled(),
       roles: teamRoles(),
-      players,
     };
+  }
+
+  // Replace a cached player (by slot) with the server's saved copy so the next
+  // per-slot save uses the fresh updated_at version token.
+  function mergeSavedPlayer(saved) {
+    if (!saved || !currentTeam) return;
+    currentTeam.players = currentTeam.players || [];
+    const i = currentTeam.players.findIndex((p) => p.slot === saved.slot);
+    if (i >= 0) currentTeam.players[i] = saved;
+    else currentTeam.players.push(saved);
+  }
+
+  // Replace a cached loadout (by slot) with the server's saved copy so the next
+  // per-slot save uses the fresh updated_at version token.
+  function mergeSavedLoadout(saved) {
+    if (!saved || !currentEncounter) return;
+    currentEncounter.loadouts = currentEncounter.loadouts || [];
+    const i = currentEncounter.loadouts.findIndex((l) => l.slot === saved.slot);
+    if (i >= 0) currentEncounter.loadouts[i] = saved;
+    else currentEncounter.loadouts.push(saved);
+  }
+
+  // Translate a save failure into the right UX. A 409 means someone else edited
+  // first: discard our (now superseded) local edits and reload the latest.
+  function handleConcurrentError(err) {
+    if (err && err.status === 409) {
+      showMessage("Someone else changed this team — reloaded the latest version.", "error");
+      dirtyMeta = false;
+      dirtyPlayerSlots.clear();
+      dirtyLoadoutSlots.clear();
+      liveReloadNow(true);
+      return;
+    }
+    handleError(err);
+  }
+
+  async function saveAll() {
+    // Only saveable from the team detail view as an editor/owner.
+    if (!currentTeam || detailView.classList.contains("is-hidden") || !canEdit()) {
+      return;
+    }
+    const name = el("team-name-input").value.trim();
+    if (!name) {
+      setSaveStatus("team", "error");
+      showMessage("Team name cannot be empty");
+      return;
+    }
+
+    const slotsToSave = Array.from(dirtyPlayerSlots);
+    if (!dirtyMeta && slotsToSave.length === 0) {
+      // Nothing actually changed (e.g. a coalesced no-op); clear the indicator.
+      setSaveStatus("team", "saved");
+      return;
+    }
+
+    const playerBySlot = {};
+    collectPlayers().forEach((p) => (playerBySlot[p.slot] = p));
+    const dirtyPlayers = slotsToSave.map((s) => playerBySlot[s]).filter(Boolean);
+    const buildError = validateBuilds(dirtyPlayers);
+    if (buildError) {
+      setSaveStatus("team", "error");
+      showMessage(buildError);
+      return;
+    }
+
     setSaveStatus("team", "saving");
     try {
-      currentTeam = await api.saveTeam(currentTeam.id, payload);
+      if (dirtyMeta) {
+        currentTeam = await api.saveTeam(currentTeam.id, {
+          ...metaPayload(name),
+          players: [],
+          expected_updated_at: currentTeam.updated_at,
+        });
+        dirtyMeta = false;
+      }
+      // Save each changed slot on its own, with its own version token, so a
+      // concurrent edit to a different slot can't be clobbered.
+      for (const slot of slotsToSave) {
+        const p = playerBySlot[slot];
+        if (!p) {
+          dirtyPlayerSlots.delete(slot);
+          continue;
+        }
+        const base = (currentTeam.players || []).find((x) => x.slot === slot);
+        const saved = await api.savePlayer(currentTeam.id, slot, {
+          ...p,
+          expected_updated_at: base ? base.updated_at : null,
+        });
+        dirtyPlayerSlots.delete(slot);
+        mergeSavedPlayer(saved);
+      }
       setSaveStatus("team", "saved");
+      markLocalSaved();
       // Roster name/role edits change the labels groupings show for each slot;
       // refresh them now that currentTeam reflects the saved roster — but not
       // while the user is mid-interaction in the groupings section, since the
@@ -1222,7 +1518,7 @@
       if (!isGroupingsInteracting()) renderGroupings();
     } catch (err) {
       setSaveStatus("team", "error");
-      handleError(err);
+      handleConcurrentError(err);
     }
   }
 
@@ -1243,6 +1539,11 @@
     // Groupings manage their own per-grouping state + autosave.
     if (e.target.closest("#groupings-card")) return;
     if (e.target.matches("input, select, textarea")) {
+      // Mark just the changed area dirty so the autosave only writes that slot
+      // (or the team meta), keeping the conflict surface small.
+      const slotEl = e.target.closest(".player-slot");
+      if (slotEl) dirtyPlayerSlots.add(Number(slotEl.dataset.slot));
+      else dirtyMeta = true;
       scheduleAutosave("team");
       // Build/role/class/race changes can change buff + crit coverage; repaint.
       refreshBuffCoverage();
@@ -1413,10 +1714,11 @@
       e.preventDefault();
       clearTimeout(autosaveTimer);
       autosaveTimer = null;
-      autosavePending = null;
+      pendingScopes.clear();
       if (!detailView.classList.contains("is-hidden")) {
-        saveAll();
-        if (currentEncounter) saveLoadouts();
+        Promise.resolve(saveAll()).then(() => {
+          if (currentEncounter) return saveLoadouts();
+        });
       }
     }
   });
@@ -1781,7 +2083,26 @@
 
     el("share-form").classList.toggle("is-hidden", !isOwner());
     el("share-note").classList.toggle("is-hidden", isOwner());
+    // Shared members (non-owners) can leave a team that was shared with them.
+    const leaveRow = el("leave-team-row");
+    if (leaveRow) leaveRow.classList.toggle("is-hidden", isOwner());
   }
+
+  el("leave-team-btn").addEventListener("click", async () => {
+    if (!currentTeam || isOwner()) return;
+    if (!confirm(`Leave “${currentTeam.name}”? You'll lose access until it's shared with you again.`))
+      return;
+    try {
+      await api.leaveTeam(currentTeam.id);
+      const name = currentTeam.name;
+      currentTeam = null;
+      showView("teams");
+      loadTeams();
+      showMessage(`You left “${name}”`, "success");
+    } catch (err) {
+      handleError(err);
+    }
+  });
 
   el("share-form").addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -1972,6 +2293,7 @@
     input.value = "";
     renderRolesEditor();
     refreshRosterRoleOptions();
+    dirtyMeta = true;
     scheduleAutosave("team");
   }
 
@@ -1986,6 +2308,7 @@
     currentTeam.roles = teamRoles().filter((r) => r.key !== key);
     renderRolesEditor();
     refreshRosterRoleOptions();
+    dirtyMeta = true;
     scheduleAutosave("team");
   }
 
@@ -2201,6 +2524,9 @@
       if (wwCb) {
         wwCb.addEventListener("change", () => {
           applyWerewolfSkills(slot, wwCb.checked);
+          const n = Number(slot.dataset.slot);
+          dirtyPlayerSlots.add(n);
+          dirtyLoadoutSlots.add(n);
           scheduleAutosave("team");
           scheduleAutosave("encounter");
         });
@@ -2236,6 +2562,7 @@
         slot.querySelectorAll("[data-crit] [data-crit-field]").forEach((field) => {
           const evt = field.tagName === "SELECT" ? "change" : "input";
           field.addEventListener(evt, () => {
+            dirtyLoadoutSlots.add(Number(slot.dataset.slot));
             scheduleAutosave("encounter");
             refreshCritCoverage();
             refreshPenCoverage();
@@ -2413,7 +2740,11 @@
     refreshCritCoverage();
     refreshPenCoverage();
 
-    // Programmatic value changes don't fire input/change, so persist explicitly.
+    // Programmatic value changes don't fire input/change, so mark this slot
+    // dirty and persist explicitly.
+    const dn = Number(dstSlot.dataset.slot);
+    dirtyPlayerSlots.add(dn);
+    dirtyLoadoutSlots.add(dn);
     setSaveStatus("team", "saving");
     setSaveStatus("encounter", "saving");
     Promise.resolve(saveAll()).then(() => saveLoadouts());
@@ -2467,7 +2798,11 @@
     updateSlotSummary(slot);
     renderPlayerNav();
 
-    // Programmatic value changes don't fire input/change, so persist explicitly.
+    // Programmatic value changes don't fire input/change, so mark this slot
+    // dirty and persist explicitly.
+    const cn = Number(slot.dataset.slot);
+    dirtyPlayerSlots.add(cn);
+    dirtyLoadoutSlots.add(cn);
     setSaveStatus("team", "saving");
     setSaveStatus("encounter", "saving");
     Promise.resolve(saveAll()).then(() => saveLoadouts());
@@ -2630,17 +2965,24 @@
 
   // Apply pre-made (template) mode: a team's template status is fixed at
   // creation (there's no in-view toggle), so this only adjusts presentation. In
-  // template mode the recurring schedule, Discord bot texts, member pool, and
-  // per-player Discord handles don't apply, so they're hidden; the pre-made run
-  // post body card is shown instead. Hiding is purely presentational — the
-  // underlying data is preserved. The roster is re-rendered elsewhere so the
-  // Discord-handle fields hide/show.
+  // template mode the recurring schedule, the Post Footer + Recruit Post bot
+  // texts, member pool, and per-player Discord handles don't apply, so they're
+  // hidden; the Build Details DM footer stays (players can still request build
+  // details), and the pre-made run post body card is shown instead. Hiding is
+  // purely presentational — the underlying data is preserved. The roster is
+  // re-rendered elsewhere so the Discord-handle fields hide/show.
   function applyPreMadeMode() {
     const on = preMade();
     const scheduleSection = el("schedule-section");
     if (scheduleSection) scheduleSection.classList.toggle("is-hidden", on);
-    const botTexts = el("discord-bot-texts-card");
-    if (botTexts) botTexts.classList.toggle("is-hidden", on);
+    // The Discord Bot Texts card stays visible for templates: the Build Details
+    // DM footer still applies (players can request build details on a pre-made
+    // run). Only the Post Footer (/coreteam post overview) and Recruit Post
+    // (/coreteam recruit pool) don't apply to templates, so hide just those.
+    const postFooterGroup = el("post-footer-group");
+    if (postFooterGroup) postFooterGroup.classList.toggle("is-hidden", on);
+    const signupPostGroup = el("signup-post-group");
+    if (signupPostGroup) signupPostGroup.classList.toggle("is-hidden", on);
     const premadeCard = el("premade-post-card");
     if (premadeCard) premadeCard.classList.toggle("is-hidden", !on);
     const membersBtn = el("members-btn");
@@ -2679,10 +3021,9 @@
   // signup. Only applies in pre-made mode, where the simple-signup toggle lives.
   function applySimpleSignupMode() {
     const on = preMade() && simpleSignup();
-    // The roster-roles editor is meaningless for simple signups (players pick a
-    // role to be auto-placed against the fixed bot role flow), so hide it.
-    const rolesSection = el("roles-section");
-    if (rolesSection) rolesSection.classList.toggle("is-hidden", on);
+    // The roster-roles editor stays visible for simple signups too: players pick
+    // one of the team's roster roles to be auto-placed against, so the role set
+    // needs to be editable in this mode as well.
     const groupStats = el("group-stats-card");
     if (groupStats) groupStats.classList.toggle("is-hidden", on);
     const buffsNav = document.querySelector('.player-nav-link[data-nav="buffs"]');
@@ -2757,8 +3098,9 @@
     clearMessage();
     try {
       // Flush any pending loadout autosave for the current encounter first, so
-      // switching never drops unsaved gear/skill edits.
-      if (autosavePending === "encounter") {
+      // switching never drops unsaved gear/skill edits (and stale dirty slots
+      // aren't applied to the next encounter).
+      if (pendingScopes.has("encounter") || dirtyLoadoutSlots.size) {
         await flushAutosave();
       }
       currentEncounter = await api.getEncounter(currentTeam.id, encounterId);
@@ -2945,7 +3287,9 @@
       remove.setAttribute("aria-label", "Remove");
       remove.textContent = "×";
       remove.addEventListener("click", () => {
+        const sEl = chip.closest(".player-slot");
         chip.remove();
+        if (sEl) dirtyLoadoutSlots.add(Number(sEl.dataset.slot));
         scheduleAutosave("encounter");
         refreshBuffCoverage();
         refreshCritCoverage();
@@ -2966,6 +3310,8 @@
       placeholder: cfg.addPlaceholder,
       onSelect: (value) => {
         addChip(listEl, type, value, true);
+        const sEl = listEl.closest(".player-slot");
+        if (sEl) dirtyLoadoutSlots.add(Number(sEl.dataset.slot));
         scheduleAutosave("encounter");
         refreshBuffCoverage();
         refreshCritCoverage();
@@ -3056,17 +3402,39 @@
     if (!currentEncounter || detailView.classList.contains("is-hidden") || !canEdit()) {
       return;
     }
+    const slots = Array.from(dirtyLoadoutSlots);
+    if (slots.length === 0) {
+      setSaveStatus("encounter", "saved");
+      return;
+    }
+    const bySlot = {};
+    collectLoadouts().forEach((l) => (bySlot[l.slot] = l));
+
     setSaveStatus("encounter", "saving");
     try {
-      currentEncounter = await api.saveLoadouts(
-        currentTeam.id,
-        currentEncounter.id,
-        collectLoadouts()
-      );
+      // Save each changed slot on its own (with its version token) so concurrent
+      // edits to different slots of the same encounter don't overwrite.
+      for (const slot of slots) {
+        const l = bySlot[slot];
+        if (!l) {
+          dirtyLoadoutSlots.delete(slot);
+          continue;
+        }
+        const base = (currentEncounter.loadouts || []).find((x) => x.slot === slot);
+        const saved = await api.saveLoadoutSlot(
+          currentTeam.id,
+          currentEncounter.id,
+          slot,
+          { ...l, expected_updated_at: base ? base.updated_at : null }
+        );
+        dirtyLoadoutSlots.delete(slot);
+        mergeSavedLoadout(saved);
+      }
       setSaveStatus("encounter", "saved");
+      markLocalSaved();
     } catch (err) {
       setSaveStatus("encounter", "error");
-      handleError(err);
+      handleConcurrentError(err);
     }
   }
 

@@ -13,6 +13,7 @@ import (
 	"github.com/core-team-builder/backend/internal/auth"
 	"github.com/core-team-builder/backend/internal/email"
 	"github.com/core-team-builder/backend/internal/models"
+	"github.com/core-team-builder/backend/internal/realtime"
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
@@ -61,6 +62,7 @@ type Server struct {
 	discord          *models.DiscordStore
 	tokens           *auth.TokenManager
 	mailer           email.Mailer
+	realtime         *realtime.Hub
 	corsOrigin       string
 	appBaseURL       string
 	passwordResetTTL time.Duration
@@ -80,6 +82,7 @@ type Config struct {
 	Discord          *models.DiscordStore
 	Tokens           *auth.TokenManager
 	Mailer           email.Mailer
+	Realtime         *realtime.Hub
 	CORSOrigin       string
 	AppBaseURL       string
 	PasswordResetTTL time.Duration
@@ -114,6 +117,7 @@ func New(c Config) *Server {
 		discord:          c.Discord,
 		tokens:           c.Tokens,
 		mailer:           c.Mailer,
+		realtime:         c.Realtime,
 		corsOrigin:       c.CORSOrigin,
 		appBaseURL:       c.AppBaseURL,
 		passwordResetTTL: c.PasswordResetTTL,
@@ -166,6 +170,13 @@ func (s *Server) Routes() http.Handler {
 	mux.Handle("DELETE /api/teams/{id}", protected(s.handleDeleteTeam))
 	mux.Handle("POST /api/teams/{id}/share", protected(s.handleShareTeam))
 	mux.Handle("DELETE /api/teams/{id}/members/{userID}", protected(s.handleUnshareTeam))
+	mux.Handle("DELETE /api/teams/{id}/membership", protected(s.handleLeaveTeam))
+	mux.Handle("PUT /api/teams/{id}/players/{slot}", protected(s.handleSavePlayer))
+
+	// Live collaboration: Server-Sent Events stream of team changes + presence.
+	// EventSource cannot send an Authorization header, so this route authenticates
+	// via the access_token query parameter instead of the bearer middleware.
+	mux.HandleFunc("GET /api/teams/{id}/events", s.handleTeamEvents)
 
 	// Roster member pool (the /coreteam recruit recruitment pool).
 	mux.Handle("GET /api/teams/{id}/roster-members", protected(s.handleListRosterMembers))
@@ -180,6 +191,7 @@ func (s *Server) Routes() http.Handler {
 	mux.Handle("PUT /api/teams/{id}/encounters/{eid}", protected(s.handleUpdateEncounter))
 	mux.Handle("DELETE /api/teams/{id}/encounters/{eid}", protected(s.handleDeleteEncounter))
 	mux.Handle("PUT /api/teams/{id}/encounters/{eid}/loadouts", protected(s.handleSaveLoadouts))
+	mux.Handle("PUT /api/teams/{id}/encounters/{eid}/loadouts/{slot}", protected(s.handleSaveLoadoutSlot))
 
 	// Groupings.
 	mux.Handle("GET /api/teams/{id}/groupings", protected(s.handleListGroupings))
@@ -209,7 +221,7 @@ func (s *Server) withCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", s.corsOrigin)
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Client-Id")
 		w.Header().Set("Vary", "Origin")
 
 		if r.Method == http.MethodOptions {

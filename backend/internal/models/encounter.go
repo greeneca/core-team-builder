@@ -158,6 +158,9 @@ type Loadout struct {
 	// (e.g. mitigation). Informational only: surfaced when Banner Bearer is
 	// slotted and shown in the Discord export; it feeds no calculation.
 	BannerBearerFocus string `json:"banner_bearer_focus"`
+	// UpdatedAt is this loadout row's last-modified timestamp; it doubles as the
+	// optimistic-concurrency token for a per-slot loadout save (SaveLoadoutSlot).
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // Encounter is a named fight within a team, with a per-player loadout list.
@@ -361,7 +364,7 @@ func (s *EncounterStore) Get(ctx context.Context, encounterID int64) (*Encounter
 	}
 
 	const lq = `
-		SELECT slot, gear, skills, potions, cp_blue, crit_dmg, mundus, armor_heavy, armor_medium, armor_light, pen_extra, catalyst_elements, weapon_damage, splintered_secrets_skills, force_of_nature_status, scribed_buffs, banner_bearer_focus
+		SELECT slot, gear, skills, potions, cp_blue, crit_dmg, mundus, armor_heavy, armor_medium, armor_light, pen_extra, catalyst_elements, weapon_damage, splintered_secrets_skills, force_of_nature_status, scribed_buffs, banner_bearer_focus, updated_at
 		FROM encounter_loadouts WHERE encounter_id = $1 ORDER BY slot`
 	rows, err := s.pool.Query(ctx, lq, encounterID)
 	if err != nil {
@@ -372,7 +375,7 @@ func (s *EncounterStore) Get(ctx context.Context, encounterID int64) (*Encounter
 		var l Loadout
 		if err := rows.Scan(
 			&l.Slot, &l.Gear, &l.Skills, &l.Potions,
-			&l.CPBlue, &l.CritDmg, &l.Mundus, &l.ArmorHeavy, &l.ArmorMedium, &l.ArmorLight, &l.PenExtra, &l.CatalystElements, &l.WeaponDamage, &l.SplinteredSecretsSkills, &l.ForceOfNatureStatus, &l.ScribedBuffs, &l.BannerBearerFocus,
+			&l.CPBlue, &l.CritDmg, &l.Mundus, &l.ArmorHeavy, &l.ArmorMedium, &l.ArmorLight, &l.PenExtra, &l.CatalystElements, &l.WeaponDamage, &l.SplinteredSecretsSkills, &l.ForceOfNatureStatus, &l.ScribedBuffs, &l.BannerBearerFocus, &l.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -434,6 +437,58 @@ func (s *EncounterStore) SaveLoadouts(ctx context.Context, encounterID int64, lo
 		}
 	}
 	return tx.Commit(ctx)
+}
+
+// SaveLoadoutSlot updates a single (encounter, slot) loadout and returns the
+// refreshed row. It is the per-slot counterpart to SaveLoadouts, used by the
+// finer-grained autosave so concurrent edits to different slots don't overwrite
+// each other.
+//
+// expectedUpdatedAt enables optimistic concurrency: when non-zero the row is
+// updated only if its updated_at still matches, otherwise ErrVersionConflict is
+// returned. A zero value skips the check.
+func (s *EncounterStore) SaveLoadoutSlot(ctx context.Context, encounterID int64, l Loadout, expectedUpdatedAt time.Time) (*Loadout, error) {
+	const setCols = `
+		SET gear = $1, skills = $2, potions = $3, cp_blue = $4, crit_dmg = $5,
+		    mundus = $6, armor_heavy = $7, armor_medium = $8, armor_light = $9, pen_extra = $10,
+		    catalyst_elements = $11, weapon_damage = $12, splintered_secrets_skills = $13,
+		    force_of_nature_status = $14, scribed_buffs = $15, banner_bearer_focus = $16`
+
+	args := []any{
+		l.Gear, l.Skills, l.Potions, l.CPBlue, l.CritDmg,
+		l.Mundus, l.ArmorHeavy, l.ArmorMedium, l.ArmorLight, l.PenExtra,
+		l.CatalystElements, l.WeaponDamage, l.SplinteredSecretsSkills,
+		l.ForceOfNatureStatus, l.ScribedBuffs, l.BannerBearerFocus,
+		encounterID, l.Slot,
+	}
+	q := `UPDATE encounter_loadouts ` + setCols + ` WHERE encounter_id = $17 AND slot = $18`
+	if !expectedUpdatedAt.IsZero() {
+		q += ` AND updated_at = $19`
+		args = append(args, expectedUpdatedAt)
+	}
+
+	tag, err := s.pool.Exec(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	if tag.RowsAffected() == 0 {
+		if expectedUpdatedAt.IsZero() {
+			return nil, ErrEncounterNotFound
+		}
+		return nil, ErrVersionConflict
+	}
+
+	var out Loadout
+	const reread = `
+		SELECT slot, gear, skills, potions, cp_blue, crit_dmg, mundus, armor_heavy, armor_medium, armor_light, pen_extra, catalyst_elements, weapon_damage, splintered_secrets_skills, force_of_nature_status, scribed_buffs, banner_bearer_focus, updated_at
+		FROM encounter_loadouts WHERE encounter_id = $1 AND slot = $2`
+	if err := s.pool.QueryRow(ctx, reread, encounterID, l.Slot).Scan(
+		&out.Slot, &out.Gear, &out.Skills, &out.Potions,
+		&out.CPBlue, &out.CritDmg, &out.Mundus, &out.ArmorHeavy, &out.ArmorMedium, &out.ArmorLight, &out.PenExtra, &out.CatalystElements, &out.WeaponDamage, &out.SplinteredSecretsSkills, &out.ForceOfNatureStatus, &out.ScribedBuffs, &out.BannerBearerFocus, &out.UpdatedAt,
+	); err != nil {
+		return nil, err
+	}
+	return &out, nil
 }
 
 // SanitizeLoadoutItems trims, drops empties, enforces length, and caps count.

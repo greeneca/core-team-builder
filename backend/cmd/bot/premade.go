@@ -390,8 +390,17 @@ func (b *bot) handlePremadeClaim(s *discordgo.Session, i *discordgo.InteractionC
 		return
 	}
 
+	// Note the slot/role the user currently holds (if any). Claiming a different
+	// slot releases this one, so it must be backfilled from its role's waitlist.
+	priorSlot, priorRole, hadPrior := 0, "", false
+	if signups, err := b.premade.ListSignups(ctx, run.ID); err != nil {
+		log.Printf("premade: claim list signups: %v", err)
+	} else if sl, ok := userSlot(signups, user.ID); ok {
+		priorSlot, priorRole, hadPrior = sl, roleForSlot(team, sl), true
+	}
+
 	if team.SimpleSignup {
-		b.claimSimple(ctx, s, i, run, team, user, values[0])
+		b.claimSimple(ctx, s, i, run, team, user, values[0], priorSlot, priorRole, hadPrior)
 		return
 	}
 
@@ -413,12 +422,18 @@ func (b *bot) handlePremadeClaim(s *discordgo.Session, i *discordgo.InteractionC
 	if err := b.premade.LeaveWaitlist(ctx, run.ID, user.ID); err != nil {
 		log.Printf("premade: claim clear waitlist: %v", err)
 	}
+	// Switching slots frees the prior one — backfill it from its role's waitlist.
+	if hadPrior && priorSlot != slot {
+		b.promoteFreedSlot(ctx, s, run, team, priorSlot, priorRole)
+	}
 	b.renderPremadeUpdate(ctx, s, i, run)
 }
 
 // claimSimple claims the first open slot matching the chosen role, retrying when
-// another user grabs the same slot first.
-func (b *bot) claimSimple(ctx context.Context, s *discordgo.Session, i *discordgo.InteractionCreate, run *models.PremadeRun, team *models.Team, user *discordgo.User, role string) {
+// another user grabs the same slot first. priorSlot/priorRole/hadPrior describe
+// the slot the user already held (if any), so switching roles backfills it from
+// that role's waitlist.
+func (b *bot) claimSimple(ctx context.Context, s *discordgo.Session, i *discordgo.InteractionCreate, run *models.PremadeRun, team *models.Team, user *discordgo.User, role string, priorSlot int, priorRole string, hadPrior bool) {
 	for attempt := 0; attempt < 16; attempt++ {
 		signups, err := b.premade.ListSignups(ctx, run.ID)
 		if err != nil {
@@ -451,6 +466,10 @@ func (b *bot) claimSimple(ctx context.Context, s *discordgo.Session, i *discordg
 		}
 		if err := b.premade.LeaveWaitlist(ctx, run.ID, user.ID); err != nil {
 			log.Printf("premade: claim simple clear waitlist: %v", err)
+		}
+		// Switching slots frees the prior one — backfill it from its waitlist.
+		if hadPrior && priorSlot != slot {
+			b.promoteFreedSlot(ctx, s, run, team, priorSlot, priorRole)
 		}
 		b.renderPremadeUpdate(ctx, s, i, run)
 		return
@@ -522,12 +541,8 @@ func (b *bot) handlePremadeLeave(s *discordgo.Session, i *discordgo.InteractionC
 		log.Printf("premade: leave waitlist: %v", err)
 	}
 
-	if held && team.WaitlistEnabled {
-		if entry, promoted, err := b.premade.PromoteToSlot(ctx, run.ID, freedSlot, freedRole); err != nil {
-			log.Printf("premade: promote: %v", err)
-		} else if promoted {
-			b.dmPromoted(s, entry, run, team, freedSlot)
-		}
+	if held {
+		b.promoteFreedSlot(ctx, s, run, team, freedSlot, freedRole)
 	}
 
 	b.renderPremadeUpdate(ctx, s, i, run)
@@ -588,6 +603,34 @@ func roleForSlot(team *models.Team, slot int) string {
 		}
 	}
 	return ""
+}
+
+// userSlot returns the slot a user currently holds on a run (if any).
+func userSlot(signups []models.PremadeSignup, discordUserID string) (int, bool) {
+	for _, sg := range signups {
+		if sg.DiscordUserID == discordUserID {
+			return sg.Slot, true
+		}
+	}
+	return 0, false
+}
+
+// promoteFreedSlot auto-promotes the head of a freed slot's role waitlist into
+// it (and DMs them) when the team's waitlist is enabled. It is a no-op when the
+// waitlist is off or that role's waitlist is empty. Shared by the leave and
+// slot-switch flows so a vacated slot is always backfilled.
+func (b *bot) promoteFreedSlot(ctx context.Context, s *discordgo.Session, run *models.PremadeRun, team *models.Team, freedSlot int, freedRole string) {
+	if !team.WaitlistEnabled {
+		return
+	}
+	entry, promoted, err := b.premade.PromoteToSlot(ctx, run.ID, freedSlot, freedRole)
+	if err != nil {
+		log.Printf("premade: promote: %v", err)
+		return
+	}
+	if promoted {
+		b.dmPromoted(s, entry, run, team, freedSlot)
+	}
 }
 
 // dmPromoted notifies a user that they were auto-promoted off the waitlist into
@@ -840,13 +883,14 @@ func premadeComponents(team *models.Team, signups []models.PremadeSignup) []disc
 	return rows
 }
 
-// premadeActionRow is the post's final button row: "Leave my slot" (any
-// claimant) and "Edit run" (gated to the run's creator / team owner-editor in
-// the handler). Shared by the specific and simple component layouts.
+// premadeActionRow is the post's final button row: "Un-Sign" (any claimant
+// releases their slot) and "Edit run" (gated to the run's creator / team
+// owner-editor in the handler). Shared by the specific and simple component
+// layouts.
 func premadeActionRow() discordgo.MessageComponent {
 	return discordgo.ActionsRow{Components: []discordgo.MessageComponent{
 		discordgo.Button{
-			Label:    "Leave my slot",
+			Label:    "Un-Sign",
 			Style:    discordgo.SecondaryButton,
 			CustomID: premadeLeaveID,
 		},

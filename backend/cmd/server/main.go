@@ -20,6 +20,7 @@ import (
 	"github.com/core-team-builder/backend/internal/email"
 	"github.com/core-team-builder/backend/internal/handlers"
 	"github.com/core-team-builder/backend/internal/models"
+	"github.com/core-team-builder/backend/internal/realtime"
 )
 
 func main() {
@@ -55,6 +56,12 @@ func run() error {
 	startTokenCleanup(ctx, refreshTokens, passwordResets, discord, time.Hour)
 	tokens := auth.NewTokenManager(cfg.JWTSecret, cfg.JWTTTL, cfg.RefreshTTL)
 
+	// Live-collaboration hub: LISTENs for team-change notifications (emitted by
+	// DB triggers on any write, including the bot's) and fans them out to the
+	// per-team SSE connections. Uses a dedicated connection, not the pool.
+	hub := realtime.NewHub()
+	go hub.Listen(ctx, cfg.DatabaseURL)
+
 	var mailer email.Mailer
 	if cfg.SMTP.Configured() {
 		mailer = email.NewSMTPMailer(email.SMTPConfig{
@@ -82,6 +89,7 @@ func run() error {
 		Discord:          discord,
 		Tokens:           tokens,
 		Mailer:           mailer,
+		Realtime:         hub,
 		CORSOrigin:       cfg.CORSOrigin,
 		AppBaseURL:       cfg.AppBaseURL,
 		PasswordResetTTL: cfg.PasswordResetTTL,

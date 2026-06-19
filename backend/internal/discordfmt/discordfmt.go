@@ -106,9 +106,15 @@ func BuildPremadePost(team *models.Team, title, postOverride string, scheduledUn
 		L = append(L, "")
 		L = append(L, wl...)
 	}
-	footer := "_Use the menus below to claim a slot or get a slot's build details. Claiming a new slot releases your previous one._"
+	// Simple-signup runs hide each slot's class/gear and the build-details menu,
+	// so the footer doesn't mention build details for them.
+	claimText := "claim a slot or get a slot's build details"
+	if team.SimpleSignup {
+		claimText = "claim a slot"
+	}
+	footer := fmt.Sprintf("_Use the menus below to %s. Claiming a new slot releases your previous one._", claimText)
 	if team.WaitlistEnabled {
-		footer = "_Use the menus below to claim a slot or get a slot's build details. Claiming a new slot releases your previous one. If a role is full you can join its waitlist — you'll be moved in automatically when a slot opens._"
+		footer = fmt.Sprintf("_Use the menus below to %s. Claiming a new slot releases your previous one. If a role is full you can join its waitlist — you'll be moved in automatically when a slot opens._", claimText)
 	}
 	L = append(L, "", footer)
 	return title, strings.TrimSpace(strings.Join(L, "\n"))

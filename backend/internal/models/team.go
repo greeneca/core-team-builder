@@ -202,6 +202,12 @@ func (t *Team) OrderedRoleKeys(extra ...string) []string {
 // access.
 var ErrTeamNotFound = errors.New("team not found")
 
+// ErrVersionConflict is returned by a version-checked save when the caller's
+// expected updated_at no longer matches the stored row — i.e. someone else
+// changed it first. Handlers surface this as a 409 so the client can refetch
+// and retry instead of silently clobbering the concurrent edit.
+var ErrVersionConflict = errors.New("version conflict")
+
 // ValidShareRoles are the roles a team can be shared with. "owner" is excluded
 // because it is assigned only at team creation. (ESO game reference data and the
 // player build validators live in eso.go.)
@@ -256,6 +262,9 @@ type Player struct {
 	// encounter (see WerewolfDefaultSkills and TeamStore.Save); when false, all
 	// werewolf-line skills (WerewolfSkills) are removed from them.
 	Werewolf bool `json:"werewolf"`
+	// UpdatedAt is the row's last-modified timestamp; it doubles as the
+	// optimistic-concurrency token for a per-slot save (see SavePlayer).
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // WerewolfDefaultSkills are the skills added to a slot's skills loadout when its
@@ -505,7 +514,7 @@ func (s *TeamStore) Get(ctx context.Context, teamID int64) (*Team, error) {
 
 	const playersQ = `
 		SELECT id, slot, name, discord_handle, role, class, race,
-		       subclassed, skill_line_1, skill_line_2, skill_line_3, mastery_1, mastery_2, werewolf
+		       subclassed, skill_line_1, skill_line_2, skill_line_3, mastery_1, mastery_2, werewolf, updated_at
 		FROM players WHERE team_id = $1 ORDER BY slot`
 	pRows, err := s.pool.Query(ctx, playersQ, teamID)
 	if err != nil {
@@ -516,7 +525,7 @@ func (s *TeamStore) Get(ctx context.Context, teamID int64) (*Team, error) {
 		var p Player
 		if err := pRows.Scan(
 			&p.ID, &p.Slot, &p.Name, &p.DiscordHandle, &p.Role, &p.Class, &p.Race,
-			&p.Subclassed, &p.SkillLine1, &p.SkillLine2, &p.SkillLine3, &p.Mastery1, &p.Mastery2, &p.Werewolf,
+			&p.Subclassed, &p.SkillLine1, &p.SkillLine2, &p.SkillLine3, &p.Mastery1, &p.Mastery2, &p.Werewolf, &p.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -567,19 +576,38 @@ func (s *TeamStore) Access(ctx context.Context, teamID, userID int64) (found boo
 // and (when players is non-nil) the roster, all within a single transaction. Each
 // player in players must have a valid Slot (1..TeamSize); slots not present are
 // left unchanged.
-func (s *TeamStore) Save(ctx context.Context, teamID int64, name string, days []string, scheduleTime string, encountersEnabled bool, postFooter string, dmFooter string, signupPost string, autoSharePoolViewers bool, preMade bool, premadePost string, simpleSignup bool, waitlistEnabled bool, roles TeamRoles, players []Player) error {
+// expectedUpdatedAt enables optimistic concurrency: when non-zero, the team row
+// is updated only if its current updated_at still matches, otherwise
+// ErrVersionConflict is returned so a stale save doesn't clobber a concurrent
+// edit. A zero value skips the check (used by callers that don't track a
+// version, e.g. older clients).
+func (s *TeamStore) Save(ctx context.Context, teamID int64, name string, days []string, scheduleTime string, encountersEnabled bool, postFooter string, dmFooter string, signupPost string, autoSharePoolViewers bool, preMade bool, premadePost string, simpleSignup bool, waitlistEnabled bool, roles TeamRoles, players []Player, expectedUpdatedAt time.Time) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
 
-	const updateTeam = `
-		UPDATE teams
-		SET name = $1, schedule_days = $2, schedule_time = $3, encounters_enabled = $4, post_footer = $5, dm_footer = $6, signup_post = $7, auto_share_pool_viewers = $8, pre_made = $9, premade_post = $10, simple_signup = $11, waitlist_enabled = $12, roles = $13
-		WHERE id = $14`
-	if _, err := tx.Exec(ctx, updateTeam, name, days, scheduleTime, encountersEnabled, postFooter, dmFooter, signupPost, autoSharePoolViewers, preMade, premadePost, simpleSignup, waitlistEnabled, roles, teamID); err != nil {
-		return err
+	if expectedUpdatedAt.IsZero() {
+		const updateTeam = `
+			UPDATE teams
+			SET name = $1, schedule_days = $2, schedule_time = $3, encounters_enabled = $4, post_footer = $5, dm_footer = $6, signup_post = $7, auto_share_pool_viewers = $8, pre_made = $9, premade_post = $10, simple_signup = $11, waitlist_enabled = $12, roles = $13
+			WHERE id = $14`
+		if _, err := tx.Exec(ctx, updateTeam, name, days, scheduleTime, encountersEnabled, postFooter, dmFooter, signupPost, autoSharePoolViewers, preMade, premadePost, simpleSignup, waitlistEnabled, roles, teamID); err != nil {
+			return err
+		}
+	} else {
+		const updateTeamVer = `
+			UPDATE teams
+			SET name = $1, schedule_days = $2, schedule_time = $3, encounters_enabled = $4, post_footer = $5, dm_footer = $6, signup_post = $7, auto_share_pool_viewers = $8, pre_made = $9, premade_post = $10, simple_signup = $11, waitlist_enabled = $12, roles = $13
+			WHERE id = $14 AND updated_at = $15`
+		tag, err := tx.Exec(ctx, updateTeamVer, name, days, scheduleTime, encountersEnabled, postFooter, dmFooter, signupPost, autoSharePoolViewers, preMade, premadePost, simpleSignup, waitlistEnabled, roles, teamID, expectedUpdatedAt)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			return ErrVersionConflict
+		}
 	}
 
 	const updatePlayer = `
@@ -633,6 +661,100 @@ func reconcileWerewolfSkillsTx(ctx context.Context, tx pgx.Tx, teamID int64, slo
 		WHERE el.encounter_id = e.id AND e.team_id = $2 AND el.slot = $3`
 	_, err := tx.Exec(ctx, removeWW, WerewolfSkills, teamID, slot)
 	return err
+}
+
+// SavePlayer updates a single roster slot and (re)reconciles its werewolf skills
+// across the team's encounters, all in one transaction. It is the per-slot
+// counterpart to Save's bulk roster update, used by the finer-grained autosave
+// so two editors changing different slots don't overwrite each other.
+//
+// expectedUpdatedAt enables optimistic concurrency: when non-zero the row is
+// updated only if its updated_at still matches, otherwise ErrVersionConflict is
+// returned. A zero value skips the check. The refreshed player (with its new
+// updated_at) is returned on success.
+func (s *TeamStore) SavePlayer(ctx context.Context, teamID int64, p Player, expectedUpdatedAt time.Time) (*Player, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+
+	if expectedUpdatedAt.IsZero() {
+		const updatePlayer = `
+			UPDATE players
+			SET name = $1, discord_handle = $2, role = $3, class = $4, race = $5,
+			    subclassed = $6, skill_line_1 = $7, skill_line_2 = $8, skill_line_3 = $9,
+			    mastery_1 = $10, mastery_2 = $11, werewolf = $12
+			WHERE team_id = $13 AND slot = $14`
+		tag, err := tx.Exec(ctx, updatePlayer,
+			p.Name, p.DiscordHandle, p.Role, p.Class, p.Race,
+			p.Subclassed, p.SkillLine1, p.SkillLine2, p.SkillLine3, p.Mastery1, p.Mastery2, p.Werewolf,
+			teamID, p.Slot,
+		)
+		if err != nil {
+			return nil, err
+		}
+		if tag.RowsAffected() == 0 {
+			return nil, ErrTeamNotFound
+		}
+	} else {
+		const updatePlayerVer = `
+			UPDATE players
+			SET name = $1, discord_handle = $2, role = $3, class = $4, race = $5,
+			    subclassed = $6, skill_line_1 = $7, skill_line_2 = $8, skill_line_3 = $9,
+			    mastery_1 = $10, mastery_2 = $11, werewolf = $12
+			WHERE team_id = $13 AND slot = $14 AND updated_at = $15`
+		tag, err := tx.Exec(ctx, updatePlayerVer,
+			p.Name, p.DiscordHandle, p.Role, p.Class, p.Race,
+			p.Subclassed, p.SkillLine1, p.SkillLine2, p.SkillLine3, p.Mastery1, p.Mastery2, p.Werewolf,
+			teamID, p.Slot, expectedUpdatedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+		if tag.RowsAffected() == 0 {
+			return nil, ErrVersionConflict
+		}
+	}
+
+	if err := reconcileWerewolfSkillsTx(ctx, tx, teamID, p.Slot, p.Werewolf); err != nil {
+		return nil, err
+	}
+
+	var out Player
+	const reread = `
+		SELECT id, slot, name, discord_handle, role, class, race,
+		       subclassed, skill_line_1, skill_line_2, skill_line_3, mastery_1, mastery_2, werewolf, updated_at
+		FROM players WHERE team_id = $1 AND slot = $2`
+	if err := tx.QueryRow(ctx, reread, teamID, p.Slot).Scan(
+		&out.ID, &out.Slot, &out.Name, &out.DiscordHandle, &out.Role, &out.Class, &out.Race,
+		&out.Subclassed, &out.SkillLine1, &out.SkillLine2, &out.SkillLine3, &out.Mastery1, &out.Mastery2, &out.Werewolf, &out.UpdatedAt,
+	); err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// GetRoles returns a team's stored roster roles, or the default set when none
+// are stored. Used to validate a role on a per-slot save without loading the
+// whole team.
+func (s *TeamStore) GetRoles(ctx context.Context, teamID int64) (TeamRoles, error) {
+	var roles TeamRoles
+	err := s.pool.QueryRow(ctx, `SELECT roles FROM teams WHERE id = $1`, teamID).Scan(&roles)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrTeamNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if len(roles) == 0 {
+		return DefaultTeamRoles(), nil
+	}
+	return roles, nil
 }
 
 // Delete removes a team and (via cascade) its members and players.

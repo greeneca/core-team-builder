@@ -1277,6 +1277,23 @@ a.brand--home:hover {
 .save-status.is-saved { color: var(--color-success); }
 .save-status.is-error { color: var(--color-danger); }
 
+/* Live-collaboration presence: a small badge showing other people currently
+   viewing the open team (populated over the SSE stream). */
+.presence-indicator {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1, 0.25rem);
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  font-size: var(--font-size-sm);
+  color: var(--color-success);
+  background: color-mix(in srgb, var(--color-success) 12%, transparent);
+  white-space: nowrap;
+  cursor: default;
+}
+.presence-indicator.is-hidden { display: none; }
+
 @media (max-width: 720px) {
   .loadout-row { grid-template-columns: 1fr; }
   .loadout-lists { grid-template-columns: 1fr; }

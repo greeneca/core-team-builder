@@ -13,6 +13,14 @@
 const TOKEN_KEY = "ctb_token";
 const REFRESH_KEY = "ctb_refresh_token";
 
+// A per-page-load random id sent on every request as X-Client-Id. It lets the
+// client recognize (and ignore) the live-update echo of its own writes. Stable
+// for the life of the tab; a new tab gets a new id so multi-tab editing still
+// sees each other's changes.
+const CLIENT_ID =
+  (window.crypto && window.crypto.randomUUID && window.crypto.randomUUID()) ||
+  `c${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
 const api = {
   // In-flight refresh shared across concurrent 401s so the single-use refresh
   // token is only rotated once.
@@ -49,9 +57,14 @@ const api = {
     return Boolean(this.getToken());
   },
 
+  // The stable per-tab client id (exposed for the live-update layer).
+  clientId() {
+    return CLIENT_ID;
+  },
+
   // Issue a single fetch with the current access token attached.
   _send(path, opts) {
-    const headers = { "Content-Type": "application/json" };
+    const headers = { "Content-Type": "application/json", "X-Client-Id": CLIENT_ID };
     const token = this.getToken();
     if (token) {
       headers["Authorization"] = `Bearer ${token}`;
@@ -288,6 +301,31 @@ const api = {
     });
   },
 
+  // Remove your own access to a team that was shared with you. The owner cannot
+  // leave their own team. Returns no content.
+  leaveTeam(id) {
+    return this.request(`/api/teams/${id}/membership`, {
+      method: "DELETE",
+    });
+  },
+
+  // Save a single roster slot (finer-grained than saveTeam). payload is one
+  // player object; include expected_updated_at for optimistic concurrency (a
+  // stale save returns 409). Returns the refreshed player.
+  savePlayer(id, slot, payload) {
+    return this.request(`/api/teams/${id}/players/${slot}`, {
+      method: "PUT",
+      body: payload,
+    });
+  },
+
+  // Live-collaboration SSE stream URL for a team. The access token is passed as
+  // a query param because EventSource can't set an Authorization header.
+  teamEventsURL(id) {
+    const token = this.getToken();
+    return `/api/teams/${id}/events?access_token=${encodeURIComponent(token || "")}`;
+  },
+
   // --- Roster members (the /coreteam recruit recruitment pool) ---
 
   // List a team's member pool: { members: [...] }.
@@ -357,6 +395,16 @@ const api = {
       method: "PUT",
       body: { loadouts },
     });
+  },
+
+  // Save a single slot's loadout (finer-grained than saveLoadouts). payload is
+  // one loadout object; include expected_updated_at for optimistic concurrency
+  // (a stale save returns 409). Returns the refreshed loadout.
+  saveLoadoutSlot(teamId, encounterId, slot, payload) {
+    return this.request(
+      `/api/teams/${teamId}/encounters/${encounterId}/loadouts/${slot}`,
+      { method: "PUT", body: payload }
+    );
   },
 
   // --- Groupings ---

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/core-team-builder/backend/internal/models"
 )
@@ -320,69 +321,12 @@ func (s *Server) handleSaveLoadouts(w http.ResponseWriter, r *http.Request) {
 
 	loadouts := make([]models.Loadout, 0, len(req.Loadouts))
 	for _, p := range req.Loadouts {
-		if p.Slot < 1 || p.Slot > models.TeamSize {
-			writeError(w, http.StatusBadRequest, "invalid player slot")
+		loadout, verr := sanitizeLoadout(p)
+		if verr != nil {
+			writeError(w, http.StatusBadRequest, verr.Error())
 			return
 		}
-		gear, err := models.SanitizeLoadoutItems(p.Gear)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid gear list")
-			return
-		}
-		skills, err := models.SanitizeLoadoutItems(p.Skills)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid skills list")
-			return
-		}
-		potions, err := models.SanitizeLoadoutItems(p.Potions)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid potions list")
-			return
-		}
-		cpBlue, err := models.SanitizeLoadoutItems(p.CPBlue)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid champion points list")
-			return
-		}
-		critDmg, err := models.SanitizeLoadoutItems(p.CritDmg)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid crit damage sources list")
-			return
-		}
-		mundus := strings.TrimSpace(p.Mundus)
-		if len(mundus) > 100 {
-			writeError(w, http.StatusBadRequest, "invalid mundus")
-			return
-		}
-		penExtra, err := models.SanitizeLoadoutItems(p.PenExtra)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid penetration sources list")
-			return
-		}
-		scribedBuffs, err := models.SanitizeLoadoutItems(p.ScribedBuffs)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid scribed buffs list")
-			return
-		}
-		bannerBearerFocus := strings.TrimSpace(p.BannerBearerFocus)
-		if len(bannerBearerFocus) > 100 {
-			writeError(w, http.StatusBadRequest, "invalid banner bearer focus")
-			return
-		}
-		loadouts = append(loadouts, models.Loadout{
-			Slot: p.Slot, Gear: gear, Skills: skills, Potions: potions,
-			CPBlue: cpBlue, CritDmg: critDmg, Mundus: mundus,
-			ArmorHeavy:              clampArmor(p.ArmorHeavy),
-			ArmorMedium:             clampArmor(p.ArmorMedium),
-			ArmorLight:              clampArmor(p.ArmorLight),
-			PenExtra:                penExtra,
-			CatalystElements:        clampCatalystElements(p.CatalystElements),
-			WeaponDamage:            clampWeaponDamage(p.WeaponDamage),
-			SplinteredSecretsSkills: clampSplinteredSecretsSkills(p.SplinteredSecretsSkills),
-			ForceOfNatureStatus:     clampForceOfNatureStatus(p.ForceOfNatureStatus),
-			ScribedBuffs:            scribedBuffs,
-			BannerBearerFocus:       bannerBearerFocus,
-		})
+		loadouts = append(loadouts, loadout)
 	}
 
 	if err := s.encounters.SaveLoadouts(r.Context(), enc.ID, loadouts); err != nil {
@@ -398,4 +342,124 @@ func (s *Server) handleSaveLoadouts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, updated)
+}
+
+// sanitizeLoadout validates, sanitizes, and clamps one loadout payload into the
+// model ready to save. Shared by the bulk and per-slot loadout saves so both
+// enforce the same rules. The returned error message is safe to surface (400).
+func sanitizeLoadout(p loadoutPayload) (models.Loadout, error) {
+	if p.Slot < 1 || p.Slot > models.TeamSize {
+		return models.Loadout{}, errors.New("invalid player slot")
+	}
+	gear, err := models.SanitizeLoadoutItems(p.Gear)
+	if err != nil {
+		return models.Loadout{}, errors.New("invalid gear list")
+	}
+	skills, err := models.SanitizeLoadoutItems(p.Skills)
+	if err != nil {
+		return models.Loadout{}, errors.New("invalid skills list")
+	}
+	potions, err := models.SanitizeLoadoutItems(p.Potions)
+	if err != nil {
+		return models.Loadout{}, errors.New("invalid potions list")
+	}
+	cpBlue, err := models.SanitizeLoadoutItems(p.CPBlue)
+	if err != nil {
+		return models.Loadout{}, errors.New("invalid champion points list")
+	}
+	critDmg, err := models.SanitizeLoadoutItems(p.CritDmg)
+	if err != nil {
+		return models.Loadout{}, errors.New("invalid crit damage sources list")
+	}
+	mundus := strings.TrimSpace(p.Mundus)
+	if len(mundus) > 100 {
+		return models.Loadout{}, errors.New("invalid mundus")
+	}
+	penExtra, err := models.SanitizeLoadoutItems(p.PenExtra)
+	if err != nil {
+		return models.Loadout{}, errors.New("invalid penetration sources list")
+	}
+	scribedBuffs, err := models.SanitizeLoadoutItems(p.ScribedBuffs)
+	if err != nil {
+		return models.Loadout{}, errors.New("invalid scribed buffs list")
+	}
+	bannerBearerFocus := strings.TrimSpace(p.BannerBearerFocus)
+	if len(bannerBearerFocus) > 100 {
+		return models.Loadout{}, errors.New("invalid banner bearer focus")
+	}
+	return models.Loadout{
+		Slot: p.Slot, Gear: gear, Skills: skills, Potions: potions,
+		CPBlue: cpBlue, CritDmg: critDmg, Mundus: mundus,
+		ArmorHeavy:              clampArmor(p.ArmorHeavy),
+		ArmorMedium:             clampArmor(p.ArmorMedium),
+		ArmorLight:              clampArmor(p.ArmorLight),
+		PenExtra:                penExtra,
+		CatalystElements:        clampCatalystElements(p.CatalystElements),
+		WeaponDamage:            clampWeaponDamage(p.WeaponDamage),
+		SplinteredSecretsSkills: clampSplinteredSecretsSkills(p.SplinteredSecretsSkills),
+		ForceOfNatureStatus:     clampForceOfNatureStatus(p.ForceOfNatureStatus),
+		ScribedBuffs:            scribedBuffs,
+		BannerBearerFocus:       bannerBearerFocus,
+	}, nil
+}
+
+// saveLoadoutSlotRequest is the per-slot loadout save payload: one loadout plus
+// an optional optimistic-concurrency token.
+type saveLoadoutSlotRequest struct {
+	loadoutPayload
+	ExpectedUpdatedAt *time.Time `json:"expected_updated_at"`
+}
+
+// handleSaveLoadoutSlot updates a single (encounter, slot) loadout. It is the
+// finer-grained counterpart to handleSaveLoadouts so two editors changing
+// different slots don't overwrite each other. The slot comes from the path; the
+// optional expected_updated_at guards against clobbering a concurrent edit (409).
+func (s *Server) handleSaveLoadoutSlot(w http.ResponseWriter, r *http.Request) {
+	_, role, enc, ok := s.encounterAccess(w, r)
+	if !ok {
+		return
+	}
+	if !canEdit(role) {
+		writeError(w, http.StatusForbidden, "you do not have permission to edit this team")
+		return
+	}
+
+	slot, err := strconv.Atoi(r.PathValue("slot"))
+	if err != nil || slot < 1 || slot > models.TeamSize {
+		writeError(w, http.StatusBadRequest, "invalid player slot")
+		return
+	}
+
+	var req saveLoadoutSlotRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	req.Slot = slot // the path is authoritative
+
+	loadout, verr := sanitizeLoadout(req.loadoutPayload)
+	if verr != nil {
+		writeError(w, http.StatusBadRequest, verr.Error())
+		return
+	}
+
+	var expected time.Time
+	if req.ExpectedUpdatedAt != nil {
+		expected = *req.ExpectedUpdatedAt
+	}
+	saved, err := s.encounters.SaveLoadoutSlot(r.Context(), enc.ID, loadout, expected)
+	if errors.Is(err, models.ErrVersionConflict) {
+		writeError(w, http.StatusConflict, "this slot was changed by someone else; reload to get the latest")
+		return
+	}
+	if errors.Is(err, models.ErrEncounterNotFound) {
+		writeError(w, http.StatusNotFound, "loadout not found")
+		return
+	}
+	if err != nil {
+		log.Printf("save loadout slot: %v", err)
+		writeError(w, http.StatusInternalServerError, "could not save loadout")
+		return
+	}
+	writeJSON(w, http.StatusOK, saved)
 }

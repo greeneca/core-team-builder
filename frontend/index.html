@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Dashboard — Core Team Builder</title>
-  <link rel="stylesheet" href="css/styles.css?v=107" />
+  <link rel="stylesheet" href="css/styles.css?v=108" />
 </head>
 <body>
   <div id="message" class="toast is-hidden" role="alert" aria-live="assertive"></div>
@@ -32,7 +32,7 @@
         <h1>Your Teams</h1>
         <div class="form-actions">
           <button id="new-team-btn" class="btn btn--primary" type="button">+ New Team</button>
-          <button id="new-template-btn" class="btn btn--ghost" type="button">+ New Template</button>
+          <button id="new-template-btn" class="btn btn--ghost" type="button">+ New Signup Template</button>
         </div>
       </div>
 
@@ -73,7 +73,7 @@
         <div class="section-head collapsible-head">
           <div class="collapsible-head-main">
             <button class="collapse-toggle" type="button" aria-expanded="true" aria-label="Collapse section"></button>
-            <h2 style="margin: 0;">Templates</h2>
+            <h2 style="margin: 0;">Signup Templates</h2>
           </div>
         </div>
         <div class="collapsible-body">
@@ -100,6 +100,7 @@
       <div class="detail-toolbar mt-4">
         <button id="back-btn" class="btn btn--ghost" type="button">← Back to teams</button>
         <div class="form-actions detail-toolbar-actions">
+          <span id="presence-indicator" class="presence-indicator is-hidden" aria-live="polite" title=""></span>
           <button id="members-btn" class="btn btn--ghost btn--sm" type="button">Members Pool</button>
           <button id="collapse-all-btn" class="btn btn--ghost btn--sm" type="button">Collapse all</button>
           <button id="expand-all-btn" class="btn btn--ghost btn--sm" type="button">Expand all</button>
@@ -145,7 +146,7 @@
 
         <!-- Roster roles: the customizable set of roles players can be assigned.
              Populated by app.js from the team's roles (defaults to the standard
-             set). Hidden for simple-signup pre-made runs. -->
+             set). Shown in every mode, including simple-signup pre-made runs. -->
         <div id="roles-section" class="roles-section mt-6">
           <h3 class="schedule-heading">Roster Roles<span class="info-indicator" tabindex="0" role="img" aria-label="Roster roles: the roles players on this team can be assigned. Add or remove roles here; the roster role picker uses this list. Removing a role isn't allowed while a player is still assigned to it." data-tip="The roles players on this team can be assigned. Add or remove roles here; the roster role picker uses this list. You can't remove a role while a player is still using it.">i</span></h3>
           <div id="roles-list" class="roles-list"></div>
@@ -202,15 +203,15 @@
         </div>
         <div class="collapsible-body">
         <div class="discord-footers">
-          <div class="form-group mt-4">
+          <div id="post-footer-group" class="form-group mt-4">
             <label for="post-footer-input">Post Footer<span class="info-indicator" tabindex="0" role="img" aria-label="Post footer: free-form text appended to the bottom of the bot's /coreteam post overview (e.g. raid lead, voice channel, reminders). Saved with the team." data-tip="Free-form text appended to the bottom of the bot's /coreteam post overview (e.g. raid lead, voice channel, reminders). Saved with the team.">i</span></label>
             <textarea id="post-footer-input" class="input" rows="3" maxlength="2000" placeholder="Optional text appended to the bottom of the bot's /coreteam post (e.g. raid lead, voice channel, reminders)."></textarea>
           </div>
-          <div class="form-group mt-4">
+          <div id="dm-footer-group" class="form-group mt-4">
             <label for="dm-footer-input">Build Details DM Footer<span class="info-indicator" tabindex="0" role="img" aria-label="Build details DM footer: free-form text appended to the bottom of the Get My Build Details direct message the bot sends each player. Saved with the team." data-tip="Free-form text appended to the bottom of the Get My Build Details direct message the bot sends each player. Saved with the team.">i</span></label>
             <textarea id="dm-footer-input" class="input" rows="3" maxlength="2000" placeholder="Optional text appended to the bottom of the Get My Build Details DM (e.g. reminders, links)."></textarea>
           </div>
-          <div class="form-group mt-4">
+          <div id="signup-post-group" class="form-group mt-4">
             <label for="signup-post-input">Recruit Post<span class="info-indicator" tabindex="0" role="img" aria-label="Recruit post: free-form recruitment text the bot posts with /coreteam recruit. Interested users press a button and the bot DMs them to gather availability, roles, and classes. Saved with the team." data-tip="Free-form recruitment text the bot posts with /coreteam recruit. Interested users press a button and the bot DMs them to gather availability, roles, and classes. Saved with the team.">i</span></label>
             <textarea id="signup-post-input" class="input" rows="3" maxlength="2000" placeholder="Optional recruitment text the bot posts with /coreteam recruit (e.g. what you're looking for, expectations)."></textarea>
           </div>
@@ -565,14 +566,17 @@
         <p id="share-note" class="text-muted is-hidden mt-2">
           Only the team owner can share or remove access.
         </p>
+        <div id="leave-team-row" class="is-hidden mt-4">
+          <button id="leave-team-btn" class="btn btn--ghost btn--sm" type="button">Leave team</button>
+        </div>
       </div>
     </section>
   </main>
 
-  <script src="js/api.js?v=100"></script>
+  <script src="js/api.js?v=110"></script>
   <script src="js/gear-skills.js?v=100"></script>
   <script src="js/data.js?v=107"></script>
   <script src="js/components.js?v=100"></script>
-  <script src="js/app.js?v=107"></script>
+  <script src="js/app.js?v=111"></script>
 </body>
 </html>
