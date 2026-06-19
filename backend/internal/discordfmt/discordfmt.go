@@ -102,7 +102,7 @@ func BuildPremadePost(team *models.Team, title, postOverride string, scheduledUn
 		}
 		L = append(L, rl...)
 	}
-	if wl := premadeWaitlistLines(waitlist); len(wl) > 0 {
+	if wl := premadeWaitlistLines(team, waitlist); len(wl) > 0 {
 		L = append(L, "")
 		L = append(L, wl...)
 	}
@@ -115,14 +115,16 @@ func BuildPremadePost(team *models.Team, title, postOverride string, scheduledUn
 }
 
 // premadeWaitlistLines renders the per-role waitlist block (FIFO mentions per
-// role). Returns nil when nobody is waiting.
-func premadeWaitlistLines(waitlist []models.PremadeWaitlistEntry) []string {
+// role), ordered by the team's own role set. Returns nil when nobody is waiting.
+func premadeWaitlistLines(team *models.Team, waitlist []models.PremadeWaitlistEntry) []string {
 	if len(waitlist) == 0 {
 		return nil
 	}
 	byRole := map[string][]string{}
+	roles := make([]string, 0, len(waitlist))
 	for _, w := range waitlist {
 		byRole[w.Role] = append(byRole[w.Role], "<@"+w.DiscordUserID+">")
+		roles = append(roles, w.Role)
 	}
 	L := []string{"__Waitlist__"}
 	seen := map[string]bool{}
@@ -132,35 +134,38 @@ func premadeWaitlistLines(waitlist []models.PremadeWaitlistEntry) []string {
 		}
 		seen[role] = true
 		if ids := byRole[role]; len(ids) > 0 {
-			L = append(L, premadeRoleLabel(role)+": "+strings.Join(ids, ", "))
+			L = append(L, team.RoleEmoji(role)+" "+team.RoleLabel(role)+": "+strings.Join(ids, ", "))
 		}
 	}
-	for _, r := range []string{"tank", "healer", "support_dps", "dps"} {
+	// The team's own roles first, then any other roles present (queue order).
+	for _, r := range team.OrderedRoleKeys(roles...) {
 		emit(r)
 	}
-	// Any other roles, in queue order of first appearance.
 	for _, w := range waitlist {
 		emit(w.Role)
 	}
 	return L
 }
 
-// premadeRoleLabel returns a display label for a role key used in pre-made posts.
-func premadeRoleLabel(role string) string {
-	switch role {
-	case "tank":
-		return "Tank"
-	case "healer":
-		return "Healer"
-	case "support_dps":
-		return "Support DPS"
-	case "dps":
-		return "DPS"
-	case "":
-		return "Other"
-	default:
-		return role
+// roleGroup is one labeled section when rendering a roster grouped by role; value
+// is the role key ("" for the catch-all "Other" group).
+type roleGroup struct{ label, value string }
+
+// roleGroups returns the ordered sections to render a roster grouped by role: the
+// team's own roles in their defined order (plus any extra roles present on the
+// roster), followed by an "Other" group when any of the given roles is unset.
+func roleGroups(team *models.Team, rolesPresent []string) []roleGroup {
+	groups := make([]roleGroup, 0, len(rolesPresent)+1)
+	for _, k := range team.OrderedRoleKeys(rolesPresent...) {
+		groups = append(groups, roleGroup{label: team.RoleLabel(k), value: k})
 	}
+	for _, r := range rolesPresent {
+		if r == "" {
+			groups = append(groups, roleGroup{label: "Other", value: ""})
+			break
+		}
+	}
+	return groups
 }
 
 // premadeRosterLines renders the roster grouped by role for a pre-made run: each
@@ -184,33 +189,35 @@ func premadeRosterLines(team *models.Team, primary *models.Encounter, claimants 
 		if id := claimants[p.Slot]; id != "" {
 			claim = "<@" + id + ">"
 		}
+		// Unnamed slots simply omit the name segment (no "Slot N" fallback).
+		name := strings.TrimSpace(p.Name)
 		var parts []string
 		if team.SimpleSignup {
 			// Simple signup: roles only — hide class and gear.
-			parts = []string{fmt.Sprintf("%d.", p.Slot), nameOrSlot(p), claim}
+			parts = []string{fmt.Sprintf("%d.", p.Slot)}
+			if name != "" {
+				parts = append(parts, name)
+			}
+			parts = append(parts, claim)
 		} else {
-			parts = []string{
-				fmt.Sprintf("%d.", p.Slot),
-				nameOrSlot(p),
+			parts = []string{fmt.Sprintf("%d.", p.Slot)}
+			if name != "" {
+				parts = append(parts, name)
+			}
+			parts = append(parts,
 				classOrDash(p.Class),
 				gearAbbrevList(bySlot[p.Slot].Gear),
 				claim,
-			}
+			)
 		}
 		rows = append(rows, row{role: p.Role, line: strings.Join(parts, " · ")})
 	}
 
-	order := []struct{ label, value string }{
-		{"Tank", "tank"}, {"Healer", "healer"}, {"Support DPS", "support_dps"}, {"DPS", "dps"},
-	}
-	known := map[string]bool{"tank": true, "healer": true, "support_dps": true, "dps": true}
-	groups := append([]struct{ label, value string }{}, order...)
+	rolesPresent := make([]string, 0, len(rows))
 	for _, r := range rows {
-		if !known[r.role] {
-			groups = append(groups, struct{ label, value string }{"Other", ""})
-			break
-		}
+		rolesPresent = append(rolesPresent, r.role)
 	}
+	groups := roleGroups(team, rolesPresent)
 
 	var L []string
 	first := true
@@ -218,7 +225,7 @@ func premadeRosterLines(team *models.Team, primary *models.Encounter, claimants 
 		var grp []row
 		for _, r := range rows {
 			if g.value == "" {
-				if !known[r.role] {
+				if r.role == "" {
 					grp = append(grp, r)
 				}
 			} else if r.role == g.value {
@@ -232,7 +239,11 @@ func premadeRosterLines(team *models.Team, primary *models.Encounter, claimants 
 			L = append(L, "")
 		}
 		first = false
-		L = append(L, "__"+g.label+"__")
+		header := "__" + g.label + "__"
+		if g.value != "" {
+			header = team.RoleEmoji(g.value) + " " + header
+		}
+		L = append(L, header)
 		for _, r := range grp {
 			L = append(L, r.line)
 		}
@@ -240,11 +251,11 @@ func premadeRosterLines(team *models.Team, primary *models.Encounter, claimants 
 	return L
 }
 
-// rosterLines renders the roster grouped by role (Tank, Healer, Support DPS,
-// DPS, then any "Other") as Markdown lines. Each player is one line prefixed by
-// an RSVP icon (✅ coming / ❌ not coming / ▫️ no response) followed by slot,
-// name, class, and abbreviated gear from the primary encounter. Returns nil when
-// there are no players.
+// rosterLines renders the roster grouped by role (the team's own roles in their
+// defined order, then any "Other" for unset roles) as Markdown lines. Each
+// player is one line prefixed by an RSVP icon (✅ coming / ❌ not coming / ▫️ no
+// response) followed by slot, name, class, and abbreviated gear from the primary
+// encounter. Returns nil when there are no players.
 func rosterLines(team *models.Team, primary *models.Encounter, marks map[int]string) []string {
 	bySlot := map[int]models.Loadout{}
 	if primary != nil {
@@ -274,17 +285,11 @@ func rosterLines(team *models.Team, primary *models.Encounter, marks map[int]str
 		})
 	}
 
-	order := []struct{ label, value string }{
-		{"Tank", "tank"}, {"Healer", "healer"}, {"Support DPS", "support_dps"}, {"DPS", "dps"},
-	}
-	known := map[string]bool{"tank": true, "healer": true, "support_dps": true, "dps": true}
-	groups := append([]struct{ label, value string }{}, order...)
+	rolesPresent := make([]string, 0, len(rows))
 	for _, r := range rows {
-		if !known[r.role] {
-			groups = append(groups, struct{ label, value string }{"Other", ""})
-			break
-		}
+		rolesPresent = append(rolesPresent, r.role)
 	}
+	groups := roleGroups(team, rolesPresent)
 
 	var L []string
 	first := true
@@ -292,7 +297,7 @@ func rosterLines(team *models.Team, primary *models.Encounter, marks map[int]str
 		var grp []row
 		for _, r := range rows {
 			if g.value == "" {
-				if !known[r.role] {
+				if r.role == "" {
 					grp = append(grp, r)
 				}
 			} else if r.role == g.value {
@@ -306,7 +311,11 @@ func rosterLines(team *models.Team, primary *models.Encounter, marks map[int]str
 			L = append(L, "")
 		}
 		first = false
-		L = append(L, "__"+g.label+"__")
+		header := "__" + g.label + "__"
+		if g.value != "" {
+			header = team.RoleEmoji(g.value) + " " + header
+		}
+		L = append(L, header)
 		for _, r := range grp {
 			L = append(L, r.line)
 		}
@@ -344,7 +353,7 @@ func PlayerDetail(team *models.Team, p models.Player, encounters []models.Encoun
 	var L []string
 
 	// Player.
-	who := fmt.Sprintf("%d. %s — %s", p.Slot, name, esoref.RoleLabel(p.Role))
+	who := fmt.Sprintf("%d. %s — %s", p.Slot, name, team.RoleLabel(p.Role))
 	if tag := discordTag(p.DiscordHandle); tag != "" {
 		who += " · " + tag
 	}
@@ -416,15 +425,6 @@ func who(p models.Player) string {
 	}
 	if p.Name != "" {
 		return p.Name
-	}
-	return fmt.Sprintf("Slot %d", p.Slot)
-}
-
-// nameOrSlot returns a player's roster name, falling back to "Slot N" when it's
-// blank. Used by the pre-made post (which doesn't surface Discord handles).
-func nameOrSlot(p models.Player) string {
-	if n := strings.TrimSpace(p.Name); n != "" {
-		return n
 	}
 	return fmt.Sprintf("Slot %d", p.Slot)
 }

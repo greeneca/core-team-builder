@@ -2,7 +2,12 @@ package models
 
 import (
 	"context"
+	"database/sql/driver"
+	"encoding/json"
 	"errors"
+	"fmt"
+
+	"sort"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -11,6 +16,187 @@ import (
 
 // TeamSize is the fixed number of player slots on every team.
 const TeamSize = 12
+
+// TeamRole is one selectable roster role on a team: Key is the stable value
+// stored on players.role; Label is its display name; Base is the color category
+// (one of the keys in ValidRoleBases) that drives the roster's role color
+// coding, so a custom role still gets a known color.
+type TeamRole struct {
+	Key   string `json:"key"`
+	Label string `json:"label"`
+	Base  string `json:"base"`
+}
+
+// ValidRoleBases are the color categories a custom roster role may map to. Each
+// has a matching --role-* CSS token (tank=blue, healer=green, dps=red,
+// support_dps=purple); the roster colors a slot by its role's Base, so any
+// custom role still renders with one of these known colors.
+var ValidRoleBases = map[string]bool{
+	"tank":        true,
+	"healer":      true,
+	"dps":         true,
+	"support_dps": true,
+}
+
+// DefaultRoleBase is the fallback color category for a role whose Base is empty
+// or unrecognized (e.g. older saved data created before role bases existed).
+const DefaultRoleBase = "dps"
+
+// TeamRoles is a team's ordered set of roster roles, stored as JSONB. It
+// implements sql.Scanner / driver.Valuer so it round-trips through the database
+// as a JSON array of {key, label} objects.
+type TeamRoles []TeamRole
+
+// Scan decodes a JSONB column (text/bytes) into the role list.
+func (r *TeamRoles) Scan(src any) error {
+	if src == nil {
+		*r = nil
+		return nil
+	}
+	var b []byte
+	switch v := src.(type) {
+	case []byte:
+		b = v
+	case string:
+		b = []byte(v)
+	default:
+		return fmt.Errorf("models.TeamRoles: unsupported scan type %T", src)
+	}
+	if len(b) == 0 {
+		*r = nil
+		return nil
+	}
+	return json.Unmarshal(b, (*[]TeamRole)(r))
+}
+
+// Value encodes the role list as a JSON array for storage in a JSONB column.
+func (r TeamRoles) Value() (driver.Value, error) {
+	if len(r) == 0 {
+		return []byte("[]"), nil
+	}
+	return json.Marshal([]TeamRole(r))
+}
+
+// DefaultTeamRoles returns the historical fixed roster roles used as the default
+// for new teams and as a fallback when a team has none stored.
+func DefaultTeamRoles() TeamRoles {
+	return TeamRoles{
+		{Key: "tank", Label: "Tank", Base: "tank"},
+		{Key: "healer", Label: "Healer", Base: "healer"},
+		{Key: "dps", Label: "DPS", Base: "dps"},
+		{Key: "support_dps", Label: "Support DPS", Base: "support_dps"},
+	}
+}
+
+// EffectiveRoles returns the team's roster roles, falling back to the default
+// set when none are stored (older teams created before custom roles). The
+// Discord bot uses this so its role labels and ordering follow the team's own
+// customizable role set rather than a fixed global list.
+func (t *Team) EffectiveRoles() TeamRoles {
+	if len(t.Roles) > 0 {
+		return t.Roles
+	}
+	return DefaultTeamRoles()
+}
+
+// RoleLabel returns the display label for a role key from the team's own role
+// set, falling back to "Other" for an empty key or the raw key when it is not
+// one of the team's roles (e.g. a player still on a since-removed role).
+func (t *Team) RoleLabel(key string) string {
+	for _, r := range t.EffectiveRoles() {
+		if r.Key == key {
+			if r.Label != "" {
+				return r.Label
+			}
+			return r.Key
+		}
+	}
+	if key == "" {
+		return "Other"
+	}
+	return key
+}
+
+// RoleBase returns the color base category for a role key from the team's own
+// role set, falling back to DefaultRoleBase when the role is unknown or has no
+// base (e.g. a player on a since-removed role).
+func (t *Team) RoleBase(key string) string {
+	for _, r := range t.EffectiveRoles() {
+		if r.Key == key {
+			if r.Base != "" {
+				return r.Base
+			}
+			return DefaultRoleBase
+		}
+	}
+	return DefaultRoleBase
+}
+
+// roleBaseOrder is the display priority of each color base: tanks first, then
+// healers, support DPS, and DPS. Bases not listed sort last. Used to order
+// roster roles consistently across the Discord bot regardless of the team's
+// stored role order.
+var roleBaseOrder = map[string]int{
+	"tank":        0,
+	"healer":      1,
+	"support_dps": 2,
+	"dps":         3,
+}
+
+// roleBaseEmoji maps a color base to the emoji shown beside its roles in the
+// Discord signup posts. Keyed by base so a custom role inherits the emoji of its
+// color category.
+var roleBaseEmoji = map[string]string{
+	"tank":        "\U0001F6E1\uFE0F", // 🛡️
+	"healer":      "\u2747\uFE0F",     // ❇️ :sparkle:
+	"support_dps": "\u2692\uFE0F",     // ⚒️ :hammer_pick:
+	"dps":         "\u2694\uFE0F",     // ⚔️
+}
+
+// RoleEmoji returns the emoji for a role key based on its color base, so every
+// role (including custom ones) gets a type-appropriate icon in the Discord
+// signup posts. Falls back to the DefaultRoleBase emoji for unknown roles.
+func (t *Team) RoleEmoji(key string) string {
+	if e, ok := roleBaseEmoji[t.RoleBase(key)]; ok {
+		return e
+	}
+	return roleBaseEmoji[DefaultRoleBase]
+}
+
+// OrderedRoleKeys returns the team's role keys ordered by their color base
+// (tank, then healer, support DPS, DPS, then anything else), followed by any
+// extra keys not in the team's set (e.g. roles read off players or waitlist
+// entries). Within a base, the team's defined order is preserved. Empty keys are
+// dropped. The Discord bot uses this to render roles in a stable, base-grouped
+// order while still showing any orphaned roles.
+func (t *Team) OrderedRoleKeys(extra ...string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(t.EffectiveRoles())+len(extra))
+	for _, r := range t.EffectiveRoles() {
+		if r.Key == "" || seen[r.Key] {
+			continue
+		}
+		seen[r.Key] = true
+		out = append(out, r.Key)
+	}
+	for _, k := range extra {
+		if k == "" || seen[k] {
+			continue
+		}
+		seen[k] = true
+		out = append(out, k)
+	}
+	basePriority := func(key string) int {
+		if p, ok := roleBaseOrder[t.RoleBase(key)]; ok {
+			return p
+		}
+		return len(roleBaseOrder)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		return basePriority(out[i]) < basePriority(out[j])
+	})
+	return out
+}
 
 // ErrTeamNotFound is returned when a team lookup matches nothing the caller may
 // access.
@@ -118,11 +304,15 @@ type Team struct {
 	// WaitlistEnabled, when true, lets players join a per-role waitlist on a
 	// pre-made run; when a slot of that role frees up, the head of that role's
 	// waitlist is auto-promoted into it. Only meaningful when PreMade is true.
-	WaitlistEnabled bool         `json:"waitlist_enabled"`
-	CreatedAt       time.Time    `json:"created_at"`
-	UpdatedAt       time.Time    `json:"updated_at"`
-	Players         []Player     `json:"players,omitempty"`
-	Members         []TeamMember `json:"members,omitempty"`
+	WaitlistEnabled bool `json:"waitlist_enabled"`
+	// Roles is the team's customizable set of roster roles (key + display
+	// label). The roster role picker reads from this; defaults to the historical
+	// fixed set (see DefaultTeamRoles).
+	Roles     TeamRoles    `json:"roles"`
+	CreatedAt time.Time    `json:"created_at"`
+	UpdatedAt time.Time    `json:"updated_at"`
+	Players   []Player     `json:"players,omitempty"`
+	Members   []TeamMember `json:"members,omitempty"`
 }
 
 // TeamStore provides data access for teams, their members, and players.
@@ -155,12 +345,12 @@ func (s *TeamStore) Create(ctx context.Context, ownerID int64, name string, copy
 	if copyFromTeamID != 0 {
 		// Copy the source team's schedule onto the new team.
 		const insertTeamCopy = `
-			INSERT INTO teams (name, owner_id, schedule_days, schedule_time, encounters_enabled, post_footer, dm_footer, signup_post, auto_share_pool_viewers, pre_made, premade_post, simple_signup, waitlist_enabled)
-			SELECT $1, $2, schedule_days, schedule_time, encounters_enabled, post_footer, dm_footer, signup_post, auto_share_pool_viewers, pre_made, premade_post, simple_signup, waitlist_enabled
+			INSERT INTO teams (name, owner_id, schedule_days, schedule_time, encounters_enabled, post_footer, dm_footer, signup_post, auto_share_pool_viewers, pre_made, premade_post, simple_signup, waitlist_enabled, roles)
+			SELECT $1, $2, schedule_days, schedule_time, encounters_enabled, post_footer, dm_footer, signup_post, auto_share_pool_viewers, pre_made, premade_post, simple_signup, waitlist_enabled, roles
 			FROM teams WHERE id = $3
-			RETURNING id, name, owner_id, schedule_days, schedule_time, encounters_enabled, post_footer, dm_footer, signup_post, auto_share_pool_viewers, pre_made, premade_post, simple_signup, waitlist_enabled, created_at, updated_at`
+			RETURNING id, name, owner_id, schedule_days, schedule_time, encounters_enabled, post_footer, dm_footer, signup_post, auto_share_pool_viewers, pre_made, premade_post, simple_signup, waitlist_enabled, roles, created_at, updated_at`
 		if err := tx.QueryRow(ctx, insertTeamCopy, name, ownerID, copyFromTeamID).Scan(
-			&team.ID, &team.Name, &team.OwnerID, &team.ScheduleDays, &team.ScheduleTime, &team.EncountersEnabled, &team.PostFooter, &team.DMFooter, &team.SignupPost, &team.AutoSharePoolViewers, &team.PreMade, &team.PremadePost, &team.SimpleSignup, &team.WaitlistEnabled, &team.CreatedAt, &team.UpdatedAt,
+			&team.ID, &team.Name, &team.OwnerID, &team.ScheduleDays, &team.ScheduleTime, &team.EncountersEnabled, &team.PostFooter, &team.DMFooter, &team.SignupPost, &team.AutoSharePoolViewers, &team.PreMade, &team.PremadePost, &team.SimpleSignup, &team.WaitlistEnabled, &team.Roles, &team.CreatedAt, &team.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -168,9 +358,9 @@ func (s *TeamStore) Create(ctx context.Context, ownerID int64, name string, copy
 		const insertTeam = `
 			INSERT INTO teams (name, owner_id)
 			VALUES ($1, $2)
-			RETURNING id, name, owner_id, schedule_days, schedule_time, encounters_enabled, post_footer, dm_footer, signup_post, auto_share_pool_viewers, pre_made, premade_post, simple_signup, waitlist_enabled, created_at, updated_at`
+			RETURNING id, name, owner_id, schedule_days, schedule_time, encounters_enabled, post_footer, dm_footer, signup_post, auto_share_pool_viewers, pre_made, premade_post, simple_signup, waitlist_enabled, roles, created_at, updated_at`
 		if err := tx.QueryRow(ctx, insertTeam, name, ownerID).Scan(
-			&team.ID, &team.Name, &team.OwnerID, &team.ScheduleDays, &team.ScheduleTime, &team.EncountersEnabled, &team.PostFooter, &team.DMFooter, &team.SignupPost, &team.AutoSharePoolViewers, &team.PreMade, &team.PremadePost, &team.SimpleSignup, &team.WaitlistEnabled, &team.CreatedAt, &team.UpdatedAt,
+			&team.ID, &team.Name, &team.OwnerID, &team.ScheduleDays, &team.ScheduleTime, &team.EncountersEnabled, &team.PostFooter, &team.DMFooter, &team.SignupPost, &team.AutoSharePoolViewers, &team.PreMade, &team.PremadePost, &team.SimpleSignup, &team.WaitlistEnabled, &team.Roles, &team.CreatedAt, &team.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -233,7 +423,7 @@ func (s *TeamStore) CountOwned(ctx context.Context, ownerID int64) (int, error) 
 // most recently updated first. Players and members are not populated here.
 func (s *TeamStore) ListForUser(ctx context.Context, userID int64) ([]Team, error) {
 	const q = `
-		SELECT t.id, t.name, t.owner_id, t.schedule_days, t.schedule_time, t.encounters_enabled, t.post_footer, t.dm_footer, t.signup_post, t.auto_share_pool_viewers, t.pre_made, t.premade_post, t.simple_signup, t.waitlist_enabled, t.created_at, t.updated_at
+		SELECT t.id, t.name, t.owner_id, t.schedule_days, t.schedule_time, t.encounters_enabled, t.post_footer, t.dm_footer, t.signup_post, t.auto_share_pool_viewers, t.pre_made, t.premade_post, t.simple_signup, t.waitlist_enabled, t.roles, t.created_at, t.updated_at
 		FROM teams t
 		JOIN team_members m ON m.team_id = t.id
 		WHERE m.user_id = $1
@@ -248,7 +438,7 @@ func (s *TeamStore) ListForUser(ctx context.Context, userID int64) ([]Team, erro
 	teams := []Team{}
 	for rows.Next() {
 		var t Team
-		if err := rows.Scan(&t.ID, &t.Name, &t.OwnerID, &t.ScheduleDays, &t.ScheduleTime, &t.EncountersEnabled, &t.PostFooter, &t.DMFooter, &t.SignupPost, &t.AutoSharePoolViewers, &t.PreMade, &t.PremadePost, &t.SimpleSignup, &t.WaitlistEnabled, &t.CreatedAt, &t.UpdatedAt); err != nil {
+		if err := rows.Scan(&t.ID, &t.Name, &t.OwnerID, &t.ScheduleDays, &t.ScheduleTime, &t.EncountersEnabled, &t.PostFooter, &t.DMFooter, &t.SignupPost, &t.AutoSharePoolViewers, &t.PreMade, &t.PremadePost, &t.SimpleSignup, &t.WaitlistEnabled, &t.Roles, &t.CreatedAt, &t.UpdatedAt); err != nil {
 			return nil, err
 		}
 		teams = append(teams, t)
@@ -260,10 +450,10 @@ func (s *TeamStore) ListForUser(ctx context.Context, userID int64) ([]Team, erro
 func (s *TeamStore) Get(ctx context.Context, teamID int64) (*Team, error) {
 	team := &Team{}
 	const teamQ = `
-		SELECT id, name, owner_id, schedule_days, schedule_time, encounters_enabled, post_footer, dm_footer, signup_post, auto_share_pool_viewers, pre_made, premade_post, simple_signup, waitlist_enabled, created_at, updated_at
+		SELECT id, name, owner_id, schedule_days, schedule_time, encounters_enabled, post_footer, dm_footer, signup_post, auto_share_pool_viewers, pre_made, premade_post, simple_signup, waitlist_enabled, roles, created_at, updated_at
 		FROM teams WHERE id = $1`
 	err := s.pool.QueryRow(ctx, teamQ, teamID).Scan(
-		&team.ID, &team.Name, &team.OwnerID, &team.ScheduleDays, &team.ScheduleTime, &team.EncountersEnabled, &team.PostFooter, &team.DMFooter, &team.SignupPost, &team.AutoSharePoolViewers, &team.PreMade, &team.PremadePost, &team.SimpleSignup, &team.WaitlistEnabled, &team.CreatedAt, &team.UpdatedAt,
+		&team.ID, &team.Name, &team.OwnerID, &team.ScheduleDays, &team.ScheduleTime, &team.EncountersEnabled, &team.PostFooter, &team.DMFooter, &team.SignupPost, &team.AutoSharePoolViewers, &team.PreMade, &team.PremadePost, &team.SimpleSignup, &team.WaitlistEnabled, &team.Roles, &team.CreatedAt, &team.UpdatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrTeamNotFound
@@ -336,7 +526,7 @@ func (s *TeamStore) Access(ctx context.Context, teamID, userID int64) (found boo
 // and (when players is non-nil) the roster, all within a single transaction. Each
 // player in players must have a valid Slot (1..TeamSize); slots not present are
 // left unchanged.
-func (s *TeamStore) Save(ctx context.Context, teamID int64, name string, days []string, scheduleTime string, encountersEnabled bool, postFooter string, dmFooter string, signupPost string, autoSharePoolViewers bool, preMade bool, premadePost string, simpleSignup bool, waitlistEnabled bool, players []Player) error {
+func (s *TeamStore) Save(ctx context.Context, teamID int64, name string, days []string, scheduleTime string, encountersEnabled bool, postFooter string, dmFooter string, signupPost string, autoSharePoolViewers bool, preMade bool, premadePost string, simpleSignup bool, waitlistEnabled bool, roles TeamRoles, players []Player) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -345,9 +535,9 @@ func (s *TeamStore) Save(ctx context.Context, teamID int64, name string, days []
 
 	const updateTeam = `
 		UPDATE teams
-		SET name = $1, schedule_days = $2, schedule_time = $3, encounters_enabled = $4, post_footer = $5, dm_footer = $6, signup_post = $7, auto_share_pool_viewers = $8, pre_made = $9, premade_post = $10, simple_signup = $11, waitlist_enabled = $12
-		WHERE id = $13`
-	if _, err := tx.Exec(ctx, updateTeam, name, days, scheduleTime, encountersEnabled, postFooter, dmFooter, signupPost, autoSharePoolViewers, preMade, premadePost, simpleSignup, waitlistEnabled, teamID); err != nil {
+		SET name = $1, schedule_days = $2, schedule_time = $3, encounters_enabled = $4, post_footer = $5, dm_footer = $6, signup_post = $7, auto_share_pool_viewers = $8, pre_made = $9, premade_post = $10, simple_signup = $11, waitlist_enabled = $12, roles = $13
+		WHERE id = $14`
+	if _, err := tx.Exec(ctx, updateTeam, name, days, scheduleTime, encountersEnabled, postFooter, dmFooter, signupPost, autoSharePoolViewers, preMade, premadePost, simpleSignup, waitlistEnabled, roles, teamID); err != nil {
 		return err
 	}
 
@@ -492,7 +682,7 @@ func (s *TeamStore) IsTemplatePublishedToGuild(ctx context.Context, teamID int64
 // are returned (a template that was un-flagged stops being runnable).
 func (s *TeamStore) ListPublishedTemplatesForGuild(ctx context.Context, guildID string) ([]Team, error) {
 	const q = `
-		SELECT t.id, t.name, t.owner_id, t.schedule_days, t.schedule_time, t.encounters_enabled, t.post_footer, t.dm_footer, t.signup_post, t.auto_share_pool_viewers, t.pre_made, t.premade_post, t.simple_signup, t.waitlist_enabled, t.created_at, t.updated_at
+		SELECT t.id, t.name, t.owner_id, t.schedule_days, t.schedule_time, t.encounters_enabled, t.post_footer, t.dm_footer, t.signup_post, t.auto_share_pool_viewers, t.pre_made, t.premade_post, t.simple_signup, t.waitlist_enabled, t.roles, t.created_at, t.updated_at
 		FROM teams t
 		JOIN team_guild_templates g ON g.team_id = t.id
 		WHERE g.guild_id = $1 AND t.pre_made = true
@@ -506,7 +696,7 @@ func (s *TeamStore) ListPublishedTemplatesForGuild(ctx context.Context, guildID 
 	teams := []Team{}
 	for rows.Next() {
 		var t Team
-		if err := rows.Scan(&t.ID, &t.Name, &t.OwnerID, &t.ScheduleDays, &t.ScheduleTime, &t.EncountersEnabled, &t.PostFooter, &t.DMFooter, &t.SignupPost, &t.AutoSharePoolViewers, &t.PreMade, &t.PremadePost, &t.SimpleSignup, &t.WaitlistEnabled, &t.CreatedAt, &t.UpdatedAt); err != nil {
+		if err := rows.Scan(&t.ID, &t.Name, &t.OwnerID, &t.ScheduleDays, &t.ScheduleTime, &t.EncountersEnabled, &t.PostFooter, &t.DMFooter, &t.SignupPost, &t.AutoSharePoolViewers, &t.PreMade, &t.PremadePost, &t.SimpleSignup, &t.WaitlistEnabled, &t.Roles, &t.CreatedAt, &t.UpdatedAt); err != nil {
 			return nil, err
 		}
 		teams = append(teams, t)

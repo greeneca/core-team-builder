@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Dashboard — Core Team Builder</title>
-  <link rel="stylesheet" href="css/styles.css?v=100" />
+  <link rel="stylesheet" href="css/styles.css?v=105" />
 </head>
 <body>
   <div id="message" class="toast is-hidden" role="alert" aria-live="assertive"></div>
@@ -30,12 +30,16 @@
     <section id="teams-view">
       <div class="section-head">
         <h1>Your Teams</h1>
-        <button id="new-team-btn" class="btn btn--primary" type="button">+ New Team</button>
+        <div class="form-actions">
+          <button id="new-team-btn" class="btn btn--primary" type="button">+ New Team</button>
+          <button id="new-template-btn" class="btn btn--ghost" type="button">+ New Template</button>
+        </div>
       </div>
 
       <form id="new-team-form" class="card is-hidden mt-4">
+        <h3 id="new-team-form-title" class="schedule-heading" style="margin-top: 0;">New team</h3>
         <div class="form-group">
-          <label for="new-team-name">Team Name</label>
+          <label for="new-team-name" id="new-team-name-label">Team Name</label>
           <input class="input" id="new-team-name" maxlength="100" placeholder="e.g. Sunday Trial Core" required />
         </div>
         <div class="form-group">
@@ -43,15 +47,42 @@
           <select id="new-team-copy" class="input"></select>
         </div>
         <div class="form-actions">
-          <button class="btn btn--primary" type="submit">Create Team</button>
+          <button class="btn btn--primary" type="submit" id="new-team-submit">Create Team</button>
           <button class="btn btn--ghost" type="button" id="new-team-cancel">Cancel</button>
         </div>
       </form>
 
-      <div id="teams-list" class="teams-grid mt-6"></div>
-      <p id="teams-empty" class="text-muted is-hidden mt-6">
-        You have no teams yet. Create one to start building your roster.
-      </p>
+      <!-- Standard teams: recurring trial teams (non-template). -->
+      <div id="teams-section" class="card mt-6 collapsible section-collapsible">
+        <div class="section-head collapsible-head">
+          <div class="collapsible-head-main">
+            <button class="collapse-toggle" type="button" aria-expanded="true" aria-label="Collapse section"></button>
+            <h2 style="margin: 0;">Teams</h2>
+          </div>
+        </div>
+        <div class="collapsible-body">
+          <div id="teams-list" class="teams-grid mt-4"></div>
+          <p id="teams-empty" class="text-muted is-hidden mt-4">
+            You have no teams yet. Create one to start building your roster.
+          </p>
+        </div>
+      </div>
+
+      <!-- Templates: pre-made signup templates run through the Discord bot. -->
+      <div id="templates-section" class="card mt-4 collapsible section-collapsible">
+        <div class="section-head collapsible-head">
+          <div class="collapsible-head-main">
+            <button class="collapse-toggle" type="button" aria-expanded="true" aria-label="Collapse section"></button>
+            <h2 style="margin: 0;">Templates</h2>
+          </div>
+        </div>
+        <div class="collapsible-body">
+          <div id="templates-list" class="teams-grid mt-4"></div>
+          <p id="templates-empty" class="text-muted is-hidden mt-4">
+            No templates yet. Create one with “+ New Template” to set up Discord signup runs.
+          </p>
+        </div>
+      </div>
     </section>
 
     <!-- Single team detail view -->
@@ -98,17 +129,35 @@
           </div>
           <div class="schedule-time-row">
             <div class="form-group schedule-time-group">
-              <label for="schedule-time">Time <span id="schedule-tz-note" class="text-muted"></span></label>
-              <input id="schedule-time" class="input" type="time" />
+              <label for="schedule-hour">Time <span id="schedule-tz-note" class="text-muted"></span></label>
+              <!-- Custom time picker: separate hour and minute <select>s
+                   (populated by app.js). The minute select is restricted to
+                   quarter-hour values so the time can only ever land on a
+                   15-minute boundary. The empty hour option (—) means no time
+                   set; combined the pair reads as "HH:MM" (24h). -->
+              <div class="schedule-time-fields">
+                <select id="schedule-hour" class="input" aria-label="Hour"></select>
+                <select id="schedule-minute" class="input" aria-label="Minute"></select>
+              </div>
             </div>
+          </div>
+        </div>
+
+        <!-- Roster roles: the customizable set of roles players can be assigned.
+             Populated by app.js from the team's roles (defaults to the standard
+             set). Hidden for simple-signup pre-made runs. -->
+        <div id="roles-section" class="roles-section mt-6">
+          <h3 class="schedule-heading">Roster Roles<span class="info-indicator" tabindex="0" role="img" aria-label="Roster roles: the roles players on this team can be assigned. Add or remove roles here; the roster role picker uses this list. Removing a role isn't allowed while a player is still assigned to it." data-tip="The roles players on this team can be assigned. Add or remove roles here; the roster role picker uses this list. You can't remove a role while a player is still using it.">i</span></h3>
+          <div id="roles-list" class="roles-list"></div>
+          <div class="roles-add-row">
+            <input id="role-add-input" class="input" maxlength="40" placeholder="Add a role (e.g. Off Tank)" aria-label="New role name" />
+            <select id="role-add-base" class="input" aria-label="Role color (Tank, Healer, DPS, or Support DPS)" title="Pick which color category this role uses, so the roster color coding still works."></select>
+            <button id="role-add-btn" class="btn btn--ghost btn--sm" type="button">+ Add Role</button>
           </div>
         </div>
 
         <div class="team-features mt-6">
           <h3 class="schedule-heading">Team Features</h3>
-          <label class="toggle" id="pre-made-label" title="When on, this team becomes a one-off pre-made trial run: players claim individual slots through the Discord bot's /coreteam signup command. The trial schedule, Discord bot texts, per-player Discord handles, and member pool are hidden (their data is kept and reappears if you turn this back off).">
-            <input type="checkbox" id="pre-made-toggle" /> Signup Template
-          </label>
           <label class="toggle" id="simple-signup-label" title="Only applies to a pre-made trial run. Off (specific): the post shows each slot's class and gear, players can request a slot's build details, and they claim an exact slot. On (simple): class, gear, and the details dropdown are hidden; players pick a role and are placed in the first open slot matching it.">
             <input type="checkbox" id="simple-signup-toggle" /> Simple signup (roles only)
           </label>
@@ -522,8 +571,8 @@
 
   <script src="js/api.js?v=100"></script>
   <script src="js/gear-skills.js?v=100"></script>
-  <script src="js/data.js?v=100"></script>
+  <script src="js/data.js?v=106"></script>
   <script src="js/components.js?v=100"></script>
-  <script src="js/app.js?v=101"></script>
+  <script src="js/app.js?v=106"></script>
 </body>
 </html>

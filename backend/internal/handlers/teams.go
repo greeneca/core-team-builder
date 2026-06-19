@@ -177,8 +177,11 @@ type updateTeamRequest struct {
 	SimpleSignup bool `json:"simple_signup"`
 	// WaitlistEnabled lets players join a per-role waitlist on a pre-made run;
 	// freed slots auto-promote the head of that role's waitlist.
-	WaitlistEnabled bool            `json:"waitlist_enabled"`
-	Players         []playerPayload `json:"players"`
+	WaitlistEnabled bool `json:"waitlist_enabled"`
+	// Roles is the team's customizable roster role set (key + label). When
+	// omitted/empty the server falls back to the default role set.
+	Roles   []models.TeamRole `json:"roles"`
+	Players []playerPayload   `json:"players"`
 }
 
 type playerPayload struct {
@@ -261,6 +264,18 @@ func (s *Server) handleUpdateTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Normalize the team's roster role set. An empty/omitted list falls back to
+	// the default roles so older clients (and pre-roles teams) keep working.
+	roles, err := normalizeTeamRoles(req.Roles)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	validRole := make(map[string]bool, len(roles))
+	for _, rl := range roles {
+		validRole[rl.Key] = true
+	}
+
 	players := make([]models.Player, 0, len(req.Players))
 	for _, p := range req.Players {
 		if p.Slot < 1 || p.Slot > models.TeamSize {
@@ -270,7 +285,7 @@ func (s *Server) handleUpdateTeam(w http.ResponseWriter, r *http.Request) {
 		role := strings.TrimSpace(p.Role)
 		class := strings.TrimSpace(p.Class)
 		race := strings.TrimSpace(p.Race)
-		if !models.ValidRoles[role] {
+		if !validRole[role] {
 			writeError(w, http.StatusBadRequest, "invalid role")
 			return
 		}
@@ -321,7 +336,7 @@ func (s *Server) handleUpdateTeam(w http.ResponseWriter, r *http.Request) {
 		players = append(players, player)
 	}
 
-	if err := s.teams.Save(r.Context(), teamID, req.Name, days, scheduleTime, req.EncountersEnabled, postFooter, dmFooter, signupPost, req.AutoSharePoolViewers, req.PreMade, premadePost, req.SimpleSignup, req.WaitlistEnabled, players); err != nil {
+	if err := s.teams.Save(r.Context(), teamID, req.Name, days, scheduleTime, req.EncountersEnabled, postFooter, dmFooter, signupPost, req.AutoSharePoolViewers, req.PreMade, premadePost, req.SimpleSignup, req.WaitlistEnabled, roles, players); err != nil {
 		log.Printf("update team: %v", err)
 		writeError(w, http.StatusInternalServerError, "could not update team")
 		return
@@ -367,6 +382,81 @@ func normalizeDays(in []string) ([]string, error) {
 		}
 	}
 	return out, nil
+}
+
+// normalizeRoles validates, slugifies, and de-duplicates the team's roster role
+// set, preserving input order. An empty list falls back to the default roles so
+// older clients (and teams created before custom roles) keep working. Each role
+// needs a non-empty label; its key is slugified from the provided key (or the
+// label) and made unique within the set. Each role must also map to a color
+// category (Base) in models.ValidRoleBases so the roster color coding keeps
+// working; a missing base falls back to the key when that is itself a base, else
+// to models.DefaultRoleBase.
+func normalizeTeamRoles(in []models.TeamRole) (models.TeamRoles, error) {
+	if len(in) == 0 {
+		return models.DefaultTeamRoles(), nil
+	}
+	if len(in) > maxTeamRoles {
+		return nil, fmt.Errorf("too many roles (max %d)", maxTeamRoles)
+	}
+	out := make(models.TeamRoles, 0, len(in))
+	seen := map[string]bool{}
+	for _, rl := range in {
+		label := strings.TrimSpace(rl.Label)
+		if label == "" {
+			return nil, errors.New("role label cannot be empty")
+		}
+		if len([]rune(label)) > maxRoleLabelLen {
+			return nil, fmt.Errorf("role label too long (max %d characters)", maxRoleLabelLen)
+		}
+		key := slugifyRole(rl.Key)
+		if key == "" {
+			key = slugifyRole(label)
+		}
+		if key == "" {
+			return nil, fmt.Errorf("role %q has no usable key", label)
+		}
+		// Resolve the color category. An explicit base must be one of the known
+		// categories; an empty one derives from the key (when it is itself a
+		// base) or the default, so older clients keep working.
+		roleBase := strings.TrimSpace(rl.Base)
+		if roleBase == "" {
+			if models.ValidRoleBases[key] {
+				roleBase = key
+			} else {
+				roleBase = models.DefaultRoleBase
+			}
+		} else if !models.ValidRoleBases[roleBase] {
+			return nil, fmt.Errorf("role %q has an invalid color category", label)
+		}
+		// Ensure the key is unique within the set (append a counter on collision).
+		base, n := key, 2
+		for seen[key] {
+			key = fmt.Sprintf("%s_%d", base, n)
+			n++
+		}
+		seen[key] = true
+		out = append(out, models.TeamRole{Key: key, Label: label, Base: roleBase})
+	}
+	return out, nil
+}
+
+// slugifyRole reduces a string to a stable role key: lowercase, with runs of
+// non-alphanumeric characters collapsed to single underscores and trimmed.
+func slugifyRole(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	var b strings.Builder
+	prevUnderscore := false
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			prevUnderscore = false
+		} else if !prevUnderscore && b.Len() > 0 {
+			b.WriteByte('_')
+			prevUnderscore = true
+		}
+	}
+	return strings.Trim(b.String(), "_")
 }
 
 // validTimeOfDay accepts "" (unset) or a 24h "HH:MM" string.

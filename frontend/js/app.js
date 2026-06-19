@@ -153,10 +153,21 @@
 
   function renderTeamsList(teams) {
     allTeams = teams;
-    const list = el("teams-list");
-    list.innerHTML = "";
-    el("teams-empty").classList.toggle("is-hidden", teams.length > 0);
+    // Templates (pre-made signup templates) are listed separately from standard
+    // recurring teams so the two are visually distinct.
+    const standard = teams.filter((t) => t.pre_made !== true);
+    const templates = teams.filter((t) => t.pre_made === true);
 
+    renderTeamCards(el("teams-list"), standard);
+    el("teams-empty").classList.toggle("is-hidden", standard.length > 0);
+
+    renderTeamCards(el("templates-list"), templates);
+    el("templates-empty").classList.toggle("is-hidden", templates.length > 0);
+  }
+
+  // Render a set of team/template cards into the given list container.
+  function renderTeamCards(list, teams) {
+    list.innerHTML = "";
     teams.forEach((team) => {
       const card = document.createElement("div");
       card.className = "team-card";
@@ -174,10 +185,12 @@
           ${owned ? `<button class="btn btn--danger btn--sm team-card-delete" type="button">Delete</button>` : ""}
         </div>`;
       card.querySelector(".team-card-name").textContent = team.name;
-      card.querySelector(".team-card-schedule").textContent = formatSchedule(
-        team.schedule_days,
-        team.schedule_time
-      );
+      // Templates have no recurring schedule, so show their signup style instead.
+      card.querySelector(".team-card-schedule").textContent = team.pre_made
+        ? team.simple_signup
+          ? "Signup template · simple (roles only)"
+          : "Signup template · specific (per slot)"
+        : formatSchedule(team.schedule_days, team.schedule_time);
       card.querySelector(".team-card-open").addEventListener("click", () => openTeam(team.id));
       card.querySelector(".team-card-share").addEventListener("click", () => openShare(team.id));
       const deleteBtn = card.querySelector(".team-card-delete");
@@ -200,13 +213,23 @@
     select.value = "";
   }
 
-  // New team form toggling.
+  // New team / new template form toggling. The same form creates both; the
+  // pending intent is tracked so submit can promote a template after creation.
   const newTeamForm = el("new-team-form");
-  el("new-team-btn").addEventListener("click", () => {
+  let creatingTemplate = false;
+
+  function openNewTeamForm(asTemplate) {
+    creatingTemplate = asTemplate;
+    el("new-team-form-title").textContent = asTemplate ? "New template" : "New team";
+    el("new-team-name-label").textContent = asTemplate ? "Template Name" : "Team Name";
+    el("new-team-submit").textContent = asTemplate ? "Create Template" : "Create Team";
     populateCopyTeamSelect(el("new-team-copy"));
     newTeamForm.classList.remove("is-hidden");
     el("new-team-name").focus();
-  });
+  }
+
+  el("new-team-btn").addEventListener("click", () => openNewTeamForm(false));
+  el("new-template-btn").addEventListener("click", () => openNewTeamForm(true));
   el("new-team-cancel").addEventListener("click", () => {
     newTeamForm.classList.add("is-hidden");
     newTeamForm.reset();
@@ -217,16 +240,46 @@
     if (!name) return;
     const copyFromRaw = el("new-team-copy").value;
     const copyFrom = copyFromRaw ? Number(copyFromRaw) : 0;
+    const asTemplate = creatingTemplate;
     try {
-      const team = await api.createTeam(name, copyFrom);
+      let team = await api.createTeam(name, copyFrom);
+      // Templates aren't a create-time option in the API, so promote the new
+      // team to a signup template: flag it pre-made with simple signup on by
+      // default. Players are omitted so any copied roster is left untouched.
+      if (asTemplate) {
+        team = await api.saveTeam(team.id, templatePromotionPayload(team));
+      }
       newTeamForm.classList.add("is-hidden");
       newTeamForm.reset();
-      showMessage(`Created team “${team.name}”`, "success");
+      showMessage(
+        `Created ${asTemplate ? "template" : "team"} “${team.name}”`,
+        "success"
+      );
       openTeam(team.id);
     } catch (err) {
       handleError(err);
     }
   });
+
+  // Build a saveTeam payload that promotes a freshly-created team into a signup
+  // template, preserving its existing meta and turning on simple signup by
+  // default. Players are intentionally omitted (unchanged).
+  function templatePromotionPayload(team) {
+    return {
+      name: team.name,
+      schedule_days: team.schedule_days || [],
+      schedule_time: team.schedule_time || "",
+      encounters_enabled: team.encounters_enabled === true,
+      post_footer: team.post_footer || "",
+      dm_footer: team.dm_footer || "",
+      signup_post: team.signup_post || "",
+      auto_share_pool_viewers: team.auto_share_pool_viewers === true,
+      pre_made: true,
+      premade_post: team.premade_post || "",
+      simple_signup: true,
+      waitlist_enabled: team.waitlist_enabled === true,
+    };
+  }
 
   // --- Team detail ---
   async function openTeam(id) {
@@ -848,6 +901,7 @@
     applyEncountersMode();
     applyAutoSharePoolMode();
     applyPreMadeMode();
+    renderRolesEditor();
     renderRoster();
     applySimpleSignupMode();
     renderGroupings();
@@ -881,17 +935,94 @@
     });
 
     // The stored time is in UTC. Always show/edit it in the **viewer's**
-    // current timezone.
-    const timeInput = el("schedule-time");
-    timeInput.value = currentTeam.schedule_time ? conv.time : "";
-    timeInput.disabled = !editable;
+    // current timezone, using the custom hour/minute picker so the value can
+    // only be a quarter-hour boundary. A legacy off-grid value is snapped to
+    // the nearest option so it still matches (and is re-saved on grid).
+    const hourSel = el("schedule-hour");
+    const minSel = el("schedule-minute");
+    populateTimeOptions();
+    setScheduleTime(currentTeam.schedule_time ? snapTimeTo15(conv.time) : "");
+    hourSel.disabled = !editable;
+    minSel.disabled = !editable;
     el("schedule-tz-note").textContent = `(in your timezone: ${localZone})`;
+  }
+
+  // Fill the schedule hour/minute <select>s: the hour select has a leading
+  // "no time" option (—) followed by 12 AM … 11 PM (value="HH" 24h), and the
+  // minute select holds the quarter-hour values :00 :15 :30 :45 (value="MM").
+  // Idempotent: only rebuilds a select if its options aren't present yet, so
+  // repeated renders don't churn the DOM.
+  function populateTimeOptions() {
+    const hourSel = el("schedule-hour");
+    const minSel = el("schedule-minute");
+    if (hourSel.dataset.populated !== "1") {
+      const opts = ['<option value="">—</option>'];
+      for (let hh = 0; hh < 24; hh++) {
+        opts.push(`<option value="${String(hh).padStart(2, "0")}">${formatHour12(hh)}</option>`);
+      }
+      hourSel.innerHTML = opts.join("");
+      hourSel.dataset.populated = "1";
+    }
+    if (minSel.dataset.populated !== "1") {
+      const opts = [];
+      for (let mm = 0; mm < 60; mm += 15) {
+        const value = String(mm).padStart(2, "0");
+        opts.push(`<option value="${value}">:${value}</option>`);
+      }
+      minSel.innerHTML = opts.join("");
+      minSel.dataset.populated = "1";
+    }
+  }
+
+  // Set the hour/minute selects from an "HH:MM" (24h) string. An empty/unset
+  // value clears the hour to the "no time" option and resets the minute to :00.
+  function setScheduleTime(value) {
+    const hourSel = el("schedule-hour");
+    const minSel = el("schedule-minute");
+    if (!value) {
+      hourSel.value = "";
+      minSel.value = "00";
+      return;
+    }
+    const [hh, mm] = value.split(":");
+    hourSel.value = hh;
+    minSel.value = mm;
+  }
+
+  // Combine the hour/minute selects back into an "HH:MM" (24h) string. Returns
+  // "" when no hour is chosen (the "no time" option).
+  function scheduleTimeValue() {
+    const hh = el("schedule-hour").value;
+    if (!hh) return "";
+    const mm = el("schedule-minute").value || "00";
+    return `${hh}:${mm}`;
+  }
+
+  // Render an hour-of-day as a 12-hour clock label, e.g. 20 → "8 PM".
+  function formatHour12(hh) {
+    const period = hh < 12 ? "AM" : "PM";
+    const h12 = hh % 12 === 0 ? 12 : hh % 12;
+    return `${h12} ${period}`;
   }
 
   function collectScheduleDays() {
     return Array.from(
       el("schedule-days").querySelectorAll("input:checked")
     ).map((cb) => cb.value);
+  }
+
+  // Snap an "HH:MM" wall-clock string to the nearest 15-minute interval. The
+  // native time input's step="900" only constrains its spinner/picker, so values
+  // typed directly (or set programmatically) can land off-grid; this keeps the
+  // schedule time on 15-minute boundaries. Returns "" for empty/unparseable
+  // input; wraps within a 24h day.
+  function snapTimeTo15(value) {
+    if (!value) return "";
+    const m = /^(\d{1,2}):(\d{2})$/.exec(String(value).trim());
+    if (!m) return value;
+    let total = Math.round((Number(m[1]) * 60 + Number(m[2])) / 15) * 15;
+    total = ((total % 1440) + 1440) % 1440;
+    return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
   }
 
   function collectPlayers() {
@@ -963,6 +1094,19 @@
     showView("teams");
     loadTeams();
   });
+
+  // Roster roles editor: add via the button or Enter in the input.
+  const roleAddBtn = el("role-add-btn");
+  if (roleAddBtn) roleAddBtn.addEventListener("click", addRole);
+  const roleAddInput = el("role-add-input");
+  if (roleAddInput) {
+    roleAddInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        addRole();
+      }
+    });
+  }
 
   // Members page: open from the team detail toolbar; back returns to the team.
   el("members-btn").addEventListener("click", () => {
@@ -1048,7 +1192,7 @@
     // UTC so any viewer can convert back to their own zone. When the time
     // crosses midnight on conversion, shift the days by the same delta so the
     // stored UTC day/time pair stays consistent.
-    const scheduleConv = convertWallTimeFull(el("schedule-time").value, localTimezone(), "UTC");
+    const scheduleConv = convertWallTimeFull(scheduleTimeValue(), localTimezone(), "UTC");
     const payload = {
       name,
       schedule_days: shiftDayKeys(collectScheduleDays(), scheduleConv.dayDelta),
@@ -1062,6 +1206,7 @@
       premade_post: el("premade-post-input") ? el("premade-post-input").value : "",
       simple_signup: simpleSignup(),
       waitlist_enabled: waitlistEnabled(),
+      roles: teamRoles(),
       players,
     };
     setSaveStatus("team", "saving");
@@ -1091,6 +1236,8 @@
     if (e.target.closest("[data-loadout]")) return;
     // The "Copy to…" control performs its own save; ignore it here.
     if (e.target.closest("[data-copy]")) return;
+    // The add-role input commits via its own button/Enter handler (addRole).
+    if (e.target.id === "role-add-input") return;
     // Groupings manage their own per-grouping state + autosave.
     if (e.target.closest("#groupings-card")) return;
     if (e.target.matches("input, select, textarea")) {
@@ -1102,6 +1249,11 @@
       // Name/role edits change the jump-nav labels.
       if (e.target.matches('[data-field="name"], [data-field="role"]')) {
         renderPlayerNav();
+      }
+      // A role change alters which roles are "in use", which gates whether a
+      // role can be removed — refresh the roles editor's chips.
+      if (e.target.matches('[data-field="role"]')) {
+        renderRolesEditor();
       }
     }
   });
@@ -1227,6 +1379,16 @@
       const root = head.closest(".collapsible");
       if (root) setCollapsed(root, !root.classList.contains("is-collapsed"));
     }
+  });
+
+  // The teams list view has its own collapsible cards (Teams / Templates); the
+  // detail-view handler above is scoped to detailView, so wire the list chevrons
+  // here. Clicking a card header toggles that section.
+  teamsView.addEventListener("click", (e) => {
+    const head = e.target.closest(".collapsible-head");
+    if (!head) return;
+    const root = head.closest(".collapsible");
+    if (root) setCollapsed(root, !root.classList.contains("is-collapsed"));
   });
 
   el("collapse-all-btn").addEventListener("click", () => {
@@ -1644,6 +1806,187 @@
       .join("");
   }
 
+  // The open team's roster roles as stored ([{key,label}]). Falls back to the
+  // default set when a team has none (older teams) so the picker is never empty.
+  function teamRoles() {
+    const roles = currentTeam && currentTeam.roles;
+    if (Array.isArray(roles) && roles.length) return roles;
+    return DEFAULT_TEAM_ROLES;
+  }
+
+  // The team's roster roles ordered for display: by color base (tank, healer,
+  // support DPS, DPS, then anything else), preserving the team's defined order
+  // within a base. Mirrors models.OrderedRoleKeys on the backend so roles list
+  // the same way in the web UI and the Discord bot. Used for display only; the
+  // stored order (currentTeam.roles) is left as the user added them.
+  function orderedTeamRoles() {
+    const last = Object.keys(ROLE_BASE_ORDER).length;
+    const priority = (role) => {
+      const p = ROLE_BASE_ORDER[roleBase(role.key)];
+      return p === undefined ? last : p;
+    };
+    return teamRoles()
+      .map((role, i) => ({ role, i }))
+      .sort((a, b) => priority(a.role) - priority(b.role) || a.i - b.i)
+      .map((x) => x.role);
+  }
+
+  // The roster roles shaped for optionsHtml/labelFor ({value,label}), in display
+  // order (base-grouped).
+  function teamRoleOptions() {
+    return orderedTeamRoles().map((r) => ({ value: r.key, label: r.label }));
+  }
+
+  // The color category (one of ROLE_BASES) for a role key, used to drive the
+  // role-* color coding so a custom role still gets a known color. Reads the
+  // team's role definitions; falls back to the key itself when it is already a
+  // base, else to DEFAULT_ROLE_BASE.
+  function roleBase(roleKey) {
+    const role = teamRoles().find((r) => r.key === roleKey);
+    const base = role && role.base;
+    if (ROLE_BASES.some((b) => b.value === base)) return base;
+    if (ROLE_BASES.some((b) => b.value === roleKey)) return roleKey;
+    return DEFAULT_ROLE_BASE;
+  }
+
+  // Refresh every roster slot's role <select> options to the current team roles,
+  // preserving each slot's current selection. Used after add/remove so unsaved
+  // roster edits, collapse state, and focus aren't disturbed (vs. renderRoster).
+  function refreshRosterRoleOptions() {
+    const roster = el("roster");
+    if (!roster) return;
+    const opts = teamRoleOptions();
+    roster.querySelectorAll('[data-field="role"]').forEach((sel) => {
+      sel.innerHTML = optionsHtml(opts, sel.value);
+    });
+  }
+
+  // Reduce a label to a stable role key. Mirrors slugifyRole in the backend:
+  // lowercase, non-alphanumerics collapsed to single underscores, trimmed.
+  function slugifyRole(s) {
+    return String(s)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "");
+  }
+
+  // Role keys currently assigned to a player. Reads the live roster selects when
+  // present (so unsaved edits count), falling back to the saved roster.
+  function rolesInUse() {
+    const set = new Set();
+    const roster = el("roster");
+    const selects = roster
+      ? roster.querySelectorAll('[data-field="role"]')
+      : [];
+    if (selects.length) {
+      selects.forEach((s) => set.add(s.value));
+    } else {
+      (currentTeam.players || []).forEach((p) => set.add(p.role));
+    }
+    return set;
+  }
+
+  // Render the add/remove roster-roles editor in the Main panel. Each role is a
+  // chip with a remove button; a role still assigned to a player can't be
+  // removed (its remove button is disabled) to avoid orphaning that player.
+  function renderRolesEditor() {
+    const list = el("roles-list");
+    if (!list) return;
+    const editable = canEdit();
+    const roles = orderedTeamRoles();
+    const usedKeys = rolesInUse();
+
+    list.innerHTML = "";
+    roles.forEach((role) => {
+      const inUse = usedKeys.has(role.key);
+      const chip = document.createElement("span");
+      chip.className = "role-chip";
+      // Color the chip's accent by its base category so the mapping is visible.
+      chip.dataset.roleBase = roleBase(role.key);
+      const label = document.createElement("span");
+      label.className = "role-chip-label";
+      label.textContent = role.label;
+      chip.appendChild(label);
+      if (editable) {
+        const rm = document.createElement("button");
+        rm.type = "button";
+        rm.className = "role-chip-remove";
+        rm.textContent = "\u00D7"; // ×
+        rm.disabled = inUse;
+        rm.setAttribute(
+          "aria-label",
+          inUse
+            ? `Can't remove ${role.label} — a player is assigned to it`
+            : `Remove ${role.label}`
+        );
+        if (inUse) rm.title = "A player is assigned to this role";
+        rm.addEventListener("click", () => removeRole(role.key));
+        chip.appendChild(rm);
+      }
+      list.appendChild(chip);
+    });
+
+    const addInput = el("role-add-input");
+    const addBtn = el("role-add-btn");
+    const addBase = el("role-add-base");
+    if (addInput) addInput.disabled = !editable;
+    if (addBtn) addBtn.disabled = !editable;
+    if (addBase) {
+      if (!addBase.options.length) addBase.innerHTML = optionsHtml(ROLE_BASES, "dps");
+      addBase.disabled = !editable;
+    }
+  }
+
+  // Add a new roster role from the add input. The label is taken verbatim; its
+  // key is slugified and made unique. The base picker maps the role to a color
+  // category (so its color coding works). No-ops on blank/duplicate labels.
+  function addRole() {
+    if (!canEdit()) return;
+    const input = el("role-add-input");
+    if (!input) return;
+    const label = input.value.trim();
+    if (!label) return;
+    const roles = teamRoles().slice();
+    if (roles.some((r) => r.label.toLowerCase() === label.toLowerCase())) {
+      showMessage("That role already exists");
+      return;
+    }
+    let key = slugifyRole(label);
+    if (!key) {
+      showMessage("Enter a role name with letters or numbers");
+      return;
+    }
+    const existing = new Set(roles.map((r) => r.key));
+    if (existing.has(key)) {
+      let n = 2;
+      while (existing.has(`${key}_${n}`)) n++;
+      key = `${key}_${n}`;
+    }
+    const baseSel = el("role-add-base");
+    let base = baseSel ? baseSel.value : DEFAULT_ROLE_BASE;
+    if (!ROLE_BASES.some((b) => b.value === base)) base = DEFAULT_ROLE_BASE;
+    roles.push({ key, label, base });
+    currentTeam.roles = roles;
+    input.value = "";
+    renderRolesEditor();
+    refreshRosterRoleOptions();
+    scheduleAutosave("team");
+  }
+
+  // Remove a roster role by key. Guarded against removing a role still assigned
+  // to a player (the UI also disables that button).
+  function removeRole(key) {
+    if (!canEdit()) return;
+    if (rolesInUse().has(key)) {
+      showMessage("Reassign players off this role before removing it");
+      return;
+    }
+    currentTeam.roles = teamRoles().filter((r) => r.key !== key);
+    renderRolesEditor();
+    refreshRosterRoleOptions();
+    scheduleAutosave("team");
+  }
+
   function renderRoster() {
     const roster = el("roster");
     roster.innerHTML = "";
@@ -1654,7 +1997,8 @@
       slot.className = "player-slot collapsible";
       slot.dataset.slot = player.slot;
       // Drives the role-based background color (see .player-slot[data-role] CSS).
-      slot.dataset.role = player.role;
+      // Uses the role's color base so custom roles still map to a known color.
+      slot.dataset.role = roleBase(player.role);
       const copyControl = editable
         ? `<div class="slot-actions" data-copy>
             <select class="input slot-copy" data-copy-select aria-label="Copy another player's build and loadout into this slot">
@@ -1682,7 +2026,7 @@
             </div>
             <div class="form-group">
               <label>Role</label>
-              <select class="input" data-field="role">${optionsHtml(ROLES, player.role)}</select>
+              <select class="input" data-field="role">${optionsHtml(teamRoleOptions(), player.role)}</select>
             </div>
             <div class="form-group" data-class-field>
               <label>Class</label>
@@ -1843,7 +2187,7 @@
       // global roster change listener).
       const roleSel = slot.querySelector('[data-field="role"]');
       roleSel.addEventListener("change", () => {
-        slot.dataset.role = roleSel.value;
+        slot.dataset.role = roleBase(roleSel.value);
         updateSlotSummary(slot);
       });
 
@@ -1960,10 +2304,10 @@
         link.href = "#";
         link.dataset.nav = "player";
         link.dataset.slot = String(num);
-        link.dataset.role = role;
+        link.dataset.role = roleBase(role);
         link.innerHTML = `<span class="player-nav-name">${num}. ${escapeAttr(
           name
-        )}</span><span class="player-nav-role">${escapeAttr(labelFor(ROLES, role))}</span>`;
+        )}</span><span class="player-nav-role">${escapeAttr(labelFor(teamRoleOptions(), role))}</span>`;
         list.appendChild(link);
       });
   }
@@ -2001,7 +2345,7 @@
       const d = dstSlot.querySelector(`[data-field="${f}"]`);
       if (s && d) d.value = s.value;
     });
-    dstSlot.dataset.role = field(dstSlot, "role");
+    dstSlot.dataset.role = roleBase(field(dstSlot, "role"));
 
     const srcSub = srcSlot.querySelector('[data-field="subclassed"]');
     const dstSub = dstSlot.querySelector('[data-field="subclassed"]');
@@ -2214,12 +2558,17 @@
   function applyEncountersMode() {
     const enabled = encountersEnabled();
     const editable = canEdit();
+    // Simple-signup templates only collect names + roles, so encounters (and
+    // their per-player loadouts) are irrelevant — hide the toggle entirely.
+    const hideToggle = preMade() && simpleSignup();
 
     const toggle = el("encounters-enabled-toggle");
     if (toggle) {
       toggle.checked = enabled;
       toggle.disabled = !editable;
     }
+    const toggleLabel = el("encounters-enabled-label");
+    if (toggleLabel) toggleLabel.classList.toggle("is-hidden", hideToggle);
 
     el("encounters-manage-card").classList.toggle("is-hidden", !enabled);
     el("encounters-panel").classList.toggle("is-hidden", !enabled);
@@ -2248,18 +2597,15 @@
     return !!currentTeam && currentTeam.pre_made === true;
   }
 
-  // Apply pre-made mode: in pre-made mode the recurring schedule, Discord bot
-  // texts, member pool, and per-player Discord handles don't apply, so they are
-  // hidden; the pre-made run post body card is shown instead. Hiding is purely
-  // presentational — the underlying data is preserved and reappears if turned
-  // off. The roster is re-rendered so the Discord-handle fields hide/show.
+  // Apply pre-made (template) mode: a team's template status is fixed at
+  // creation (there's no in-view toggle), so this only adjusts presentation. In
+  // template mode the recurring schedule, Discord bot texts, member pool, and
+  // per-player Discord handles don't apply, so they're hidden; the pre-made run
+  // post body card is shown instead. Hiding is purely presentational — the
+  // underlying data is preserved. The roster is re-rendered elsewhere so the
+  // Discord-handle fields hide/show.
   function applyPreMadeMode() {
     const on = preMade();
-    const toggle = el("pre-made-toggle");
-    if (toggle) {
-      toggle.checked = on;
-      toggle.disabled = !canEdit();
-    }
     const scheduleSection = el("schedule-section");
     if (scheduleSection) scheduleSection.classList.toggle("is-hidden", on);
     const botTexts = el("discord-bot-texts-card");
@@ -2302,6 +2648,10 @@
   // signup. Only applies in pre-made mode, where the simple-signup toggle lives.
   function applySimpleSignupMode() {
     const on = preMade() && simpleSignup();
+    // The roster-roles editor is meaningless for simple signups (players pick a
+    // role to be auto-placed against the fixed bot role flow), so hide it.
+    const rolesSection = el("roles-section");
+    if (rolesSection) rolesSection.classList.toggle("is-hidden", on);
     const groupStats = el("group-stats-card");
     if (groupStats) groupStats.classList.toggle("is-hidden", on);
     const buffsNav = document.querySelector('.player-nav-link[data-nav="buffs"]');
@@ -2470,20 +2820,10 @@
     currentTeam.auto_share_pool_viewers = e.target.checked;
   });
 
-  // Toggle pre-made trial run mode. Updates currentTeam and re-applies the mode
-  // (hiding schedule/bot-texts/member-pool/handles, showing the run-post card);
-  // the generic detail-view change handler persists the flag via team autosave.
-  el("pre-made-toggle").addEventListener("change", (e) => {
-    if (!canEdit()) {
-      e.target.checked = preMade();
-      return;
-    }
-    currentTeam.pre_made = e.target.checked;
-    applyPreMadeMode();
-    renderRoster();
-    applySimpleSignupMode();
-  });
-  // Toggle simple (role-based) vs specific (per-slot) signup for pre-made runs.
+  // A team's template (pre-made) status is set at creation via the "+ New
+  // Template" button — there's no in-view toggle to change it after the fact.
+  // Toggle simple (role-based) vs specific (per-slot) signup for templates. The
+  // encounters toggle is hidden for simple signups, so re-apply that too.
   el("simple-signup-toggle").addEventListener("change", (e) => {
     if (!canEdit()) {
       e.target.checked = simpleSignup();
@@ -2491,6 +2831,7 @@
     }
     currentTeam.simple_signup = e.target.checked;
     applySimpleSignupMode();
+    applyEncountersMode();
   });
   // Toggle the per-role waitlist for pre-made runs.
   el("waitlist-toggle").addEventListener("change", (e) => {

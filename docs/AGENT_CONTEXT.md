@@ -169,23 +169,52 @@ column; the `User` JSON model hides it (`json:"-"`).
   has a **"Copy from team"** picker whose first option, "None (empty team)",
   creates a blank team.
 - **Players**: each slot has `name`, `discord_handle`, `role`, `class`, plus a
-  subclassing build (`006_player_subclass.sql`). Empty fields = unset. Roles and
-  classes are validated against allow-lists in
-  `backend/internal/models/eso.go` (`ValidRoles`, `ValidClasses`) — the ESO game
+  subclassing build (`006_player_subclass.sql`). Empty fields = unset. Classes
+  are validated against the allow-list in
+  `backend/internal/models/eso.go` (`ValidClasses`) — the ESO game
   reference data + build validators live in `eso.go`, separate from the team
   persistence layer in `team.go`:
-  - roles: `tank`, `healer`, `dps`, `support_dps` (the backend still accepts
-    `""`, but the UI no longer offers an unset role — every slot always has a
-    concrete role).
+  - roles: **per-team and customizable** (`042_team_roles.sql`). A team owns a
+    `roles JSONB` set of `{key, label, base}` objects (default Tank/Healer/DPS/
+    Support DPS, see `models.DefaultTeamRoles`). `base` is the **color category**
+    (one of `tank`/`healer`/`dps`/`support_dps`, `models.ValidRoleBases`) that
+    drives the roster's role color coding, so a **custom** role with an arbitrary
+    key still renders in a known `--role-*` color. The roster role picker reads
+    from this set, and `handleUpdateTeam` validates each player's role against the
+    team's own role keys (not a global allow-list) and each role's `base` against
+    `ValidRoleBases` (empty base derives from the key, else `DefaultRoleBase`).
+    Add/remove roles from the **Main panel** ("Roster Roles"); the add row has a
+    base/color picker, and each role chip is accented with its base color. A role
+    can't be removed while a player is assigned to it. The editor is hidden for
+    simple-signup pre-made runs. The **Discord post flows** are role-aware: both
+    the `/coreteam post` overview and the pre-made `/coreteam signup` post +
+    controls render each role using the team's own role set via `Team.RoleLabel`,
+    `Team.OrderedRoleKeys`, and `Team.EffectiveRoles` (see `cmd/bot/premade.go`
+    and `internal/discordfmt`), so custom roles show their labels. Roles are
+    always **ordered by color base** — tank, then healer, support DPS, DPS, then
+    anything else (`models.roleBaseOrder`); within a base the team's defined order
+    is kept. The web UI mirrors this for display via `orderedTeamRoles()` /
+    `ROLE_BASE_ORDER` (the stored order in `currentTeam.roles` is left as added).
+    Both Discord post flows also show a per-role emoji by base (`Team.RoleEmoji` /
+    `models.roleBaseEmoji`: tank 🛡️, healer ❇️, support DPS ⚒️, DPS ⚔️) on the
+    roster group headers; the signup posts add it to waitlist lines and the
+    claim/waitlist selects too.
+    `ValidRoles` in `eso.go` remains the fixed set only for the member pool and
+    the Discord recruit intake flow (`cmd/bot/intake.go`), which are intentionally
+    left on the standard roles.
   - classes: `arcanist`, `dragonknight`, `necromancer`, `nightblade`,
     `sorcerer`, `templar`, `warden` (plus `""`). The frontend mirrors these
-    plus display labels in `frontend/js/data.js` (`ROLES`, `CLASSES`).
+    plus display labels in `frontend/js/data.js` (`CLASSES`); `DEFAULT_TEAM_ROLES`
+    holds the fallback roster roles (each with a color `base`) and `ROLE_BASES`
+    the color-category options for the picker.
   - New teams default the 12 roles to 2 tanks, 2 healers, 8 dps
     (`defaultPlayerRole` in `team.go`).
   - Each roster slot is color-coded by role: the slot carries a `data-role`
-    attribute (set in `renderRoster` and updated on change) and the
-    `.player-slot[data-role="…"]` CSS applies a tinted background + left accent
-    bar using the `--role-*` tokens in `styles.css`.
+    attribute (set in `renderRoster` and updated on change) holding the role's
+    **base** color category (via `roleBase()` in `app.js`, not the raw role key)
+    and the `.player-slot[data-role="…"]` CSS applies a tinted background + left
+    accent bar using the `--role-*` tokens in `styles.css`. The player jump-nav
+    and the role-chip editor are colored the same way.
   - **Copy from slot**: each slot (editors only) has a **"Copy from…"** dropdown
     that pulls another slot's build + per-encounter loadout **into** this slot —
     everything **except** name and discord handle (role/class/race/subclass +
@@ -238,23 +267,29 @@ column; the `User` JSON model hides it (`json:"-"`).
   (`SharePoolMembers` from `cmd/bot` `signupFinish`). Turning the flag **off**
   does nothing — it never revokes already-granted shares; it just stops new pool
   members from being shared with unless re-enabled.
-- **Pre-made trial run** (`035_team_premade.sql`): `teams.pre_made BOOLEAN`
-  (default **false**) + `teams.premade_post TEXT` (default `''`, ≤2000 runes) — a
-  "Team Features" checkbox plus its own "Pre-made Run Post" card. When **on**, the
-  team becomes a one-off run posted via the bot's `/coreteam signup` command and
-  the UI **hides** (non-destructively) the trial schedule, Discord Bot Texts,
-  per-player Discord handles, the Members Pool button, and the auto-share toggle —
-  none of that applies to a pre-made run. The hidden data is preserved and
-  reappears if the flag is turned back off. The bot side (signups, scheduling) is
+- **Pre-made trial run / template** (`035_team_premade.sql`): `teams.pre_made
+  BOOLEAN` (default **false**) + `teams.premade_post TEXT` (default `''`, ≤2000
+  runes). A pre-made team is a "signup template". Template status is set **at
+  creation time** via the teams page's **+ New Template** button (the web UI no
+  longer exposes an in-view toggle to flip `pre_made`): the frontend creates the
+  team, then promotes it with a save that sets `pre_made=true` and
+  `simple_signup=true` (simple signup is the template default). The teams page
+  lists templates in their own collapsible **Templates** section, separate from
+  standard teams. When a team is a template, the detail UI shows its own
+  "Pre-made Run Post" card and **hides** (non-destructively) the trial schedule,
+  Discord Bot Texts, per-player Discord handles, the Members Pool button, and the
+  auto-share toggle — none of that applies. The bot side (signups, scheduling) is
   documented under "Discord bot" → "Pre-made trial runs" below.
 - **Simple signup** (`037_team_simple_signup.sql`): `teams.simple_signup BOOLEAN`
-  (default **false**) — a "Team Features" checkbox shown only when **Pre-made** is
-  on. Off = "specific" signup (current behavior: the post shows each slot's
-  class/gear, a "get build details" dropdown is offered, and players claim an
-  exact slot). On = "simple" signup: the post hides class/gear and the details
-  dropdown, the claim select lists **roles** (with open counts), and claiming
-  takes the first open slot matching the chosen role (`handlePremadeClaim` →
-  `claimSimple`, retrying on slot races).
+  (default **false**, but **on** by default for new templates) — a "Team
+  Features" checkbox shown only when the team is a template. Off = "specific"
+  signup (the post shows each slot's class/gear, a "get build details" dropdown is
+  offered, and players claim an exact slot). On = "simple" signup: the post hides
+  class/gear and the details dropdown, the claim select lists **roles** (with open
+  counts), and claiming takes the first open slot matching the chosen role
+  (`handlePremadeClaim` → `claimSimple`, retrying on slot races). When simple
+  signup is on, the **Encounters Enabled** toggle is hidden (encounters don't
+  apply to a name/role-only template).
 - **Waitlist** (`038_premade_waitlist.sql`): `teams.waitlist_enabled BOOLEAN`
   (default **false**) — a "Team Features" checkbox shown only when **Pre-made** is
   on. When on, a "Join a waitlist (role is full)" select appears on the post for

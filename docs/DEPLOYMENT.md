@@ -247,9 +247,9 @@ Run it:
 - [ ] In Discord, a user runs `/coreteam link code:<code>` with a code generated
       from the web UI ("Link Discord" button), then `/coreteam setup` in a channel
       to bind a team, and `/coreteam post` to share the trial. To run a pre-made
-      event, mark a team as **Pre-made** in the web UI (Team Features) and run
-      `/coreteam signup`. See `docs/AGENT_CONTEXT.md` "Discord bot" and "Pre-made
-      trial runs".
+      event, create a **template** in the web UI (the teams page's **+ New
+      Template** button) and run `/coreteam signup`. See `docs/AGENT_CONTEXT.md`
+      "Discord bot" and "Pre-made trial runs".
 
 > Treat `DISCORD_BOT_TOKEN` like any other secret (keep it in `.env`, `chmod 600`).
 > Rotating it in the developer portal requires updating `.env` and restarting the

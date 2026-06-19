@@ -42,6 +42,10 @@ const (
 	maxGroupingNameLen = 100
 	// maxGroupNameLen caps a single group's name within a grouping (in runes).
 	maxGroupNameLen = 50
+	// maxTeamRoles caps how many roster roles a team may define.
+	maxTeamRoles = 16
+	// maxRoleLabelLen caps a roster role's display label (in runes).
+	maxRoleLabelLen = 40
 )
 
 // Server holds the dependencies shared across HTTP handlers.

@@ -227,6 +227,7 @@ rows. Managed via `PasswordResetStore`.
 | premade_post   | text              | body the bot prepends to a `/coreteam signup` post (default `''`); `035_team_premade.sql` |
 | simple_signup  | boolean           | pre-made role-based "simple" signup (hides class/gear + details, claims first matching slot); default `false`; `037_team_simple_signup.sql` |
 | waitlist_enabled | boolean         | pre-made per-role waitlist (auto-promote on freed slot); default `false`; `038_premade_waitlist.sql` |
+| roles          | jsonb             | customizable roster roles `[{key,label}]`; default Tank/Healer/DPS/Support DPS; `042_team_roles.sql` |
 | created_at     | timestamptz       | default `now()`                            |
 | updated_at     | timestamptz       | auto-updated via trigger                   |
 
@@ -289,9 +290,11 @@ single membership lookup.
 
 Every team is created with all 12 player slots pre-populated (in a single
 transaction), so slots are edited rather than added/removed. New slots default
-their roles to 2 tanks / 2 healers / 8 dps. Role, class, skill-line, and mastery
+their roles to 2 tanks / 2 healers / 8 dps. Class, skill-line, and mastery
 values are validated against allow-lists in the backend
-(`internal/models/eso.go`). Subclassing (`006_player_subclass.sql`) is
+(`internal/models/eso.go`). Roles are **per-team** (`teams.roles` JSONB, migration
+`042`): each player's role is validated against its team's own role set rather
+than a global list. Subclassing (`006_player_subclass.sql`) is
 mutually exclusive: when `subclassed` is true the three `skill_line_*` columns
 apply and the masteries are blanked; when false the two `mastery_*` columns
 apply (drawn from the player's class) and the skill lines are blanked.

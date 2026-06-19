@@ -41,6 +41,41 @@ const ROLES = [
   { value: "support_dps", label: "Support DPS" },
 ];
 
+// Color categories a custom roster role can map to. Each value has a matching
+// --role-* CSS token (see ROLE_BASES coloring in styles.css), so a custom role
+// still renders in a known color. Mirrors models.ValidRoleBases on the backend.
+const ROLE_BASES = [
+  { value: "tank", label: "Tank" },
+  { value: "healer", label: "Healer" },
+  { value: "dps", label: "DPS" },
+  { value: "support_dps", label: "Support DPS" },
+];
+
+// Fallback color category when a role has no usable base (mirrors
+// models.DefaultRoleBase).
+const DEFAULT_ROLE_BASE = "dps";
+
+// Display priority of each color base: tanks first, then healers, support DPS,
+// and DPS. Bases not listed sort last. Mirrors models.roleBaseOrder on the
+// backend so roles render in the same order everywhere they're listed.
+const ROLE_BASE_ORDER = {
+  tank: 0,
+  healer: 1,
+  support_dps: 2,
+  dps: 3,
+};
+
+// Default roster roles for a team (key + display label + color base). A team can
+// customize this set from the team detail page; this list is the fallback used
+// when a team has none stored (e.g. older teams). Keys mirror the backend role
+// values; base is the color category driving the roster color coding.
+const DEFAULT_TEAM_ROLES = [
+  { key: "tank", label: "Tank", base: "tank" },
+  { key: "healer", label: "Healer", base: "healer" },
+  { key: "dps", label: "DPS", base: "dps" },
+  { key: "support_dps", label: "Support DPS", base: "support_dps" },
+];
+
 const CLASSES = [
   { value: "", label: "—" },
   { value: "arcanist", label: "Arcanist" },

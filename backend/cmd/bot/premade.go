@@ -601,10 +601,7 @@ func (b *bot) dmPromoted(s *discordgo.Session, entry *models.PremadeWaitlistEntr
 		log.Printf("premade: promote dm channel: %v", err)
 		return
 	}
-	role := esoref.RoleLabel(entry.Role)
-	if role == "" {
-		role = entry.Role
-	}
+	role := team.RoleLabel(entry.Role)
 	title := run.Title
 	if strings.TrimSpace(title) == "" {
 		title = team.Name
@@ -795,8 +792,12 @@ func premadeComponents(team *models.Team, signups []models.PremadeSignup) []disc
 	allOpts := make([]discordgo.SelectMenuOption, 0, len(players))
 	openOpts := make([]discordgo.SelectMenuOption, 0, len(players))
 	for _, p := range players {
-		label := slotOptionLabel(p)
-		opt := discordgo.SelectMenuOption{Label: truncate(label, 100), Value: strconv.Itoa(p.Slot)}
+		label := slotOptionLabel(team, p)
+		opt := discordgo.SelectMenuOption{
+			Label: truncate(label, 100),
+			Value: strconv.Itoa(p.Slot),
+			Emoji: &discordgo.ComponentEmoji{Name: team.RoleEmoji(p.Role)},
+		}
 		allOpts = append(allOpts, opt)
 		if !taken[p.Slot] {
 			openOpts = append(openOpts, opt)
@@ -873,7 +874,7 @@ func premadeSimpleComponents(team *models.Team, taken map[int]bool) []discordgo.
 
 	seen := map[string]bool{}
 	opts := make([]discordgo.SelectMenuOption, 0, 8)
-	addRole := func(value, label string) {
+	addRole := func(value string) {
 		if value == "" || seen[value] {
 			return
 		}
@@ -881,20 +882,20 @@ func premadeSimpleComponents(team *models.Team, taken map[int]bool) []discordgo.
 		if openByRole[value] <= 0 {
 			return
 		}
-		if label == "" {
-			label = value
-		}
 		opts = append(opts, discordgo.SelectMenuOption{
-			Label: truncate(fmt.Sprintf("%s (%d open)", label, openByRole[value]), 100),
+			Label: truncate(fmt.Sprintf("%s (%d open)", team.RoleLabel(value), openByRole[value]), 100),
 			Value: value,
+			Emoji: &discordgo.ComponentEmoji{Name: team.RoleEmoji(value)},
 		})
 	}
-	// Standard roles first, in a sensible order, then any other roles present.
-	for _, r := range []string{"tank", "healer", "support_dps", "dps"} {
-		addRole(r, esoref.RoleLabel(r))
-	}
+	// The team's own roles first, in their defined order, then any other roles
+	// present on the roster (e.g. a player on a since-removed role).
+	playerRoles := make([]string, 0, len(team.Players))
 	for _, p := range team.Players {
-		addRole(p.Role, esoref.RoleLabel(p.Role))
+		playerRoles = append(playerRoles, p.Role)
+	}
+	for _, r := range team.OrderedRoleKeys(playerRoles...) {
+		addRole(r)
 	}
 
 	claimRow := discordgo.ActionsRow{Components: []discordgo.MessageComponent{
@@ -952,20 +953,18 @@ func premadeWaitlistRow(team *models.Team, taken map[int]bool) (discordgo.Messag
 		if total[role] == 0 || open[role] > 0 {
 			return // only offer waitlist for full roles
 		}
-		label := esoref.RoleLabel(role)
-		if label == "" {
-			label = role
-		}
 		opts = append(opts, discordgo.SelectMenuOption{
-			Label: truncate(fmt.Sprintf("%s waitlist", label), 100),
+			Label: truncate(fmt.Sprintf("%s waitlist", team.RoleLabel(role)), 100),
 			Value: role,
+			Emoji: &discordgo.ComponentEmoji{Name: team.RoleEmoji(role)},
 		})
 	}
-	for _, r := range []string{"tank", "healer", "support_dps", "dps"} {
-		add(r)
-	}
+	playerRoles := make([]string, 0, len(team.Players))
 	for _, p := range team.Players {
-		add(p.Role)
+		playerRoles = append(playerRoles, p.Role)
+	}
+	for _, r := range team.OrderedRoleKeys(playerRoles...) {
+		add(r)
 	}
 	if len(opts) == 0 {
 		return nil, false
@@ -980,8 +979,9 @@ func premadeWaitlistRow(team *models.Team, taken map[int]bool) (discordgo.Messag
 }
 
 // slotOptionLabel renders a slot's picker label, e.g. "Slot 3 · Tank · Dragonknight".
-func slotOptionLabel(p models.Player) string {
-	role := esoref.RoleLabel(p.Role)
+// The role label comes from the team's own role set so custom roles display.
+func slotOptionLabel(team *models.Team, p models.Player) string {
+	role := team.RoleLabel(p.Role)
 	if role == "" {
 		role = "—"
 	}
