@@ -61,10 +61,14 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	// Guild interactions only need the Guilds intent (slash commands, buttons,
-	// and modals are delivered as interactions, not gateway messages).
-	session.Identify.Intents = discordgo.IntentsGuilds
+	// Guild interactions are delivered as interactions (Guilds intent). The
+	// /coreteam signup flow is a free-text DM conversation, so we also need the
+	// DirectMessages intent (to receive DM message events) and the privileged
+	// MessageContent intent (to read what the user types). MessageContent must be
+	// enabled for the application in the Discord developer portal.
+	session.Identify.Intents = discordgo.IntentsGuilds | discordgo.IntentDirectMessages | discordgo.IntentMessageContent
 	session.AddHandler(b.onInteraction)
+	session.AddHandler(b.onMessageCreate)
 
 	if err := session.Open(); err != nil {
 		return err

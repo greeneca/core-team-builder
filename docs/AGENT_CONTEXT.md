@@ -550,22 +550,48 @@ the `pre_made` flag on (see "Pre-made trial run" under Teams). Tables in
 `backend/cmd/bot/scheduler.go`.
 
 - **Command** (`/coreteam signup`, `handlePremade`): resolves the runner's
-  **linked** app account (`GetUserByDiscordID`), lists their **pre-made teams they
-  own or can edit** (`listEditablePremadeTeams`), and walks a component flow whose
-  custom IDs carry context: ephemeral **team select** (`premade_team`) → ephemeral
-  **timezone select** (`premade_tz:<teamID>`, reusing the signup intake's
-  `signupTimezones`/`tzOffsetLabel`) → a **modal** (`premade_modal:<teamID>:<tz>`)
-  capturing **title**, **date** (`YYYY-MM-DD`), and **time** (`HH:MM`, 24h). The
-  modal submit parses the date/time **in the chosen IANA zone**, converts to UTC,
-  creates the run, and posts the announcement publicly in the current channel via
-  `ChannelMessageSendComplex` (so the message id is captured immediately).
+  **linked** app account (`GetUserByDiscordID`), confirms they have at least one
+  **runnable template** here (`listRunnablePremadeTeams` = owned/editable
+  pre-made teams **plus** templates published to this guild), then opens a **DM
+  conversation** (the slash command itself only replies "check your DMs"). The
+  conversation lives in `backend/cmd/bot/premade_dm.go`, driven by gateway DM
+  messages (`onMessageCreate`) plus one component select for the one-time
+  timezone pick. State is persisted per Discord user in `premade_signup_sessions`
+  (`040_dm_signup.sql`) so a half-finished signup survives a bot restart; the
+  `step` column names the awaited answer: **team** (reply a number when >1
+  runnable) → **tz** (timezone select, only when `users.timezone` is unset —
+  reuses the intake's `signupTimezones`/`tzOffsetLabel`, then remembered; users
+  can change it later with `/coreteam timezone`) →
+  **title** (free text) → **when** (free-text date/time parsed by
+  `github.com/olebedev/when` in the user's zone; `parseWhen`/`normalizeMilitaryTime`
+  also handles `2100`-style military times) → **confirm** ("yes" or send a new
+  time) → **body** (free-text post-body override, or "skip" for the template
+  default). On confirm, `finishPremadeDM` re-checks owner/editor **or**
+  published-to-guild, creates the run, and posts the announcement publicly in the
+  originating channel via `ChannelMessageSendComplex`. Requires the privileged
+  **MESSAGE CONTENT** intent (see `cmd/bot/main.go`).
 - **Post** (`discordfmt.BuildPremadePost`): title + a single `<t:unix:F>`/`:R`
-  schedule timestamp + the team's `premade_post` body + a per-slot roster showing
+  schedule timestamp + the run's body (`premade_runs.post_override` when set,
+  else the team's `premade_post`) + a per-slot roster showing
   each slot's name/role/class and either the claimant's mention or "open".
   Controls (`premadeComponents`): a **claim** select listing only open slots
   (`premade_claim`; disabled "all taken" placeholder when full), a **details**
-  select listing all slots (`premade_details`), and a **Leave my slot** button
-  (`premade_leave`).
+  select listing all slots (`premade_details`), and a final button row
+  (`premadeActionRow`) with **Leave my slot** (`premade_leave`) and **Edit run**
+  (`premade_edit`).
+- **Edit** (`premade_edit` → `handlePremadeEdit`, `cmd/bot/premade_edit.go`):
+  visible to everyone but gated to the run's creator or the team's owner/editor
+  (`canEditRun`). It opens a DM and reuses the `premade_signup_sessions` row in
+  **edit mode** (`mode='edit'`, `run_id` set; `041_premade_run_edit.sql`) to walk
+  a field menu (`premade_edit_field`: title / when / body / done). Each applied
+  field calls `PremadeStore.UpdateRun` and re-renders the posted announcement in
+  place via `refreshPremadePostMessage` (`ChannelMessageEditComplex`), then
+  re-shows the menu so several fields can be edited in one sitting.
+- **Cancel** (`isCancel` in `cmd/bot/premade_dm.go`): typing a cancel word
+  (cancel / stop / quit / abort / exit / nevermind) in the DM aborts whatever
+  conversation is active. `onMessageCreate` checks it before the step switch, so
+  it works at any step of both the create and edit flows — it deletes the
+  session and confirms (nothing is posted or changed).
 - **Simple signup** (`teams.simple_signup`, see Teams above): when on, the post
   hides class/gear (`premadeRosterLines`) and drops the **details** select; the
   **claim** select instead lists **roles** with open counts

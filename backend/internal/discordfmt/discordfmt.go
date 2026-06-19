@@ -74,7 +74,10 @@ func BuildPost(team *models.Team, primary *models.Encounter, groupings []models.
 //
 // claimants maps a slot number to the claiming user's Discord ID; an empty/absent
 // entry renders the slot as open.
-func BuildPremadePost(team *models.Team, title string, scheduledUnix int64, primary *models.Encounter, claimants map[int]string, waitlist []models.PremadeWaitlistEntry) (string, string) {
+//
+// postOverride, when non-empty, replaces the team's default premade post body
+// (team.PremadePost) for this run.
+func BuildPremadePost(team *models.Team, title, postOverride string, scheduledUnix int64, primary *models.Encounter, claimants map[int]string, waitlist []models.PremadeWaitlistEntry) (string, string) {
 	if strings.TrimSpace(title) == "" {
 		title = team.Name
 	}
@@ -83,7 +86,11 @@ func BuildPremadePost(team *models.Team, title string, scheduledUnix int64, prim
 	if scheduledUnix > 0 {
 		L = append(L, fmt.Sprintf("\U0001F5D3\uFE0F  <t:%d:F> (<t:%d:R>)", scheduledUnix, scheduledUnix))
 	}
-	if body := strings.TrimSpace(team.PremadePost); body != "" {
+	body := strings.TrimSpace(postOverride)
+	if body == "" {
+		body = strings.TrimSpace(team.PremadePost)
+	}
+	if body != "" {
 		if len(L) > 0 {
 			L = append(L, "")
 		}

@@ -141,6 +141,28 @@ func (s *DiscordStore) GetUserByDiscordID(ctx context.Context, discordUserID str
 	return id, nil
 }
 
+// GetUserTimezone returns a user's remembered IANA timezone, or "" when unset.
+func (s *DiscordStore) GetUserTimezone(ctx context.Context, userID int64) (string, error) {
+	const q = `SELECT timezone FROM users WHERE id = $1`
+	var tz string
+	err := s.pool.QueryRow(ctx, q, userID).Scan(&tz)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrUserNotFound
+	}
+	if err != nil {
+		return "", err
+	}
+	return tz, nil
+}
+
+// SetUserTimezone stores a user's IANA timezone so future signup flows can
+// resolve natural-language times without re-asking.
+func (s *DiscordStore) SetUserTimezone(ctx context.Context, userID int64, tz string) error {
+	const q = `UPDATE users SET timezone = $1 WHERE id = $2`
+	_, err := s.pool.Exec(ctx, q, tz, userID)
+	return err
+}
+
 // BindChannel binds a Discord channel to a team (upsert on channel_id).
 func (s *DiscordStore) BindChannel(ctx context.Context, guildID, channelID string, teamID, setByUserID int64) error {
 	const q = `

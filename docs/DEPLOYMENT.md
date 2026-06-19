@@ -233,6 +233,10 @@ Discord-side setup (one-time):
       **Create Public Threads**, **Manage Threads**, and **Manage Messages**
       permissions in the channels where runs are posted (to open the run thread
       15 min before and delete the post + thread 2 h after).
+- [ ] Enable the **MESSAGE CONTENT** privileged intent for the application
+      (developer portal → Bot → Privileged Gateway Intents). `/coreteam signup`
+      is a free-text DM conversation, so the bot must be able to read the
+      messages users type in DMs. Without it the signup flow can't progress.
 - [ ] (Dev/fast) set `DISCORD_GUILD_ID` to your server's ID so `/coreteam`
       registers instantly to that guild. Leave it empty in production to register
       globally (the first global registration can take up to ~1h to appear).

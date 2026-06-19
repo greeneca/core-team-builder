@@ -104,6 +104,16 @@ var coreTeamCommand = &discordgo.ApplicationCommand{
 		},
 		{
 			Type:        discordgo.ApplicationCommandOptionSubCommand,
+			Name:        "publish",
+			Description: "Make one of your signup templates available to everyone in this server",
+		},
+		{
+			Type:        discordgo.ApplicationCommandOptionSubCommand,
+			Name:        "timezone",
+			Description: "Set or change your remembered timezone for signup scheduling",
+		},
+		{
+			Type:        discordgo.ApplicationCommandOptionSubCommand,
 			Name:        "status",
 			Description: "Show which team this channel is bound to",
 		},
@@ -144,6 +154,10 @@ func (b *bot) onCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		b.handleSignupPost(s, i)
 	case "signup":
 		b.handlePremade(s, i)
+	case "publish":
+		b.handlePublish(s, i)
+	case "timezone":
+		b.handleTimezone(s, i)
 	case "status":
 		b.handleStatus(s, i)
 	case "unset":
@@ -168,6 +182,10 @@ func (b *bot) onComponent(s *discordgo.Session, i *discordgo.InteractionCreate) 
 		b.handleGetMyDetails(s, i)
 	case "setup_select":
 		b.handleSetupSelect(s, i)
+	case "publish_select":
+		b.handlePublishSelect(s, i)
+	case "timezone_select":
+		b.handleTimezoneSelect(s, i)
 	case "rsvp_yes":
 		b.handleRSVP(s, i, models.RSVPYes)
 	case "rsvp_no":
@@ -179,10 +197,6 @@ func (b *bot) onModalSubmit(s *discordgo.Session, i *discordgo.InteractionCreate
 	id := i.ModalSubmitData().CustomID
 	if id == "setup_create_modal" {
 		b.handleSetupCreate(s, i)
-		return
-	}
-	if strings.HasPrefix(id, premadeModalPrefix) {
-		b.handlePremadeModalSubmit(s, i)
 	}
 }
 

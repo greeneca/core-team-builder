@@ -16,6 +16,10 @@ var ErrPremadeRunNotFound = errors.New("premade run not found")
 // ErrSlotTaken is returned when claiming a slot that another user already holds.
 var ErrSlotTaken = errors.New("slot already taken")
 
+// ErrPremadeSessionNotFound is returned when no in-progress DM signup session
+// exists for a Discord user.
+var ErrPremadeSessionNotFound = errors.New("premade signup session not found")
+
 // PremadeRun is one posted pre-made trial run. The bookkeeping timestamps let
 // the bot's scheduler create the thread (15 min before) and clean up (2 h after)
 // exactly once, surviving restarts.
@@ -27,6 +31,7 @@ type PremadeRun struct {
 	MessageID       string
 	ThreadID        string
 	Title           string
+	PostOverride    string
 	ScheduledAt     time.Time
 	CreatedBy       *int64
 	ThreadStartedAt *time.Time
@@ -62,13 +67,13 @@ func NewPremadeStore(pool *pgxpool.Pool) *PremadeStore {
 	return &PremadeStore{pool: pool}
 }
 
-const premadeRunCols = `id, team_id, guild_id, channel_id, message_id, thread_id, title, scheduled_at, created_by, thread_started_at, cleaned_up_at, created_at, updated_at`
+const premadeRunCols = `id, team_id, guild_id, channel_id, message_id, thread_id, title, post_override, scheduled_at, created_by, thread_started_at, cleaned_up_at, created_at, updated_at`
 
 func scanRun(row pgx.Row) (*PremadeRun, error) {
 	r := &PremadeRun{}
 	err := row.Scan(
 		&r.ID, &r.TeamID, &r.GuildID, &r.ChannelID, &r.MessageID, &r.ThreadID,
-		&r.Title, &r.ScheduledAt, &r.CreatedBy, &r.ThreadStartedAt, &r.CleanedUpAt,
+		&r.Title, &r.PostOverride, &r.ScheduledAt, &r.CreatedBy, &r.ThreadStartedAt, &r.CleanedUpAt,
 		&r.CreatedAt, &r.UpdatedAt,
 	)
 	if err != nil {
@@ -78,19 +83,36 @@ func scanRun(row pgx.Row) (*PremadeRun, error) {
 }
 
 // CreateRun inserts a new run (without a message id yet — set it with
-// SetRunMessage once the announcement is posted).
-func (s *PremadeStore) CreateRun(ctx context.Context, teamID int64, guildID, channelID, title string, scheduledAt time.Time, createdBy int64) (*PremadeRun, error) {
+// SetRunMessage once the announcement is posted). postOverride is an optional
+// per-run body; empty means the team's default premade post body is used.
+func (s *PremadeStore) CreateRun(ctx context.Context, teamID int64, guildID, channelID, title, postOverride string, scheduledAt time.Time, createdBy int64) (*PremadeRun, error) {
 	const q = `
-		INSERT INTO premade_runs (team_id, guild_id, channel_id, title, scheduled_at, created_by)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO premade_runs (team_id, guild_id, channel_id, title, post_override, scheduled_at, created_by)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		RETURNING ` + premadeRunCols
-	return scanRun(s.pool.QueryRow(ctx, q, teamID, guildID, channelID, title, scheduledAt, createdBy))
+	return scanRun(s.pool.QueryRow(ctx, q, teamID, guildID, channelID, title, postOverride, scheduledAt, createdBy))
 }
 
 // SetRunMessage records the posted announcement's message id.
 func (s *PremadeStore) SetRunMessage(ctx context.Context, runID int64, messageID string) error {
 	_, err := s.pool.Exec(ctx, `UPDATE premade_runs SET message_id = $1 WHERE id = $2`, messageID, runID)
 	return err
+}
+
+// UpdateRun changes an existing run's editable fields (title, scheduled time,
+// and post-body override) and returns the updated row. postOverride empty means
+// "use the team default body".
+func (s *PremadeStore) UpdateRun(ctx context.Context, runID int64, title, postOverride string, scheduledAt time.Time) (*PremadeRun, error) {
+	const q = `
+		UPDATE premade_runs
+		SET title = $2, post_override = $3, scheduled_at = $4, updated_at = now()
+		WHERE id = $1
+		RETURNING ` + premadeRunCols
+	r, err := scanRun(s.pool.QueryRow(ctx, q, runID, title, postOverride, scheduledAt))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrPremadeRunNotFound
+	}
+	return r, err
 }
 
 // GetRun returns a run by id.
@@ -312,5 +334,88 @@ func (s *PremadeStore) MarkThreadStarted(ctx context.Context, runID int64, threa
 // MarkCleanedUp records that the run's post and thread were cleaned up.
 func (s *PremadeStore) MarkCleanedUp(ctx context.Context, runID int64) error {
 	_, err := s.pool.Exec(ctx, `UPDATE premade_runs SET cleaned_up_at = now() WHERE id = $1`, runID)
+	return err
+}
+
+// PremadeSession is one in-progress DM signup conversation, keyed by the
+// Discord user driving it. It is persisted after each answer so the flow
+// survives a bot restart. A new /coreteam signup overwrites any prior session.
+type PremadeSession struct {
+	DiscordUserID string
+	AppUserID     int64
+	TeamID        *int64
+	GuildID       string
+	ChannelID     string
+	DMChannelID   string
+	Step          string
+	Title         string
+	ScheduledAt   *time.Time
+	PostOverride  string
+	// Mode is "" for the create flow and "edit" when editing an existing run.
+	Mode string
+	// RunID is the run being edited (Mode == "edit"); nil for the create flow.
+	RunID     *int64
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+const premadeSessionCols = `discord_user_id, app_user_id, team_id, guild_id, channel_id, dm_channel_id, step, title, scheduled_at, post_override, mode, run_id, created_at, updated_at`
+
+func scanSession(row pgx.Row) (*PremadeSession, error) {
+	sess := &PremadeSession{}
+	err := row.Scan(
+		&sess.DiscordUserID, &sess.AppUserID, &sess.TeamID, &sess.GuildID,
+		&sess.ChannelID, &sess.DMChannelID, &sess.Step, &sess.Title,
+		&sess.ScheduledAt, &sess.PostOverride, &sess.Mode, &sess.RunID,
+		&sess.CreatedAt, &sess.UpdatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return sess, nil
+}
+
+// GetSession returns the active DM signup session for a Discord user, or
+// ErrPremadeSessionNotFound when none exists.
+func (s *PremadeStore) GetSession(ctx context.Context, discordUserID string) (*PremadeSession, error) {
+	const q = `SELECT ` + premadeSessionCols + ` FROM premade_signup_sessions WHERE discord_user_id = $1`
+	sess, err := scanSession(s.pool.QueryRow(ctx, q, discordUserID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrPremadeSessionNotFound
+	}
+	return sess, err
+}
+
+// UpsertSession creates or replaces the DM signup session for a Discord user.
+// created_at is preserved on update; updated_at is bumped to now().
+func (s *PremadeStore) UpsertSession(ctx context.Context, sess *PremadeSession) error {
+	const q = `
+		INSERT INTO premade_signup_sessions
+			(discord_user_id, app_user_id, team_id, guild_id, channel_id, dm_channel_id, step, title, scheduled_at, post_override, mode, run_id, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, now())
+		ON CONFLICT (discord_user_id) DO UPDATE SET
+			app_user_id = EXCLUDED.app_user_id,
+			team_id = EXCLUDED.team_id,
+			guild_id = EXCLUDED.guild_id,
+			channel_id = EXCLUDED.channel_id,
+			dm_channel_id = EXCLUDED.dm_channel_id,
+			step = EXCLUDED.step,
+			title = EXCLUDED.title,
+			scheduled_at = EXCLUDED.scheduled_at,
+			post_override = EXCLUDED.post_override,
+			mode = EXCLUDED.mode,
+			run_id = EXCLUDED.run_id,
+			updated_at = now()`
+	_, err := s.pool.Exec(ctx, q,
+		sess.DiscordUserID, sess.AppUserID, sess.TeamID, sess.GuildID,
+		sess.ChannelID, sess.DMChannelID, sess.Step, sess.Title,
+		sess.ScheduledAt, sess.PostOverride, sess.Mode, sess.RunID,
+	)
+	return err
+}
+
+// DeleteSession removes a user's DM signup session. Idempotent.
+func (s *PremadeStore) DeleteSession(ctx context.Context, discordUserID string) error {
+	_, err := s.pool.Exec(ctx, `DELETE FROM premade_signup_sessions WHERE discord_user_id = $1`, discordUserID)
 	return err
 }

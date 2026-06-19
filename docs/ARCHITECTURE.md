@@ -460,7 +460,8 @@ after a restart:
 | channel_id        | text        | channel the post is in                      |
 | message_id        | text        | the announcement message (set after posting)|
 | thread_id         | text        | the run thread (set 15 min before)          |
-| title             | text        | run title from the modal                    |
+| title             | text        | run title from the DM conversation          |
+| post_override     | text        | per-run body overriding `premade_post` (default `''`); `040_dm_signup.sql` |
 | scheduled_at      | timestamptz | trial start, **UTC** (from runner's zone)   |
 | created_by        | bigint      | FK → `users(id)`, set null on delete        |
 | thread_started_at | timestamptz | NULL until the thread is created            |
@@ -496,6 +497,38 @@ moves the head of that slot's role queue into the open slot (transactionally,
 | discord_user_id  | text        | waiter; unique per run                    |
 | discord_username | text        | display name at join time                 |
 | created_at       | timestamptz | default `now()`; FIFO order               |
+
+`premade_signup_sessions` (`040_dm_signup.sql`) — one in-progress **DM signup
+conversation** per Discord user (primary key `discord_user_id`), persisted so a
+half-finished signup survives a bot restart. `step` names the awaited answer
+(create flow: team / tz / title / when / confirm / body; edit flow:
+edit_field / edit_title / edit_when / edit_body); a new `/coreteam signup` or
+**Edit run** press overwrites any prior session, and the flow deletes it on
+completion (`finishPremadeDM` / the edit "Done" choice). Typing a cancel word
+(`isCancel`: cancel / stop / quit / abort / exit / nevermind) in the DM at any
+step deletes the session and aborts the conversation:
+
+| column          | type        | notes                                       |
+|-----------------|-------------|---------------------------------------------|
+| discord_user_id | text        | primary key (the runner)                    |
+| app_user_id     | bigint      | FK → `users(id)`, cascade                   |
+| team_id         | bigint      | FK → `teams(id)`, cascade; NULL until chosen|
+| guild_id        | text        | guild the signup was started in             |
+| channel_id      | text        | channel to post the run in                  |
+| dm_channel_id   | text        | the DM channel driving the conversation     |
+| step            | text        | the awaited answer                          |
+| title           | text        | run title (once entered)                    |
+| scheduled_at    | timestamptz | parsed run time, **UTC** (NULL until set)   |
+| post_override   | text        | optional per-run body (default `''`)        |
+| mode            | text        | `''` create flow / `'edit'` editing a run; `041_premade_run_edit.sql` |
+| run_id          | bigint      | FK → `premade_runs(id)`, cascade; the run being edited (`041`) |
+| created_at      | timestamptz | default `now()`                             |
+| updated_at      | timestamptz | bumped on each answer                       |
+
+The runner's remembered timezone lives in `users.timezone` (`040_dm_signup.sql`,
+default `''`): asked once via a DM select, then reused so natural-language times
+resolve without re-asking. Users can set or change it at any time with
+`/coreteam timezone` (`handleTimezone`/`handleTimezoneSelect`, ephemeral select).
 
 Managed via `PremadeStore`; the bot's background scheduler (`cmd/bot/scheduler.go`,
 the only time-based worker) acts on due runs. See `docs/AGENT_CONTEXT.md`

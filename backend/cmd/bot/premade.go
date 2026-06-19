@@ -7,7 +7,6 @@ import (
 	"log"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/core-team-builder/backend/internal/discordfmt"
@@ -16,36 +15,36 @@ import (
 )
 
 // The /coreteam signup flow posts a one-off, scheduled trial run from a pre-made
-// team that players claim per slot. It is built entirely from message components
-// (selects/buttons) and one modal, so no privileged intents are needed.
+// team that players claim per slot. Creating a run is driven through a free-text
+// DM conversation (see premade_dm.go); the posted run's controls (claim/leave/
+// details/waitlist) remain message components.
 //
 // Custom ID grammar:
 //
-//	premade_team                       (ephemeral team picker; value = team id)
-//	premade_tz:<teamID>                (ephemeral timezone picker; value = IANA tz)
-//	premade_modal:<teamID>:<tz>        (modal: title + date + time)
+//	premade_dm_tz                      (one-time DM timezone picker; value = IANA tz)
 //	premade_claim                      (on the post; value = slot to claim, or role in simple mode)
 //	premade_details                    (on the post; value = slot to DM details for)
 //	premade_wait                       (on the post; value = role to waitlist for)
 //	premade_leave                      (on the post; release the presser's slot/waitlist)
+//	premade_edit                       (on the post; start a DM to edit title/time/body)
+//	premade_edit_field                 (DM select; value = title | when | body | done)
 const (
-	premadePrefix      = "premade_"
-	premadeModalPrefix = "premade_modal:"
-	premadeTeamID      = "premade_team"
-	premadeClaimID     = "premade_claim"
-	premadeDetailsID   = "premade_details"
-	premadeWaitID      = "premade_wait"
-	premadeLeaveID     = "premade_leave"
+	premadePrefix       = "premade_"
+	premadeDMTimezoneID = "premade_dm_tz"
+	premadeClaimID      = "premade_claim"
+	premadeDetailsID    = "premade_details"
+	premadeWaitID       = "premade_wait"
+	premadeLeaveID      = "premade_leave"
+	premadeEditID       = "premade_edit"
+	premadeEditFieldID  = "premade_edit_field"
 )
 
 // onPremadeComponent dispatches every premade_* component interaction.
 func (b *bot) onPremadeComponent(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	id := i.MessageComponentData().CustomID
 	switch {
-	case id == premadeTeamID:
-		b.handlePremadeTeamSelect(s, i)
-	case strings.HasPrefix(id, "premade_tz:"):
-		b.handlePremadeTzSelect(s, i)
+	case id == premadeDMTimezoneID:
+		b.handlePremadeDMTimezone(s, i)
 	case id == premadeClaimID:
 		b.handlePremadeClaim(s, i)
 	case id == premadeDetailsID:
@@ -54,11 +53,17 @@ func (b *bot) onPremadeComponent(s *discordgo.Session, i *discordgo.InteractionC
 		b.handlePremadeWaitlist(s, i)
 	case id == premadeLeaveID:
 		b.handlePremadeLeave(s, i)
+	case id == premadeEditID:
+		b.handlePremadeEdit(s, i)
+	case id == premadeEditFieldID:
+		b.handlePremadeEditFieldSelect(s, i)
 	}
 }
 
-// handlePremade starts the flow: it resolves the runner's linked account, lists
-// their pre-made teams they can edit, and shows an ephemeral team picker.
+// handlePremade starts the DM signup conversation: it resolves the runner's
+// linked account, confirms they have at least one runnable template here, then
+// opens a DM and hands off to the state machine in premade_dm.go. The slash
+// command itself only acknowledges with a "check your DMs" ephemeral.
 func (b *bot) handlePremade(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	user := invokingUser(i)
 	if user == nil {
@@ -70,7 +75,7 @@ func (b *bot) handlePremade(s *discordgo.Session, i *discordgo.InteractionCreate
 
 	appUserID, err := b.discord.GetUserByDiscordID(ctx, user.ID)
 	if errors.Is(err, models.ErrUserNotFound) {
-		ephemeral(s, i, "Link your account first with /coreteam link, then mark a team as pre-made in the web app.")
+		ephemeral(s, i, "Link your account first with /coreteam link, then mark a team as a signup template in the web app.")
 		return
 	}
 	if err != nil {
@@ -79,47 +84,18 @@ func (b *bot) handlePremade(s *discordgo.Session, i *discordgo.InteractionCreate
 		return
 	}
 
-	teams, err := b.listEditablePremadeTeams(ctx, appUserID)
+	teams, err := b.listRunnablePremadeTeams(ctx, appUserID, i.GuildID)
 	if err != nil {
 		log.Printf("premade: list teams: %v", err)
 		ephemeral(s, i, "Something went wrong loading your teams. Please try again.")
 		return
 	}
 	if len(teams) == 0 {
-		ephemeral(s, i, "You don't have any pre-made teams you can run. Mark a team as pre-made in the web app (Team Features) first.")
+		ephemeral(s, i, "You don't have any signup templates you can run here. Mark a team as a signup template in the web app (Team Features), or ask someone to publish one to this server with /coreteam publish.")
 		return
 	}
 
-	options := make([]discordgo.SelectMenuOption, 0, len(teams))
-	for idx, t := range teams {
-		if idx >= 25 {
-			break
-		}
-		options = append(options, discordgo.SelectMenuOption{
-			Label: truncate(t.Name, 100),
-			Value: strconv.FormatInt(t.ID, 10),
-		})
-	}
-
-	err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{
-			Flags:   discordgo.MessageFlagsEphemeral,
-			Content: "Which pre-made team would you like to run?",
-			Components: []discordgo.MessageComponent{
-				discordgo.ActionsRow{Components: []discordgo.MessageComponent{
-					discordgo.SelectMenu{
-						CustomID:    premadeTeamID,
-						Placeholder: "Select a pre-made team",
-						Options:     options,
-					},
-				}},
-			},
-		},
-	})
-	if err != nil {
-		log.Printf("premade: respond: %v", err)
-	}
+	b.startPremadeDM(ctx, s, i, user, appUserID, teams)
 }
 
 // listEditablePremadeTeams returns the user's pre-made teams they own or can
@@ -149,126 +125,133 @@ func (b *bot) listEditablePremadeTeams(ctx context.Context, appUserID int64) ([]
 	return out, nil
 }
 
-// handlePremadeTeamSelect advances from the team picker to the timezone picker.
-func (b *bot) handlePremadeTeamSelect(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	values := i.MessageComponentData().Values
-	if len(values) == 0 {
-		return
-	}
-	teamID := values[0]
-
-	opts := make([]discordgo.SelectMenuOption, 0, len(signupTimezones))
-	for _, tz := range signupTimezones {
-		opts = append(opts, discordgo.SelectMenuOption{Label: tzOffsetLabel(tz), Value: tz})
-	}
-	err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseUpdateMessage,
-		Data: &discordgo.InteractionResponseData{
-			Content: "Which timezone are you entering the date and time in?",
-			Components: []discordgo.MessageComponent{
-				discordgo.ActionsRow{Components: []discordgo.MessageComponent{
-					discordgo.SelectMenu{
-						CustomID:    "premade_tz:" + teamID,
-						Placeholder: "Select your timezone",
-						Options:     opts,
-					},
-				}},
-			},
-		},
-	})
+// listRunnablePremadeTeams returns the templates a user may run from a given
+// guild: the pre-made teams they own or can edit, plus any pre-made templates
+// published to that guild (deduplicated, most-recently-updated first).
+func (b *bot) listRunnablePremadeTeams(ctx context.Context, appUserID int64, guildID string) ([]models.Team, error) {
+	editable, err := b.listEditablePremadeTeams(ctx, appUserID)
 	if err != nil {
-		log.Printf("premade: team select: %v", err)
+		return nil, err
 	}
+	out := make([]models.Team, 0, len(editable))
+	seen := make(map[int64]bool, len(editable))
+	for _, t := range editable {
+		if !seen[t.ID] {
+			seen[t.ID] = true
+			out = append(out, t)
+		}
+	}
+	if guildID != "" {
+		published, err := b.teams.ListPublishedTemplatesForGuild(ctx, guildID)
+		if err != nil {
+			return nil, err
+		}
+		for _, t := range published {
+			if !seen[t.ID] {
+				seen[t.ID] = true
+				out = append(out, t)
+			}
+		}
+	}
+	return out, nil
 }
 
-// handlePremadeTzSelect opens the title/date/time modal once a timezone is set.
-func (b *bot) handlePremadeTzSelect(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	id := i.MessageComponentData().CustomID
-	teamID := strings.TrimPrefix(id, "premade_tz:")
-	values := i.MessageComponentData().Values
-	if len(values) == 0 {
+// handlePublish lists the runner's signup templates with their per-server
+// published state and lets them toggle availability to everyone in this guild.
+// Publishing makes a template runnable via /coreteam signup by any linked member
+// of the server without sharing edit access to the underlying team.
+func (b *bot) handlePublish(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	if i.GuildID == "" {
+		ephemeral(s, i, "Run this in a server channel — templates are published per server.")
 		return
 	}
-	tz := values[0]
-
-	err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseModal,
-		Data: &discordgo.InteractionResponseData{
-			CustomID: premadeModalPrefix + teamID + ":" + tz,
-			Title:    "Schedule the run",
-			Components: []discordgo.MessageComponent{
-				discordgo.ActionsRow{Components: []discordgo.MessageComponent{
-					discordgo.TextInput{
-						CustomID:    "premade_title",
-						Label:       "Title",
-						Style:       discordgo.TextInputShort,
-						Required:    true,
-						MaxLength:   100,
-						Placeholder: "e.g. Saturday vAA Carry",
-					},
-				}},
-				discordgo.ActionsRow{Components: []discordgo.MessageComponent{
-					discordgo.TextInput{
-						CustomID:    "premade_date",
-						Label:       "Date (YYYY-MM-DD)",
-						Style:       discordgo.TextInputShort,
-						Required:    true,
-						MaxLength:   10,
-						Placeholder: "2026-07-04",
-					},
-				}},
-				discordgo.ActionsRow{Components: []discordgo.MessageComponent{
-					discordgo.TextInput{
-						CustomID:    "premade_time",
-						Label:       "Time (HH:MM, 24h)",
-						Style:       discordgo.TextInputShort,
-						Required:    true,
-						MaxLength:   5,
-						Placeholder: "20:00",
-					},
-				}},
-			},
-		},
-	})
-	if err != nil {
-		log.Printf("premade: tz select modal: %v", err)
+	if !hasManageChannels(i) {
+		ephemeral(s, i, "You need the Manage Channels permission to publish a template to this server.")
+		return
 	}
-}
-
-// handlePremadeModalSubmit parses the schedule, creates the run, and posts the
-// public announcement.
-func (b *bot) handlePremadeModalSubmit(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	user := invokingUser(i)
 	if user == nil {
 		ephemeral(s, i, "Could not identify your Discord account.")
 		return
 	}
-	parts := strings.SplitN(i.ModalSubmitData().CustomID, ":", 3)
-	if len(parts) != 3 {
-		ephemeral(s, i, "Something went wrong. Please run /coreteam signup again.")
-		return
-	}
-	teamID, err := strconv.ParseInt(parts[1], 10, 64)
-	if err != nil {
-		ephemeral(s, i, "That selection was invalid. Please run /coreteam signup again.")
-		return
-	}
-	tz := parts[2]
+	ctx, cancel := handlerContext()
+	defer cancel()
 
-	loc, err := time.LoadLocation(tz)
-	if err != nil {
-		ephemeral(s, i, "I couldn't understand that timezone. Please run /coreteam signup again.")
+	appUserID, err := b.discord.GetUserByDiscordID(ctx, user.ID)
+	if errors.Is(err, models.ErrUserNotFound) {
+		ephemeral(s, i, "Link your account first with /coreteam link, then mark a team as a signup template in the web app.")
 		return
 	}
-	title := strings.TrimSpace(modalValue(i, "premade_title"))
-	date := strings.TrimSpace(modalValue(i, "premade_date"))
-	clock := strings.TrimSpace(modalValue(i, "premade_time"))
-	when, err := time.ParseInLocation("2006-01-02 15:04", date+" "+clock, loc)
 	if err != nil {
-		ephemeral(s, i, "I couldn't read that date/time. Use the format YYYY-MM-DD and HH:MM (24h), e.g. 2026-07-04 and 20:00.")
+		log.Printf("publish: get user: %v", err)
+		ephemeral(s, i, "Something went wrong. Please try again.")
 		return
 	}
-	scheduledUTC := when.UTC()
+
+	teams, err := b.listEditablePremadeTeams(ctx, appUserID)
+	if err != nil {
+		log.Printf("publish: list teams: %v", err)
+		ephemeral(s, i, "Something went wrong loading your templates. Please try again.")
+		return
+	}
+	if len(teams) == 0 {
+		ephemeral(s, i, "You don't have any signup templates to publish. Mark a team as a signup template in the web app (Team Features) first.")
+		return
+	}
+
+	options, err := b.buildPublishOptions(ctx, teams, i.GuildID)
+	if err != nil {
+		log.Printf("publish: build options: %v", err)
+		ephemeral(s, i, "Something went wrong. Please try again.")
+		return
+	}
+
+	err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Flags:   discordgo.MessageFlagsEphemeral,
+			Content: "Select a template to toggle its availability to everyone in this server:",
+			Components: []discordgo.MessageComponent{
+				discordgo.ActionsRow{Components: []discordgo.MessageComponent{
+					discordgo.SelectMenu{
+						CustomID:    "publish_select",
+						Placeholder: "Choose a template to publish / unpublish",
+						Options:     options,
+					},
+				}},
+			},
+		},
+	})
+	if err != nil {
+		log.Printf("publish: respond: %v", err)
+	}
+}
+
+// handlePublishSelect toggles the chosen template's availability in this guild,
+// then re-renders the picker in place with the updated state.
+func (b *bot) handlePublishSelect(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	if i.GuildID == "" {
+		ephemeral(s, i, "Run this in a server channel — templates are published per server.")
+		return
+	}
+	if !hasManageChannels(i) {
+		ephemeral(s, i, "You need the Manage Channels permission to publish a template to this server.")
+		return
+	}
+	values := i.MessageComponentData().Values
+	if len(values) == 0 {
+		return
+	}
+	teamID, err := strconv.ParseInt(values[0], 10, 64)
+	if err != nil {
+		ephemeral(s, i, "That selection was invalid.")
+		return
+	}
+	user := invokingUser(i)
+	if user == nil {
+		ephemeral(s, i, "Could not identify your Discord account.")
+		return
+	}
 
 	ctx, cancel := handlerContext()
 	defer cancel()
@@ -279,52 +262,104 @@ func (b *bot) handlePremadeModalSubmit(s *discordgo.Session, i *discordgo.Intera
 		return
 	}
 	if err != nil {
-		log.Printf("premade: modal get user: %v", err)
+		log.Printf("publish select: get user: %v", err)
 		ephemeral(s, i, "Something went wrong. Please try again.")
 		return
 	}
-	_, role, err := b.teams.Access(ctx, teamID, appUserID)
+
+	// Only the template's owner/editor may change its publication.
+	teams, err := b.listEditablePremadeTeams(ctx, appUserID)
 	if err != nil {
-		log.Printf("premade: modal access: %v", err)
+		log.Printf("publish select: list teams: %v", err)
 		ephemeral(s, i, "Something went wrong. Please try again.")
 		return
 	}
-	if role != models.RoleOwner && role != models.RoleEditor {
-		ephemeral(s, i, "You don't have permission to run that team.")
-		return
+	var chosen *models.Team
+	for idx := range teams {
+		if teams[idx].ID == teamID {
+			chosen = &teams[idx]
+			break
+		}
 	}
-	team, _, primary, _, err := b.loadTeamData(ctx, teamID)
-	if err != nil {
-		log.Printf("premade: load team: %v", err)
-		ephemeral(s, i, "Could not load that team. Please try again.")
-		return
-	}
-	if !team.PreMade {
-		ephemeral(s, i, "That team isn't marked as pre-made anymore.")
+	if chosen == nil {
+		ephemeral(s, i, "You can only publish your own signup templates.")
 		return
 	}
 
-	run, err := b.premade.CreateRun(ctx, teamID, i.GuildID, i.ChannelID, title, scheduledUTC, appUserID)
+	published, err := b.teams.IsTemplatePublishedToGuild(ctx, teamID, i.GuildID)
 	if err != nil {
-		log.Printf("premade: create run: %v", err)
-		ephemeral(s, i, "Something went wrong creating the run. Please try again.")
+		log.Printf("publish select: check: %v", err)
+		ephemeral(s, i, "Something went wrong. Please try again.")
 		return
 	}
+	if published {
+		if err := b.teams.UnpublishTemplateFromGuild(ctx, teamID, i.GuildID); err != nil {
+			log.Printf("publish select: unpublish: %v", err)
+			ephemeral(s, i, "Something went wrong. Please try again.")
+			return
+		}
+	} else {
+		if err := b.teams.PublishTemplateToGuild(ctx, teamID, i.GuildID, appUserID); err != nil {
+			log.Printf("publish select: publish: %v", err)
+			ephemeral(s, i, "Something went wrong. Please try again.")
+			return
+		}
+	}
 
-	embed := b.premadeEmbed(team, run, primary, nil, nil)
-	msg, err := s.ChannelMessageSendComplex(i.ChannelID, &discordgo.MessageSend{
-		Embeds:     []*discordgo.MessageEmbed{embed},
-		Components: premadeComponents(team, nil),
+	verb := "Published"
+	if published {
+		verb = "Unpublished"
+	}
+	options, err := b.buildPublishOptions(ctx, teams, i.GuildID)
+	if err != nil {
+		log.Printf("publish select: rebuild options: %v", err)
+		ephemeral(s, i, "Saved your change, but couldn't refresh the list.")
+		return
+	}
+	content := fmt.Sprintf("%s **%s** for this server. Select another template to toggle, or dismiss this message.", verb, truncate(chosen.Name, 80))
+	err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseUpdateMessage,
+		Data: &discordgo.InteractionResponseData{
+			Content: content,
+			Components: []discordgo.MessageComponent{
+				discordgo.ActionsRow{Components: []discordgo.MessageComponent{
+					discordgo.SelectMenu{
+						CustomID:    "publish_select",
+						Placeholder: "Choose a template to publish / unpublish",
+						Options:     options,
+					},
+				}},
+			},
+		},
 	})
 	if err != nil {
-		log.Printf("premade: post: %v", err)
-		ephemeral(s, i, "Couldn't post the run here. Check my permissions in this channel and try again.")
-		return
+		log.Printf("publish select: respond: %v", err)
 	}
-	if err := b.premade.SetRunMessage(ctx, run.ID, msg.ID); err != nil {
-		log.Printf("premade: set message id: %v", err)
+}
+
+// buildPublishOptions renders one select option per template, annotated with
+// whether it is currently published to the given guild.
+func (b *bot) buildPublishOptions(ctx context.Context, teams []models.Team, guildID string) ([]discordgo.SelectMenuOption, error) {
+	options := make([]discordgo.SelectMenuOption, 0, len(teams))
+	for idx, t := range teams {
+		if idx >= 25 {
+			break
+		}
+		published, err := b.teams.IsTemplatePublishedToGuild(ctx, t.ID, guildID)
+		if err != nil {
+			return nil, err
+		}
+		desc := "Not published here — select to publish"
+		if published {
+			desc = "Published here — select to unpublish"
+		}
+		options = append(options, discordgo.SelectMenuOption{
+			Label:       truncate(t.Name, 100),
+			Value:       strconv.FormatInt(t.ID, 10),
+			Description: truncate(desc, 100),
+		})
 	}
-	ephemeral(s, i, "Posted your pre-made run. Players can claim slots from the post above.")
+	return options, nil
 }
 
 // handlePremadeClaim locks a slot to the presser (releasing any prior claim). In
@@ -695,6 +730,36 @@ func (b *bot) renderPremadeUpdate(ctx context.Context, s *discordgo.Session, i *
 	}
 }
 
+// refreshPremadePostMessage re-renders a run's posted announcement in place
+// (embed + controls) without an interaction — used after a DM-driven edit. It is
+// a no-op when the run hasn't been posted yet (no message id).
+func (b *bot) refreshPremadePostMessage(ctx context.Context, s *discordgo.Session, run *models.PremadeRun) error {
+	if run.MessageID == "" || run.ChannelID == "" {
+		return nil
+	}
+	team, _, primary, _, err := b.loadTeamData(ctx, run.TeamID)
+	if err != nil {
+		return err
+	}
+	signups, err := b.premade.ListSignups(ctx, run.ID)
+	if err != nil {
+		return err
+	}
+	waitlist, err := b.premade.ListWaitlist(ctx, run.ID)
+	if err != nil {
+		return err
+	}
+	embed := b.premadeEmbed(team, run, primary, signups, waitlist)
+	components := premadeComponents(team, signups)
+	_, err = s.ChannelMessageEditComplex(&discordgo.MessageEdit{
+		Channel:    run.ChannelID,
+		ID:         run.MessageID,
+		Embeds:     &[]*discordgo.MessageEmbed{embed},
+		Components: &components,
+	})
+	return err
+}
+
 // premadeEmbed builds the run announcement embed from team data, the current
 // signups, and the current per-role waitlist.
 func (b *bot) premadeEmbed(team *models.Team, run *models.PremadeRun, primary *models.Encounter, signups []models.PremadeSignup, waitlist []models.PremadeWaitlistEntry) *discordgo.MessageEmbed {
@@ -702,7 +767,7 @@ func (b *bot) premadeEmbed(team *models.Team, run *models.PremadeRun, primary *m
 	for _, sg := range signups {
 		claimants[sg.Slot] = sg.DiscordUserID
 	}
-	title, desc := discordfmt.BuildPremadePost(team, run.Title, run.ScheduledAt.Unix(), primary, claimants, waitlist)
+	title, desc := discordfmt.BuildPremadePost(team, run.Title, run.PostOverride, run.ScheduledAt.Unix(), primary, claimants, waitlist)
 	return &discordgo.MessageEmbed{
 		Title:       truncate(title, embedTitleLimit),
 		Description: truncate(desc, embedDescriptionLimit),
@@ -770,14 +835,26 @@ func premadeComponents(team *models.Team, signups []models.PremadeSignup) []disc
 	if waitRow, ok := premadeWaitlistRow(team, taken); ok {
 		rows = append(rows, waitRow)
 	}
-	rows = append(rows, discordgo.ActionsRow{Components: []discordgo.MessageComponent{
+	rows = append(rows, premadeActionRow())
+	return rows
+}
+
+// premadeActionRow is the post's final button row: "Leave my slot" (any
+// claimant) and "Edit run" (gated to the run's creator / team owner-editor in
+// the handler). Shared by the specific and simple component layouts.
+func premadeActionRow() discordgo.MessageComponent {
+	return discordgo.ActionsRow{Components: []discordgo.MessageComponent{
 		discordgo.Button{
 			Label:    "Leave my slot",
 			Style:    discordgo.SecondaryButton,
 			CustomID: premadeLeaveID,
 		},
-	}})
-	return rows
+		discordgo.Button{
+			Label:    "Edit run",
+			Style:    discordgo.PrimaryButton,
+			CustomID: premadeEditID,
+		},
+	}}
 }
 
 // premadeSimpleComponents builds the simple-signup controls: a role select
@@ -842,13 +919,7 @@ func premadeSimpleComponents(team *models.Team, taken map[int]bool) []discordgo.
 	if waitRow, ok := premadeWaitlistRow(team, taken); ok {
 		rows = append(rows, waitRow)
 	}
-	rows = append(rows, discordgo.ActionsRow{Components: []discordgo.MessageComponent{
-		discordgo.Button{
-			Label:    "Leave my slot",
-			Style:    discordgo.SecondaryButton,
-			CustomID: premadeLeaveID,
-		},
-	}})
+	rows = append(rows, premadeActionRow())
 	return rows
 }
 

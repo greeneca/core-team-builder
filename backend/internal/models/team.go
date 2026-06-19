@@ -451,3 +451,65 @@ func (s *TeamStore) ShareAutoTeamsForDiscord(ctx context.Context, discordUserID 
 	_, err := s.pool.Exec(ctx, q, discordUserID, userID)
 	return err
 }
+
+// PublishTemplateToGuild makes a template (pre-made team) runnable by anyone in
+// the given Discord guild, without sharing edit access to the team. Idempotent:
+// re-publishing the same (team, guild) leaves the original publisher/timestamp
+// untouched.
+func (s *TeamStore) PublishTemplateToGuild(ctx context.Context, teamID int64, guildID string, publishedBy int64) error {
+	const q = `
+		INSERT INTO team_guild_templates (team_id, guild_id, published_by)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (team_id, guild_id) DO NOTHING`
+	_, err := s.pool.Exec(ctx, q, teamID, guildID, publishedBy)
+	return err
+}
+
+// UnpublishTemplateFromGuild revokes a template's availability in a guild. It is
+// idempotent (a no-op when no grant exists).
+func (s *TeamStore) UnpublishTemplateFromGuild(ctx context.Context, teamID int64, guildID string) error {
+	const q = `DELETE FROM team_guild_templates WHERE team_id = $1 AND guild_id = $2`
+	_, err := s.pool.Exec(ctx, q, teamID, guildID)
+	return err
+}
+
+// IsTemplatePublishedToGuild reports whether a template is published to a guild.
+func (s *TeamStore) IsTemplatePublishedToGuild(ctx context.Context, teamID int64, guildID string) (bool, error) {
+	const q = `SELECT 1 FROM team_guild_templates WHERE team_id = $1 AND guild_id = $2`
+	var x int
+	err := s.pool.QueryRow(ctx, q, teamID, guildID).Scan(&x)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// ListPublishedTemplatesForGuild returns the pre-made teams published to the
+// given guild, most-recently-updated first. Only teams still flagged pre_made
+// are returned (a template that was un-flagged stops being runnable).
+func (s *TeamStore) ListPublishedTemplatesForGuild(ctx context.Context, guildID string) ([]Team, error) {
+	const q = `
+		SELECT t.id, t.name, t.owner_id, t.schedule_days, t.schedule_time, t.encounters_enabled, t.post_footer, t.dm_footer, t.signup_post, t.auto_share_pool_viewers, t.pre_made, t.premade_post, t.simple_signup, t.waitlist_enabled, t.created_at, t.updated_at
+		FROM teams t
+		JOIN team_guild_templates g ON g.team_id = t.id
+		WHERE g.guild_id = $1 AND t.pre_made = true
+		ORDER BY t.updated_at DESC`
+	rows, err := s.pool.Query(ctx, q, guildID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	teams := []Team{}
+	for rows.Next() {
+		var t Team
+		if err := rows.Scan(&t.ID, &t.Name, &t.OwnerID, &t.ScheduleDays, &t.ScheduleTime, &t.EncountersEnabled, &t.PostFooter, &t.DMFooter, &t.SignupPost, &t.AutoSharePoolViewers, &t.PreMade, &t.PremadePost, &t.SimpleSignup, &t.WaitlistEnabled, &t.CreatedAt, &t.UpdatedAt); err != nil {
+			return nil, err
+		}
+		teams = append(teams, t)
+	}
+	return teams, rows.Err()
+}
