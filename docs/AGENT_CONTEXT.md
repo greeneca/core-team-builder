@@ -242,6 +242,17 @@ column; the `User` JSON model hides it (`json:"-"`).
     as `SKILL_LINE_GROUPS`/`SKILL_LINES` and `MASTERIES_BY_CLASS`/`MASTERIES`,
     and the roster shows a "Subclassed" checkbox that swaps between 3 skill-line
     dropdowns and 2 class-mastery dropdowns (mastery options follow the class).
+- **Werewolf** (`043_player_werewolf.sql`): each player has a `werewolf` bool with
+  a roster toggle next to "Subclassed". When checked it adds the default werewolf
+  skills (`models.WerewolfDefaultSkills` / `WEREWOLF_DEFAULT_SKILLS`) to that
+  slot's `encounter_loadouts.skills`; unchecking removes the full Werewolf skill
+  line (`models.WerewolfSkills`). The flag applies to **every** encounter: the UI
+  updates the currently-shown encounter's skill chips for immediate feedback, and
+  `TeamStore.Save` reconciles all of the team's encounters for that slot
+  (`reconcileWerewolfSkillsTx`). The `/coreteam post` overview and `/coreteam
+  signup` post tag a werewolf slot with **`WW`** before its gear. Note: because
+  reconciliation runs on every team save, a non-werewolf slot can't keep a
+  manually-added werewolf-line skill.
 - **Endpoints** (all JWT-protected): `GET/POST /api/teams`,
   `GET/PUT/DELETE /api/teams/{id}`, `POST /api/teams/{id}/share`,
   `DELETE /api/teams/{id}/members/{userID}`. Mutations return the full refreshed
@@ -307,7 +318,7 @@ column; the `User` JSON model hides it (`json:"-"`).
   the old web-app clipboard export (detailed post / condensed list) was removed.
 - **Save-all**: `PUT /api/teams/{id}` is the single "save everything" call —
   body is `{ name, schedule_days, schedule_time,
-  encounters_enabled, post_footer, dm_footer, signup_post, auto_share_pool_viewers, pre_made, premade_post, simple_signup, waitlist_enabled, players: [{slot,name,discord_handle,role,class,subclassed,skill_line_1..3,mastery_1..2}] }`
+  encounters_enabled, post_footer, dm_footer, signup_post, auto_share_pool_viewers, pre_made, premade_post, simple_signup, waitlist_enabled, players: [{slot,name,discord_handle,role,class,subclassed,skill_line_1..3,mastery_1..2,werewolf}] }`
   and the backend (`TeamStore.Save`) updates team meta + roster in one
   transaction (there is no per-player save endpoint). `schedule_time` is sent in
   UTC (the UI converts from the viewer's current zone,

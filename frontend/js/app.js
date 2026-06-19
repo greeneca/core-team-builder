@@ -1033,6 +1033,7 @@
       };
       const subEl = slot.querySelector('[data-field="subclassed"]');
       const subclassed = subEl ? subEl.checked : false;
+      const wwEl = slot.querySelector('[data-field="werewolf"]');
       return {
         slot: Number(slot.dataset.slot),
         name: val("name").trim(),
@@ -1041,6 +1042,7 @@
         class: val("class"),
         race: val("race"),
         subclassed,
+        werewolf: wwEl ? wwEl.checked : false,
         // Only the active build set is sent; the backend clears the rest too.
         skill_line_1: subclassed ? val("skill_line_1") : "",
         skill_line_2: subclassed ? val("skill_line_2") : "",
@@ -2038,10 +2040,16 @@
             </div>
           </div>
           <div class="player-build">
-            <label class="subclass-toggle">
-              <input type="checkbox" data-field="subclassed" />
-              <span>Subclassed</span>
-            </label>
+            <div class="build-toggles">
+              <label class="subclass-toggle">
+                <input type="checkbox" data-field="subclassed" />
+                <span>Subclassed</span>
+              </label>
+              <label class="subclass-toggle">
+                <input type="checkbox" data-field="werewolf" />
+                <span>Werewolf</span>
+              </label>
+            </div>
             <div class="build-selects" data-build></div>
           </div>
           <div class="player-loadout" data-loadout>
@@ -2145,6 +2153,7 @@
 
       slot.querySelector('[data-field="name"]').value = player.name;
       slot.querySelector('[data-field="subclassed"]').checked = player.subclassed;
+      slot.querySelector('[data-field="werewolf"]').checked = !!player.werewolf;
 
       // Discord handle: an open combobox whose suggestions are the team's member
       // pool (free-form text still allowed). The inner input keeps data-field so
@@ -2182,6 +2191,20 @@
         if (!subCb.checked) renderBuild(slot, player);
       });
       renderBuild(slot, player);
+
+      // Werewolf toggle: add the default werewolf skills to the visible (current
+      // encounter) skills list when checked, or strip every werewolf-line skill
+      // when unchecked. The team save persists the flag and the backend keeps the
+      // skills in sync across all encounters; the encounter save persists the
+      // chip change for the encounter shown now.
+      const wwCb = slot.querySelector('[data-field="werewolf"]');
+      if (wwCb) {
+        wwCb.addEventListener("change", () => {
+          applyWerewolfSkills(slot, wwCb.checked);
+          scheduleAutosave("team");
+          scheduleAutosave("encounter");
+        });
+      }
 
       // Recolor the slot live when its role changes (autosave is handled by the
       // global roster change listener).
@@ -2351,6 +2374,11 @@
     const dstSub = dstSlot.querySelector('[data-field="subclassed"]');
     if (srcSub && dstSub) dstSub.checked = srcSub.checked;
 
+    // Werewolf flag follows the source (its skills come along via the chip copy).
+    const srcWW = srcSlot.querySelector('[data-field="werewolf"]');
+    const dstWW = dstSlot.querySelector('[data-field="werewolf"]');
+    if (srcWW && dstWW) dstWW.checked = srcWW.checked;
+
     // Re-render the target's conditional build with the source's selections.
     renderBuild(dstSlot, {
       skill_line_1: field(srcSlot, "skill_line_1"),
@@ -2404,6 +2432,9 @@
 
     const sub = slot.querySelector('[data-field="subclassed"]');
     if (sub) sub.checked = false;
+
+    const ww = slot.querySelector('[data-field="werewolf"]');
+    if (ww) ww.checked = false;
 
     // Re-render the build area now that class is empty and subclass is off.
     renderBuild(slot, {});
@@ -2941,6 +2972,34 @@
         refreshPenCoverage();
       },
     });
+  }
+
+  // All Werewolf skill-line keys (derived from the skills data), used to strip a
+  // slot's werewolf skills when its werewolf toggle is turned off. Mirrors
+  // models.WerewolfSkills on the backend.
+  function werewolfSkillKeys() {
+    return SKILLS.filter((s) => s.group === "Werewolf").map((s) => s.value);
+  }
+
+  // Sync a slot's (current encounter) skills chip list with its werewolf toggle:
+  // adding inserts the default werewolf skills (deduped); removing strips every
+  // werewolf-line skill. The backend mirrors this across all encounters on save.
+  function applyWerewolfSkills(slot, on) {
+    const listEl = slot.querySelector(
+      '[data-loadout] .loadout-col[data-type="skills"] .chip-list'
+    );
+    if (!listEl) return;
+    if (on) {
+      WEREWOLF_DEFAULT_SKILLS.forEach((key) => addChip(listEl, "skills", key, true));
+    } else {
+      const ww = new Set(werewolfSkillKeys());
+      listEl.querySelectorAll(".chip").forEach((chip) => {
+        if (ww.has(chip.dataset.value)) chip.remove();
+      });
+    }
+    refreshBuffCoverage();
+    refreshCritCoverage();
+    refreshPenCoverage();
   }
 
   // Collect each player's loadout (gear/skills chips) from the roster slots.

@@ -204,8 +204,11 @@ func premadeRosterLines(team *models.Team, primary *models.Encounter, claimants 
 			if name != "" {
 				parts = append(parts, name)
 			}
+			parts = append(parts, classOrDash(p.Class))
+			if p.Werewolf {
+				parts = append(parts, "WW")
+			}
 			parts = append(parts,
-				classOrDash(p.Class),
 				gearAbbrevList(bySlot[p.Slot].Gear),
 				claim,
 			)
@@ -277,8 +280,11 @@ func rosterLines(team *models.Team, primary *models.Encounter, marks map[int]str
 			fmt.Sprintf("%d.", p.Slot),
 			who(p),
 			classOrDash(p.Class),
-			gearAbbrevList(bySlot[p.Slot].Gear),
 		}
+		if p.Werewolf {
+			parts = append(parts, "WW")
+		}
+		parts = append(parts, gearAbbrevList(bySlot[p.Slot].Gear))
 		rows = append(rows, row{
 			role: p.Role,
 			line: rsvpIcon(marks[p.Slot]) + " " + strings.Join(parts, " · "),

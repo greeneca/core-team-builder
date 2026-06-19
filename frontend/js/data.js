@@ -76,6 +76,19 @@ const DEFAULT_TEAM_ROLES = [
   { key: "support_dps", label: "Support DPS", base: "support_dps" },
 ];
 
+// Skills added to a slot's skills loadout when its werewolf toggle is turned on.
+// Mirrors models.WerewolfDefaultSkills on the backend. The full Werewolf skill
+// line (removed when the toggle is turned off) is derived from SKILL_GROUPS at
+// runtime via werewolfSkillKeys() in app.js.
+const WEREWOLF_DEFAULT_SKILLS = [
+  "feral_pounce",
+  "hircines_rage",
+  "ferocious_roar",
+  "bloody_gnash",
+  "bloodclaws",
+  "werewolf_berserker",
+];
+
 const CLASSES = [
   { value: "", label: "—" },
   { value: "arcanist", label: "Arcanist" },

@@ -251,6 +251,47 @@ type Player struct {
 	SkillLine3    string `json:"skill_line_3"`
 	Mastery1      string `json:"mastery_1"`
 	Mastery2      string `json:"mastery_2"`
+	// Werewolf marks a slot as running a werewolf build. When true, the default
+	// werewolf skills are kept in that slot's skills loadout across every
+	// encounter (see WerewolfDefaultSkills and TeamStore.Save); when false, all
+	// werewolf-line skills (WerewolfSkills) are removed from them.
+	Werewolf bool `json:"werewolf"`
+}
+
+// WerewolfDefaultSkills are the skills added to a slot's skills loadout when its
+// werewolf flag is turned on. Keys mirror the Werewolf skill line in
+// frontend/js/gear-skills.js.
+var WerewolfDefaultSkills = []string{
+	"feral_pounce",
+	"hircines_rage",
+	"ferocious_roar",
+	"bloody_gnash",
+	"bloodclaws",
+	"werewolf_berserker",
+}
+
+// WerewolfSkills is the full set of Werewolf skill-line keys. Turning the
+// werewolf flag off removes any of these from a slot's skills loadout. Mirrors
+// the Werewolf group in frontend/js/gear-skills.js.
+var WerewolfSkills = []string{
+	"bloodclaws",
+	"bloody_gnash",
+	"brutal_pounce",
+	"claw_fury",
+	"deafening_roar",
+	"feral_pounce",
+	"ferocious_roar",
+	"gnash",
+	"hircines_bounty",
+	"hircines_fortitude",
+	"hircines_rage",
+	"pack_leader",
+	"pounce",
+	"rending_claws",
+	"rip_and_tear",
+	"roar",
+	"werewolf_berserker",
+	"werewolf_transformation",
 }
 
 // TeamMember is a user with access to a team. Role is "owner" or "member".
@@ -377,9 +418,9 @@ func (s *TeamStore) Create(ctx context.Context, ownerID int64, name string, copy
 		// Copy the roster slot-for-slot, then all encounters + loadouts.
 		const copyPlayers = `
 			INSERT INTO players (team_id, slot, name, discord_handle, role, class, race,
-			                     subclassed, skill_line_1, skill_line_2, skill_line_3, mastery_1, mastery_2)
+			                     subclassed, skill_line_1, skill_line_2, skill_line_3, mastery_1, mastery_2, werewolf)
 			SELECT $1, slot, name, discord_handle, role, class, race,
-			       subclassed, skill_line_1, skill_line_2, skill_line_3, mastery_1, mastery_2
+			       subclassed, skill_line_1, skill_line_2, skill_line_3, mastery_1, mastery_2, werewolf
 			FROM players WHERE team_id = $2`
 		if _, err := tx.Exec(ctx, copyPlayers, team.ID, copyFromTeamID); err != nil {
 			return nil, err
@@ -464,7 +505,7 @@ func (s *TeamStore) Get(ctx context.Context, teamID int64) (*Team, error) {
 
 	const playersQ = `
 		SELECT id, slot, name, discord_handle, role, class, race,
-		       subclassed, skill_line_1, skill_line_2, skill_line_3, mastery_1, mastery_2
+		       subclassed, skill_line_1, skill_line_2, skill_line_3, mastery_1, mastery_2, werewolf
 		FROM players WHERE team_id = $1 ORDER BY slot`
 	pRows, err := s.pool.Query(ctx, playersQ, teamID)
 	if err != nil {
@@ -475,7 +516,7 @@ func (s *TeamStore) Get(ctx context.Context, teamID int64) (*Team, error) {
 		var p Player
 		if err := pRows.Scan(
 			&p.ID, &p.Slot, &p.Name, &p.DiscordHandle, &p.Role, &p.Class, &p.Race,
-			&p.Subclassed, &p.SkillLine1, &p.SkillLine2, &p.SkillLine3, &p.Mastery1, &p.Mastery2,
+			&p.Subclassed, &p.SkillLine1, &p.SkillLine2, &p.SkillLine3, &p.Mastery1, &p.Mastery2, &p.Werewolf,
 		); err != nil {
 			return nil, err
 		}
@@ -545,19 +586,53 @@ func (s *TeamStore) Save(ctx context.Context, teamID int64, name string, days []
 		UPDATE players
 		SET name = $1, discord_handle = $2, role = $3, class = $4, race = $5,
 		    subclassed = $6, skill_line_1 = $7, skill_line_2 = $8, skill_line_3 = $9,
-		    mastery_1 = $10, mastery_2 = $11
-		WHERE team_id = $12 AND slot = $13`
+		    mastery_1 = $10, mastery_2 = $11, werewolf = $12
+		WHERE team_id = $13 AND slot = $14`
 	for _, p := range players {
 		if _, err := tx.Exec(ctx, updatePlayer,
 			p.Name, p.DiscordHandle, p.Role, p.Class, p.Race,
-			p.Subclassed, p.SkillLine1, p.SkillLine2, p.SkillLine3, p.Mastery1, p.Mastery2,
+			p.Subclassed, p.SkillLine1, p.SkillLine2, p.SkillLine3, p.Mastery1, p.Mastery2, p.Werewolf,
 			teamID, p.Slot,
 		); err != nil {
+			return err
+		}
+		if err := reconcileWerewolfSkillsTx(ctx, tx, teamID, p.Slot, p.Werewolf); err != nil {
 			return err
 		}
 	}
 
 	return tx.Commit(ctx)
+}
+
+// reconcileWerewolfSkillsTx keeps a slot's skills loadout in sync with its
+// werewolf flag across every one of the team's encounters. When on, it appends
+// any missing WerewolfDefaultSkills (preserving existing order, no duplicates);
+// when off, it strips every WerewolfSkills entry. Runs in the given transaction.
+func reconcileWerewolfSkillsTx(ctx context.Context, tx pgx.Tx, teamID int64, slot int, werewolf bool) error {
+	if werewolf {
+		const addWW = `
+			UPDATE encounter_loadouts el
+			SET skills = el.skills || COALESCE((
+			    SELECT array_agg(k ORDER BY ord)
+			    FROM unnest($1::text[]) WITH ORDINALITY AS u(k, ord)
+			    WHERE NOT (k = ANY(el.skills))
+			), '{}')
+			FROM encounters e
+			WHERE el.encounter_id = e.id AND e.team_id = $2 AND el.slot = $3`
+		_, err := tx.Exec(ctx, addWW, WerewolfDefaultSkills, teamID, slot)
+		return err
+	}
+	const removeWW = `
+		UPDATE encounter_loadouts el
+		SET skills = COALESCE((
+		    SELECT array_agg(s ORDER BY ord)
+		    FROM unnest(el.skills) WITH ORDINALITY AS u(s, ord)
+		    WHERE NOT (s = ANY($1::text[]))
+		), '{}')
+		FROM encounters e
+		WHERE el.encounter_id = e.id AND e.team_id = $2 AND el.slot = $3`
+	_, err := tx.Exec(ctx, removeWW, WerewolfSkills, teamID, slot)
+	return err
 }
 
 // Delete removes a team and (via cascade) its members and players.

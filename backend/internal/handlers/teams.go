@@ -197,6 +197,7 @@ type playerPayload struct {
 	SkillLine3    string `json:"skill_line_3"`
 	Mastery1      string `json:"mastery_1"`
 	Mastery2      string `json:"mastery_2"`
+	Werewolf      bool   `json:"werewolf"`
 }
 
 func (s *Server) handleUpdateTeam(w http.ResponseWriter, r *http.Request) {
@@ -306,6 +307,7 @@ func (s *Server) handleUpdateTeam(w http.ResponseWriter, r *http.Request) {
 			Class:         class,
 			Race:          race,
 			Subclassed:    p.Subclassed,
+			Werewolf:      p.Werewolf,
 		}
 
 		// The subclass flag selects which build set applies. Validate only the
