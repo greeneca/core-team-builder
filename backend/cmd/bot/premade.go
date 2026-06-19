@@ -806,9 +806,9 @@ func (b *bot) refreshPremadePostMessage(ctx context.Context, s *discordgo.Sessio
 // premadeEmbed builds the run announcement embed from team data, the current
 // signups, and the current per-role waitlist.
 func (b *bot) premadeEmbed(team *models.Team, run *models.PremadeRun, primary *models.Encounter, signups []models.PremadeSignup, waitlist []models.PremadeWaitlistEntry) *discordgo.MessageEmbed {
-	claimants := map[int]string{}
+	claimants := map[int]models.PremadeSignup{}
 	for _, sg := range signups {
-		claimants[sg.Slot] = sg.DiscordUserID
+		claimants[sg.Slot] = sg
 	}
 	title, desc := discordfmt.BuildPremadePost(team, run.Title, run.PostOverride, run.ScheduledAt.Unix(), primary, claimants, waitlist)
 	return &discordgo.MessageEmbed{

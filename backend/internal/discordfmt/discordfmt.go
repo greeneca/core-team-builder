@@ -70,14 +70,16 @@ func BuildPost(team *models.Team, primary *models.Encounter, groupings []models.
 // parts. title is the run's title (falling back to the team name); description
 // holds the scheduled time as a per-viewer Discord timestamp, the team's
 // free-form premade post body, and the per-slot roster showing each slot's
-// role/class and either the claimant's mention or "open".
+// role/class and either the claimant's name or "open".
 //
-// claimants maps a slot number to the claiming user's Discord ID; an empty/absent
-// entry renders the slot as open.
+// claimants maps a slot number to the claiming signup; an empty/absent entry
+// renders the slot as open. Claimants are shown by their stored display name
+// (plain text), not a <@id> mention, because Discord's mobile client does not
+// reliably resolve mentions inside embeds (it shows them as raw numeric IDs).
 //
 // postOverride, when non-empty, replaces the team's default premade post body
 // (team.PremadePost) for this run.
-func BuildPremadePost(team *models.Team, title, postOverride string, scheduledUnix int64, primary *models.Encounter, claimants map[int]string, waitlist []models.PremadeWaitlistEntry) (string, string) {
+func BuildPremadePost(team *models.Team, title, postOverride string, scheduledUnix int64, primary *models.Encounter, claimants map[int]models.PremadeSignup, waitlist []models.PremadeWaitlistEntry) (string, string) {
 	if strings.TrimSpace(title) == "" {
 		title = team.Name
 	}
@@ -120,8 +122,9 @@ func BuildPremadePost(team *models.Team, title, postOverride string, scheduledUn
 	return title, strings.TrimSpace(strings.Join(L, "\n"))
 }
 
-// premadeWaitlistLines renders the per-role waitlist block (FIFO mentions per
-// role), ordered by the team's own role set. Returns nil when nobody is waiting.
+// premadeWaitlistLines renders the per-role waitlist block (FIFO, by display
+// name per role), ordered by the team's own role set. Returns nil when nobody is
+// waiting.
 func premadeWaitlistLines(team *models.Team, waitlist []models.PremadeWaitlistEntry) []string {
 	if len(waitlist) == 0 {
 		return nil
@@ -129,7 +132,7 @@ func premadeWaitlistLines(team *models.Team, waitlist []models.PremadeWaitlistEn
 	byRole := map[string][]string{}
 	roles := make([]string, 0, len(waitlist))
 	for _, w := range waitlist {
-		byRole[w.Role] = append(byRole[w.Role], "<@"+w.DiscordUserID+">")
+		byRole[w.Role] = append(byRole[w.Role], claimantDisplay(w.DiscordUsername, w.DiscordUserID))
 		roles = append(roles, w.Role)
 	}
 	L := []string{"__Waitlist__"}
@@ -139,8 +142,8 @@ func premadeWaitlistLines(team *models.Team, waitlist []models.PremadeWaitlistEn
 			return
 		}
 		seen[role] = true
-		if ids := byRole[role]; len(ids) > 0 {
-			L = append(L, team.RoleEmoji(role)+" "+team.RoleLabel(role)+": "+strings.Join(ids, ", "))
+		if names := byRole[role]; len(names) > 0 {
+			L = append(L, team.RoleEmoji(role)+" "+team.RoleLabel(role)+": "+strings.Join(names, ", "))
 		}
 	}
 	// The team's own roles first, then any other roles present (queue order).
@@ -174,10 +177,21 @@ func roleGroups(team *models.Team, rolesPresent []string) []roleGroup {
 	return groups
 }
 
+// claimantDisplay renders a signup for embed text. Discord does not reliably
+// resolve <@id> mentions inside embeds on its mobile client (they show as a raw
+// numeric ID), so use the stored display name as plain text; fall back to the
+// raw ID only when no name was recorded.
+func claimantDisplay(username, discordUserID string) string {
+	if name := strings.TrimSpace(username); name != "" {
+		return name
+	}
+	return discordUserID
+}
+
 // premadeRosterLines renders the roster grouped by role for a pre-made run: each
 // slot shows its number, the slot's roster name, class, and either the
-// claimant's mention or "open".
-func premadeRosterLines(team *models.Team, primary *models.Encounter, claimants map[int]string) []string {
+// claimant's name or "open".
+func premadeRosterLines(team *models.Team, primary *models.Encounter, claimants map[int]models.PremadeSignup) []string {
 	bySlot := map[int]models.Loadout{}
 	if primary != nil {
 		for _, lo := range primary.Loadouts {
@@ -192,8 +206,10 @@ func premadeRosterLines(team *models.Team, primary *models.Encounter, claimants 
 	rows := make([]row, 0, len(players))
 	for _, p := range players {
 		claim := "_open_"
-		if id := claimants[p.Slot]; id != "" {
-			claim = "<@" + id + ">"
+		if sg, ok := claimants[p.Slot]; ok {
+			if name := claimantDisplay(sg.DiscordUsername, sg.DiscordUserID); name != "" {
+				claim = name
+			}
 		}
 		// Unnamed slots simply omit the name segment (no "Slot N" fallback).
 		name := strings.TrimSpace(p.Name)
