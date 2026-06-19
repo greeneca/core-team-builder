@@ -114,6 +114,11 @@ var coreTeamCommand = &discordgo.ApplicationCommand{
 		},
 		{
 			Type:        discordgo.ApplicationCommandOptionSubCommand,
+			Name:        "login",
+			Description: "Post a link to the Core Team Builder web app",
+		},
+		{
+			Type:        discordgo.ApplicationCommandOptionSubCommand,
 			Name:        "status",
 			Description: "Show which team this channel is bound to",
 		},
@@ -158,6 +163,8 @@ func (b *bot) onCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		b.handlePublish(s, i)
 	case "timezone":
 		b.handleTimezone(s, i)
+	case "login":
+		b.handleLogin(s, i)
 	case "status":
 		b.handleStatus(s, i)
 	case "unset":
@@ -689,6 +696,28 @@ func (b *bot) handleGetMyDetails(s *discordgo.Session, i *discordgo.InteractionC
 	})
 	if err != nil {
 		log.Printf("details: ephemeral fallback: %v", err)
+	}
+}
+
+// --- /coreteam login ---
+
+// handleLogin posts a public message with a link to the web app (APP_BASE_URL)
+// so members can open Core Team Builder from Discord. Replies ephemerally if the
+// base URL isn't configured.
+func (b *bot) handleLogin(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	url := strings.TrimSpace(b.appBaseURL)
+	if url == "" {
+		ephemeral(s, i, "The web app URL isn't configured. Ask an admin to set APP_BASE_URL.")
+		return
+	}
+	err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Content: "Log in to Core Team Builder: " + url,
+		},
+	})
+	if err != nil {
+		log.Printf("login: respond: %v", err)
 	}
 }
 

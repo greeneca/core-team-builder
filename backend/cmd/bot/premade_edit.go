@@ -97,6 +97,63 @@ func (b *bot) handlePremadeEdit(s *discordgo.Session, i *discordgo.InteractionCr
 	ephemeral(s, i, "Check your DMs — I'll help you edit this run there.")
 }
 
+// handlePremadeDelete deletes a posted run. Like the edit button it's gated to
+// the run's creator or a team owner/editor (Discord can't hide the button
+// per-user, so non-editors get an ephemeral rejection). It tears down the post
+// (and thread, if any) and marks the run cleaned up so it's no longer active.
+func (b *bot) handlePremadeDelete(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	user := invokingUser(i)
+	if user == nil || i.Message == nil {
+		ephemeral(s, i, "Could not identify your Discord account.")
+		return
+	}
+
+	ctx, cancel := handlerContext()
+	defer cancel()
+
+	run, ok := b.premadeRunForMessage(ctx, s, i)
+	if !ok {
+		return
+	}
+
+	appUserID, err := b.discord.GetUserByDiscordID(ctx, user.ID)
+	if errors.Is(err, models.ErrUserNotFound) {
+		ephemeral(s, i, "Link your account first with /coreteam link to delete a run.")
+		return
+	}
+	if err != nil {
+		log.Printf("premade delete: get user: %v", err)
+		ephemeral(s, i, "Something went wrong. Please try again.")
+		return
+	}
+
+	allowed, err := b.canEditRun(ctx, run, appUserID)
+	if err != nil {
+		log.Printf("premade delete: permission: %v", err)
+		ephemeral(s, i, "Something went wrong. Please try again.")
+		return
+	}
+	if !allowed {
+		ephemeral(s, i, "Only the person who created this run (or a team owner/editor) can delete it.")
+		return
+	}
+
+	// Acknowledge privately first (the message this interaction came from is
+	// about to be deleted), then tear down the post/thread and mark it done.
+	ephemeral(s, i, "Deleted this run.")
+	if run.ThreadID != "" {
+		if _, err := s.ChannelDelete(run.ThreadID); err != nil {
+			log.Printf("premade delete: delete thread (run %d): %v", run.ID, err)
+		}
+	}
+	if err := s.ChannelMessageDelete(i.ChannelID, i.Message.ID); err != nil {
+		log.Printf("premade delete: delete post (run %d): %v", run.ID, err)
+	}
+	if err := b.premade.MarkCleanedUp(ctx, run.ID); err != nil {
+		log.Printf("premade delete: mark cleaned up (run %d): %v", run.ID, err)
+	}
+}
+
 // canEditRun reports whether the app user may edit the run: the original creator,
 // or an owner/editor of the run's team.
 func (b *bot) canEditRun(ctx context.Context, run *models.PremadeRun, appUserID int64) (bool, error) {

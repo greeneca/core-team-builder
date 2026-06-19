@@ -529,6 +529,8 @@ column; the `User` JSON model hides it (`json:"-"`).
   - `signup` — posts a one-off **pre-made trial run** (see "Pre-made trial runs"
     below). Implemented in `backend/cmd/bot/premade.go`. (Formerly named
     `premade`; the internal `premade_*` custom IDs and tables are unchanged.)
+  - `login` — posts a public message linking to the web app (`APP_BASE_URL`).
+    Replies ephemerally if `APP_BASE_URL` is unconfigured (`handleLogin`).
   - `status` / `unset` — show / remove the channel's team binding.
   - **Get My Build Details** button (`get_my_details`) → matches the presser to a
     roster slot (by Discord ID/mention in `players.discord_handle`, else
@@ -628,8 +630,8 @@ the `pre_made` flag on (see "Pre-made trial run" under Teams). Tables in
   Controls (`premadeComponents`): a **claim** select listing only open slots
   (`premade_claim`; disabled "all taken" placeholder when full), a **details**
   select listing all slots (`premade_details`), and a final button row
-  (`premadeActionRow`) with **Leave my slot** (`premade_leave`) and **Edit run**
-  (`premade_edit`).
+  (`premadeActionRow`) with **Un-Sign** (`premade_leave`), **Edit run**
+  (`premade_edit`), and **Delete run** (`premade_delete`).
 - **Edit** (`premade_edit` → `handlePremadeEdit`, `cmd/bot/premade_edit.go`):
   visible to everyone but gated to the run's creator or the team's owner/editor
   (`canEditRun`). It opens a DM and reuses the `premade_signup_sessions` row in
@@ -638,6 +640,11 @@ the `pre_made` flag on (see "Pre-made trial run" under Teams). Tables in
   field calls `PremadeStore.UpdateRun` and re-renders the posted announcement in
   place via `refreshPremadePostMessage` (`ChannelMessageEditComplex`), then
   re-shows the menu so several fields can be edited in one sitting.
+- **Delete** (`premade_delete` → `handlePremadeDelete`, `cmd/bot/premade_edit.go`):
+  visible to everyone but gated to the run's creator or the team's owner/editor
+  (`canEditRun`; non-editors get an ephemeral rejection). Deletes the posted
+  message (and thread, if any) and marks the run cleaned up (`MarkCleanedUp`) so
+  it's no longer active.
 - **Cancel** (`isCancel` in `cmd/bot/premade_dm.go`): typing a cancel word
   (cancel / stop / quit / abort / exit / nevermind) in the DM aborts whatever
   conversation is active. `onMessageCreate` checks it before the step switch, so

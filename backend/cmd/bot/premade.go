@@ -36,6 +36,7 @@ const (
 	premadeWaitID       = "premade_wait"
 	premadeLeaveID      = "premade_leave"
 	premadeEditID       = "premade_edit"
+	premadeDeleteID     = "premade_delete"
 	premadeEditFieldID  = "premade_edit_field"
 )
 
@@ -55,6 +56,8 @@ func (b *bot) onPremadeComponent(s *discordgo.Session, i *discordgo.InteractionC
 		b.handlePremadeLeave(s, i)
 	case id == premadeEditID:
 		b.handlePremadeEdit(s, i)
+	case id == premadeDeleteID:
+		b.handlePremadeDelete(s, i)
 	case id == premadeEditFieldID:
 		b.handlePremadeEditFieldSelect(s, i)
 	}
@@ -884,9 +887,10 @@ func premadeComponents(team *models.Team, signups []models.PremadeSignup) []disc
 }
 
 // premadeActionRow is the post's final button row: "Un-Sign" (any claimant
-// releases their slot) and "Edit run" (gated to the run's creator / team
-// owner-editor in the handler). Shared by the specific and simple component
-// layouts.
+// releases their slot), "Edit run", and "Delete run" (both gated to the run's
+// creator / team owner-editor in their handlers — Discord can't hide a button
+// per-user on a shared post, so non-editors get a private rejection instead).
+// Shared by the specific and simple component layouts.
 func premadeActionRow() discordgo.MessageComponent {
 	return discordgo.ActionsRow{Components: []discordgo.MessageComponent{
 		discordgo.Button{
@@ -898,6 +902,11 @@ func premadeActionRow() discordgo.MessageComponent {
 			Label:    "Edit run",
 			Style:    discordgo.PrimaryButton,
 			CustomID: premadeEditID,
+		},
+		discordgo.Button{
+			Label:    "Delete run",
+			Style:    discordgo.DangerButton,
+			CustomID: premadeDeleteID,
 		},
 	}}
 }
