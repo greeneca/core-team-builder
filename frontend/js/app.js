@@ -399,8 +399,20 @@
       renderPresence();
       return;
     }
-    // A change event. Ignore the brief echo of our own just-saved write.
-    if (Date.now() < localSaveQuietUntil) return;
+    // A change event — possibly the echo of our own just-saved write. While a
+    // local-save quiet window is active we avoid reloading on that echo, but we
+    // must NOT drop a collaborator's change: defer the reload until just after
+    // the window instead of discarding it (otherwise an edit another user makes
+    // while we're actively saving would be lost, since markLocalSaved keeps the
+    // window refreshed for the whole editing session). runLiveReloadIfIdle still
+    // gates on isBusyEditing so we never interrupt in-progress typing.
+    const quietLeft = localSaveQuietUntil - Date.now();
+    if (quietLeft > 0) {
+      liveReloadQueued = true;
+      clearTimeout(liveReloadTimer);
+      liveReloadTimer = setTimeout(runLiveReloadIfIdle, quietLeft + 50);
+      return;
+    }
     scheduleLiveReload();
   }
 
