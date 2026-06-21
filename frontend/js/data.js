@@ -910,9 +910,9 @@ const BUFFS = [
     sources: { skillLines: ["draconic_power"], classes: ["dragonknight"] } },
   // Courage
   { value: "major_courage", label: "Major Courage", desc: "Increases Weapon and Spell Damage.",
-    sources: { gear: ["perfected_olorime", "vestment_of_olorime", "spell_power_cure"], skills: ["ferocious_roar"] } },
+    sources: { gear: ["vestment_of_olorime", "spell_power_cure"], skills: ["ferocious_roar"] } },
   { value: "minor_courage", label: "Minor Courage", desc: "Increases Weapon and Spell Damage.",
-    sources: { gear: ["claw_of_yolnahkriin", "perfected_claw_of_yolnahkriin", "magma_incarnate", "pangrit_denmother", "phoenix_moth_theurge", "crusader", "fledglings_nest"], skills: ["arcanists_domain", "reconstructive_domain", "zenas_empowering_disc", "blood_of_the_elder_dragon", "pack_leader"] } },
+    sources: { gear: ["claw_of_yolnahkriin", "magma_incarnate", "pangrit_denmother", "phoenix_moth_theurge", "crusader", "fledglings_nest"], skills: ["arcanists_domain", "reconstructive_domain", "zenas_empowering_disc", "blood_of_the_elder_dragon", "pack_leader"] } },
   // Cowardice (enemy debuff: −Weapon/Spell Damage, so the whole group benefits).
   // Tracked from reliable, non-random applicators — Nightblade fears, Necromancer
   // bone totems, the Dragonknight chains, the Werewolf roar, and dedicated sets.
@@ -937,7 +937,7 @@ const BUFFS = [
   // Major Heroism (group Ultimate generation): Warden Bountiful Harvest mastery
   // plus the usual support sets.
   { value: "major_heroism", label: "Major Heroism", desc: "Grants the group 3 Ultimate every 1.5s.",
-    sources: { masteries: ["bountiful_harvest"], gear: ["drakes_rush", "transformative_hope", "perfected_transformative_hope", "heroic_unity"] } },
+    sources: { masteries: ["bountiful_harvest"], gear: ["drakes_rush", "transformative_hope", "heroic_unity"] } },
   // Minor Heroism shared to healed allies by the Fire/Hearth heals and to allies
   // by Reawakened Hierophant (2 Crux).
   { value: "minor_heroism", label: "Minor Heroism", desc: "Grants the group Ultimate over time.",
@@ -974,7 +974,7 @@ const BUFFS = [
     sources: { skillLines: ["assassination"], classes: ["nightblade"] } },
   // Slayer
   { value: "major_slayer", label: "Major Slayer", desc: "Increases damage to Dungeon/Trial monsters.",
-    sources: { gear: ["master_architect", "roaring_opportunist", "perfected_roaring_opportunist", "war_machine"] } },
+    sources: { gear: ["master_architect", "roaring_opportunist", "war_machine"] } },
   // Toughness: shared to the group by the Warden Green Balance passive.
   { value: "minor_toughness", label: "Minor Toughness", desc: "Increases group Max Health by 10%.",
     sources: { skillLines: ["green_balance"], classes: ["warden"] } },
@@ -1193,7 +1193,7 @@ const CRIT_GROUP_SOURCES = [
   // Major Force (+20% crit dmg) shared with the whole group. Saxhleel Champion
   // and Grisly Gourmet grant it to allies; Aggressive Horn and Light's Champion
   // (skills) buff the group.
-  { value: "major_force", label: "Major Force", pct: 20, detect: { gear: ["saxhleel_champion", "perfected_saxhleel_champion", "grisly_gourmet"], skills: ["aggressive_horn", "lights_champion"], masteries: ["ink_scribes_verve"] } },
+  { value: "major_force", label: "Major Force", pct: 20, detect: { gear: ["saxhleel_champion", "grisly_gourmet"], skills: ["aggressive_horn", "lights_champion"], masteries: ["ink_scribes_verve"] } },
   // Minor Force (+10% crit dmg) applied to group members by these sets (the
   // wearer of Grave Inevitability gets Major Force instead, but its grouped
   // allies get Minor Force), plus the Werewolf Feeding Frenzy synergy (Roar
@@ -1201,7 +1201,7 @@ const CRIT_GROUP_SOURCES = [
   // (Velothi, Beast Trap, Accelerate, Stalwart Guard) lives in the self list and
   // is deduped per-player when the team already provides this group-wide.
   { value: "minor_force", label: "Minor Force", pct: 10, detect: { gear: ["twilight_remedy", "phoenix_moth_theurge", "grave_inevitability"], skills: ["roar", "ferocious_roar", "deafening_roar"] } },
-  { value: "lucent_echoes", label: "Lucent Echoes", pct: 11, detect: { gear: ["lucent_echoes", "perfected_lucent_echoes"] } },
+  { value: "lucent_echoes", label: "Lucent Echoes", pct: 11, detect: { gear: ["lucent_echoes"] } },
   // Minor Brittle (+10% crit dmg taken) is an enemy debuff: Rune of the
   // Colorless Pool and Glittering Goad both apply it to the target. (Baron
   // Zaudrus was previously listed here but only grants Ultimate, not Brittle.)
@@ -1291,14 +1291,13 @@ const CRIT_SELF_SOURCES = [
   // bonus (Back-Alley requires an active food buff — effectively always up in
   // PvE). True-Sworn Fury and Mora Scribe's Thesis scale with combat/buff state;
   // we model their baselines (True-Sworn's unscaled 4%; Mora Scribe's at its 12%
-  // Minor-Buff cap). Both regular and Perfected Mora Scribe's Thesis grant the
-  // same crit bonus. Malacath's Band of Brutality is a net negative — it trades
+  // Minor-Buff cap). Malacath's Band of Brutality is a net negative — it trades
   // 50% Critical Damage for raw damage — so its pct is negative and lowers the
   // player's total. All five are one-line value edits if the assumptions change.
   { value: "orders_wrath", label: "Order's Wrath", pct: 8, detect: { gear: ["orders_wrath"] } },
   { value: "back_alley_gourmand", label: "Back-Alley Gourmand (food)", pct: 13, detect: { gear: ["back_alley_gourmand"] } },
   { value: "true_sworn_fury", label: "True-Sworn Fury", pct: 4, detect: { gear: ["true_sworn_fury"] } },
-  { value: "mora_scribes_thesis", label: "Mora Scribe's Thesis (12 Minor Buffs)", pct: 12, detect: { gear: ["mora_scribes_thesis", "perfected_mora_scribes_thesis"] } },
+  { value: "mora_scribes_thesis", label: "Mora Scribe's Thesis (12 Minor Buffs)", pct: 12, detect: { gear: ["mora_scribes_thesis"] } },
   { value: "malacaths_band_of_brutality", label: "Malacath's Band of Brutality", pct: -50, detect: { gear: ["malacaths_band_of_brutality"] } },
 ];
 
