@@ -529,6 +529,13 @@ column; the `User` JSON model hides it (`json:"-"`).
   - `signup` — posts a one-off **pre-made trial run** (see "Pre-made trial runs"
     below). Implemented in `backend/cmd/bot/premade.go`. (Formerly named
     `premade`; the internal `premade_*` custom IDs and tables are unchanged.)
+  - `roll` — posts a **randomly chosen ESO trial** as a boxed embed (trial name +
+    its bosses) with a single **Re-roll** button that re-picks in place. The post
+    is public, but **only the poster can re-roll**: their Discord ID is encoded in
+    the button's custom ID (`roll_reroll:<id>`) and checked on press (others get
+    an ephemeral notice). The pool is every group in `models.EncounterNameGroups`
+    except `General`. Needs no team binding. Implemented in
+    `backend/cmd/bot/roll.go` (`handleRoll` / `handleRollReroll`).
   - `login` — posts a public message linking to the web app (`APP_BASE_URL`).
     Replies ephemerally if `APP_BASE_URL` is unconfigured (`handleLogin`).
   - `status` / `unset` — show / remove the channel's team binding.

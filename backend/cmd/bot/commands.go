@@ -114,6 +114,11 @@ var coreTeamCommand = &discordgo.ApplicationCommand{
 		},
 		{
 			Type:        discordgo.ApplicationCommandOptionSubCommand,
+			Name:        "roll",
+			Description: "Pick a random ESO trial (includes a re-roll button)",
+		},
+		{
+			Type:        discordgo.ApplicationCommandOptionSubCommand,
 			Name:        "login",
 			Description: "Post a link to the Core Team Builder web app",
 		},
@@ -161,6 +166,8 @@ func (b *bot) onCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		b.handlePremade(s, i)
 	case "publish":
 		b.handlePublish(s, i)
+	case "roll":
+		b.handleRoll(s, i)
 	case "timezone":
 		b.handleTimezone(s, i)
 	case "login":
@@ -182,6 +189,10 @@ func (b *bot) onComponent(s *discordgo.Session, i *discordgo.InteractionCreate) 
 	}
 	if strings.HasPrefix(id, premadePrefix) {
 		b.onPremadeComponent(s, i)
+		return
+	}
+	if strings.HasPrefix(id, rollRerollPrefix) {
+		b.handleRollReroll(s, i)
 		return
 	}
 	switch id {
