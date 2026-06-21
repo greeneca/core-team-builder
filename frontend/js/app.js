@@ -333,6 +333,12 @@
   let presenceUsers = [];
   let liveReloadTimer = null;
   let liveReloadQueued = false;
+  // Timestamp of the user's last real edit (keystroke/commit) inside the detail
+  // view. isBusyEditing uses it to tell "actively typing" from a field that
+  // merely holds focus, so a collaborator's change isn't blocked forever just
+  // because some field is focused.
+  let lastDetailInputAt = 0;
+  const ACTIVE_EDIT_GRACE_MS = 4000;
 
   function openEventStream(teamId) {
     closeEventStream();
@@ -424,12 +430,38 @@
     if (autosaveTimer || pendingScopes.size) return true;
     if (dirtyMeta || dirtyPlayerSlots.size || dirtyLoadoutSlots.size) return true;
     if (isGroupingsInteracting()) return true;
+    // A focused field only counts as "busy" while the user is *actively* editing
+    // it — i.e. they typed or changed something within the last few seconds.
+    // Merely holding focus (e.g. a combobox that re-focuses itself after a
+    // selection, or a field clicked into and left) must not block live updates
+    // indefinitely, otherwise a collaborator's edits never appear while any field
+    // is focused. Active typing keeps refreshing lastDetailInputAt below, so
+    // in-progress (not-yet-saved) text is still protected from a re-render.
     const a = document.activeElement;
-    if (a && detailView.contains(a) && a.matches("input, select, textarea, [contenteditable]")) {
+    if (
+      a &&
+      detailView.contains(a) &&
+      a.matches("input, select, textarea, [contenteditable]") &&
+      Date.now() - lastDetailInputAt < ACTIVE_EDIT_GRACE_MS
+    ) {
       return true;
     }
     return false;
   }
+
+  // Record genuine user edit activity (typing or committing a field) in the
+  // detail view. Capture phase so it runs regardless of stopPropagation;
+  // programmatic value changes during a live re-render don't fire these events,
+  // so they never falsely mark the user as busy.
+  ["input", "change"].forEach((evt) =>
+    detailView.addEventListener(
+      evt,
+      () => {
+        lastDetailInputAt = Date.now();
+      },
+      true
+    )
+  );
 
   function scheduleLiveReload() {
     liveReloadQueued = true;
@@ -1391,17 +1423,20 @@
 
   // Flush any pending debounced autosave immediately. Returns a promise that
   // resolves once the in-flight saves complete, so callers can await it before
-  // doing something that would otherwise clobber the unsaved changes. The team
-  // (roster) scope is saved before the encounter (loadout) scope so a change
-  // touching both (e.g. werewolf) settles in a consistent order.
+  // doing something that would otherwise clobber the unsaved changes. The
+  // encounter (loadout) scope is saved BEFORE the team (roster) scope: a player
+  // save reconciles werewolf skills into the loadout rows, which would bump the
+  // loadout's optimistic-concurrency token and make the loadout save 409 against
+  // its own stale token. Saving the loadout first means that reconcile sees the
+  // already-saved skills and becomes a no-op (see reconcileWerewolfSkillsTx).
   function flushAutosave() {
     clearTimeout(autosaveTimer);
     autosaveTimer = null;
     const scopes = new Set(pendingScopes);
     pendingScopes.clear();
     let chain = Promise.resolve();
-    if (scopes.has("team")) chain = chain.then(() => saveAll());
     if (scopes.has("encounter")) chain = chain.then(() => saveLoadouts());
+    if (scopes.has("team")) chain = chain.then(() => saveAll());
     return chain.then(() => {
       // A live refresh deferred while the user was editing can run now.
       if (liveReloadQueued) scheduleLiveReload();
@@ -2759,7 +2794,11 @@
     dirtyLoadoutSlots.add(dn);
     setSaveStatus("team", "saving");
     setSaveStatus("encounter", "saving");
-    Promise.resolve(saveAll()).then(() => saveLoadouts());
+    // Loadout first, then the player: a player save reconciles werewolf skills
+    // into the loadout rows and would bump the loadout token, 409-ing the loadout
+    // save against its own stale token. Saving the loadout first makes that
+    // reconcile a no-op (see reconcileWerewolfSkillsTx / flushAutosave).
+    Promise.resolve(saveLoadouts()).then(() => saveAll());
   }
 
   // Reset a roster slot to an empty build: clears name, Discord handle,

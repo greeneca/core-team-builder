@@ -638,6 +638,12 @@ func (s *TeamStore) Save(ctx context.Context, teamID int64, name string, days []
 // when off, it strips every WerewolfSkills entry. Runs in the given transaction.
 func reconcileWerewolfSkillsTx(ctx context.Context, tx pgx.Tx, teamID int64, slot int, werewolf bool) error {
 	if werewolf {
+		// Only touch rows actually missing a default skill. The trailing
+		// `NOT (el.skills @> $1)` guard means a slot that already has every
+		// default is left untouched, so we don't bump its updated_at (the
+		// loadout's optimistic-concurrency token) on an unrelated player save —
+		// otherwise a follow-up loadout save for the same slot (e.g. the "copy
+		// player" flow) would spuriously 409 against its own just-stale token.
 		const addWW = `
 			UPDATE encounter_loadouts el
 			SET skills = el.skills || COALESCE((
@@ -646,10 +652,14 @@ func reconcileWerewolfSkillsTx(ctx context.Context, tx pgx.Tx, teamID int64, slo
 			    WHERE NOT (k = ANY(el.skills))
 			), '{}')
 			FROM encounters e
-			WHERE el.encounter_id = e.id AND e.team_id = $2 AND el.slot = $3`
+			WHERE el.encounter_id = e.id AND e.team_id = $2 AND el.slot = $3
+			  AND NOT (el.skills @> $1::text[])`
 		_, err := tx.Exec(ctx, addWW, WerewolfDefaultSkills, teamID, slot)
 		return err
 	}
+	// Only touch rows that still contain at least one werewolf skill (array
+	// overlap). A slot with no werewolf skills is left untouched so its
+	// updated_at token is preserved across an unrelated player save (see above).
 	const removeWW = `
 		UPDATE encounter_loadouts el
 		SET skills = COALESCE((
@@ -658,7 +668,8 @@ func reconcileWerewolfSkillsTx(ctx context.Context, tx pgx.Tx, teamID int64, slo
 		    WHERE NOT (s = ANY($1::text[]))
 		), '{}')
 		FROM encounters e
-		WHERE el.encounter_id = e.id AND e.team_id = $2 AND el.slot = $3`
+		WHERE el.encounter_id = e.id AND e.team_id = $2 AND el.slot = $3
+		  AND el.skills && $1::text[]`
 	_, err := tx.Exec(ctx, removeWW, WerewolfSkills, teamID, slot)
 	return err
 }
