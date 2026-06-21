@@ -138,6 +138,26 @@ server {
         proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
         proxy_set_header   X-Forwarded-Proto $scheme;
     }
+
+    # Live-collaboration Server-Sent Events. This is a long-lived streamed
+    # response: the upstream MUST NOT buffer it, or clients get no live updates
+    # until the connection closes (the classic "works locally, not in prod"
+    # symptom). The project nginx re-emits `X-Accel-Buffering: no`, which nginx
+    # honors automatically — but set it explicitly here too so the behavior does
+    # not depend on that header, and so gzip never buffers the stream.
+    location ~ ^/api/teams/[0-9]+/events$ {
+        proxy_pass         http://127.0.0.1:8081;   # = FRONTEND_PORT
+        proxy_http_version 1.1;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_set_header   Connection        "";
+        proxy_buffering     off;   # the critical setting for SSE
+        proxy_cache         off;
+        gzip                off;   # gzip would buffer the stream
+        proxy_read_timeout  1h;    # keepalive pings every 25s keep it open
+    }
 }
 ```
 
