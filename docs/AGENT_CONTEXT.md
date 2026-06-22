@@ -524,7 +524,11 @@ column; the `User` JSON model hides it (`json:"-"`).
     viewer's own timezone — no more per-tz list), the roster grouped by role with
     abbreviated gear (Markdown lines, one player each, RSVP icon beside the name;
     each role header shows a `(filled/total)` count, where a slot is "filled" when
-    it has an assigned Discord handle or an open slot has been filled),
+    it has an assigned Discord handle or an open slot has been filled). Each
+    player's name is the **resolved Discord display name** for their handle:
+    mention/ID handles are looked up live (guild nick → global name → username,
+    cached in `handleNameCache`, resolved by `resolveRosterNames`), and plain
+    `@username` text handles are shown as the username (minus the `@`).
     a **Fill list** section, and groupings. Carries a button row
     (**✅ Coming**, **❌ Not coming** (RSVP), **Get My Build Details**) plus a
     **signup dropdown** (`post_fill_select`) whenever the roster has any open
@@ -552,8 +556,11 @@ column; the `User` JSON model hides it (`json:"-"`).
   - `status` / `unset` — show / remove the channel's team binding.
   - **Get My Build Details** button (`get_my_details`) → matches the presser to a
     roster slot (by Discord ID/mention in `players.discord_handle`, else
-    case-insensitive username/global name) and DMs them their build as a **boxed
-    embed** (title + description) with underlined per-data-type headers
+    case-insensitive username/global name); if no handle matches, it falls back to
+    the open slot the user signed up to fill on this post (`fillSignupPlayer` over
+    `discord_post_fills`), so fillers get their build too. Users on the general
+    fill list (no specific slot) get an ephemeral note that there's no build to
+    send yet. DMs them their build as a **boxed embed** (title + description) with underlined per-data-type headers
     (`discordfmt.PlayerDetail` returns `(title, description)`); falls back to an
     ephemeral embed if DMs are closed. Order: Player, Class & Race, Build, then one
     section per encounter (the encounter-name header is omitted when there's only

@@ -37,9 +37,13 @@ import (
 // "fill list" (backups not tied to a specific slot), rendered in their own
 // section.
 //
+// names maps a roster slot to the player's resolved Discord display name (from
+// matching their stored handle); when present it replaces the raw handle in the
+// roster line. Slots without an entry fall back to the slot name.
+//
 // The self-required penetration/crit and missing self-buffs now live in the
 // per-player build-details DM (see PlayerDetail), not on this post.
-func BuildPost(team *models.Team, primary *models.Encounter, groupings []models.Grouping, marks map[int]string, fillBySlot map[int]string, fillList []string) (title, description string) {
+func BuildPost(team *models.Team, primary *models.Encounter, groupings []models.Grouping, marks map[int]string, fillBySlot map[int]string, fillList []string, names map[int]string) (title, description string) {
 	title = team.Name
 
 	var L []string
@@ -54,7 +58,7 @@ func BuildPost(team *models.Team, primary *models.Encounter, groupings []models.
 
 	// Roster grouped by role. Rendered as Markdown (not a code block) so each
 	// player's RSVP status shows as a ✅/❌/▫️ icon beside their name.
-	if rl := rosterLines(team, primary, marks, fillBySlot); len(rl) > 0 {
+	if rl := rosterLines(team, primary, marks, fillBySlot, names); len(rl) > 0 {
 		if len(L) > 0 {
 			L = append(L, "")
 		}
@@ -315,7 +319,11 @@ func roleCountSuffix(filled, total int) string {
 // When an open slot (no Discord handle) has a fill signup in fillBySlot, that
 // player's name segment shows the filler's display name with a `fill` tag and
 // the icon is forced to ✅ (signing up to fill counts as coming).
-func rosterLines(team *models.Team, primary *models.Encounter, marks map[int]string, fillBySlot map[int]string) []string {
+//
+// names overrides the displayed name for a slot with the player's resolved
+// Discord display name (so the roster shows the Discord username instead of the
+// raw stored handle).
+func rosterLines(team *models.Team, primary *models.Encounter, marks map[int]string, fillBySlot map[int]string, names map[int]string) []string {
 	bySlot := map[int]models.Loadout{}
 	if primary != nil {
 		for _, lo := range primary.Loadouts {
@@ -334,6 +342,10 @@ func rosterLines(team *models.Team, primary *models.Encounter, marks map[int]str
 	rows := make([]row, 0, len(players))
 	for _, p := range players {
 		name := who(p)
+		// Prefer the resolved Discord display name over the raw stored handle.
+		if n := strings.TrimSpace(names[p.Slot]); n != "" {
+			name = n
+		}
 		icon := rsvpIcon(marks[p.Slot])
 		filler := strings.TrimSpace(fillBySlot[p.Slot])
 		if filler != "" {

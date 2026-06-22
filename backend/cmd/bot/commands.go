@@ -25,6 +25,9 @@ type bot struct {
 	// appBaseURL is the public base URL of the web app (APP_BASE_URL), used to
 	// build sign-in links the bot sends to users. Empty when unconfigured.
 	appBaseURL string
+	// nameCache memoizes resolved Discord display names (by guild+user) so
+	// re-rendering a post on every RSVP/fill press doesn't re-hit the API.
+	nameCache *handleNameCache
 }
 
 // Discord embed limits (and the post's accent color, Discord blurple).
@@ -581,7 +584,8 @@ func (b *bot) handlePost(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	if user := invokingUser(i); user != nil {
 		footer = postedByPrefix + displayName(user)
 	}
-	embed := buildPostEmbed(team, primary, gr, nil, nil, footer)
+	names := b.resolveRosterNames(s, i.GuildID, team)
+	embed := buildPostEmbed(team, primary, gr, nil, nil, names, footer)
 	err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
@@ -598,9 +602,10 @@ func (b *bot) handlePost(s *discordgo.Session, i *discordgo.InteractionCreate) {
 // RSVPs, and the current fill signups. Each responding roster member gets a
 // ✅/❌ icon beside their name; each filled open slot shows the filler's name
 // with a `fill` tag and an automatic ✅, and fill-list backups get their own
-// section. footerText, when non-empty, is shown as the embed footer (used to note
-// who posted). Pass nil rsvps/fills for the initial post.
-func buildPostEmbed(team *models.Team, primary *models.Encounter, gr []models.Grouping, rsvps []models.RSVP, fills []models.PostFill, footerText string) *discordgo.MessageEmbed {
+// section. names maps a slot to the player's resolved Discord display name (shown
+// instead of the raw handle). footerText, when non-empty, is shown as the embed
+// footer (used to note who posted). Pass nil rsvps/fills for the initial post.
+func buildPostEmbed(team *models.Team, primary *models.Encounter, gr []models.Grouping, rsvps []models.RSVP, fills []models.PostFill, names map[int]string, footerText string) *discordgo.MessageEmbed {
 	fillBySlot := map[int]string{}
 	var fillList []string
 	for _, f := range fills {
@@ -614,7 +619,7 @@ func buildPostEmbed(team *models.Team, primary *models.Encounter, gr []models.Gr
 			fillBySlot[f.Slot] = name
 		}
 	}
-	title, desc := discordfmt.BuildPost(team, primary, gr, rsvpMarks(team, rsvps), fillBySlot, fillList)
+	title, desc := discordfmt.BuildPost(team, primary, gr, rsvpMarks(team, rsvps), fillBySlot, fillList, names)
 	embed := &discordgo.MessageEmbed{
 		Title:       truncate(title, embedTitleLimit),
 		Description: truncate(desc, embedDescriptionLimit),
@@ -848,9 +853,10 @@ func (b *bot) renderPostUpdate(ctx context.Context, s *discordgo.Session, i *dis
 	if err != nil {
 		return err
 	}
+	names := b.resolveRosterNames(s, i.GuildID, team)
 	// Preserve the "Posted by" footer set on the original post (RSVP/fill updates
 	// re-render the embed from scratch, which would otherwise drop it).
-	embed := buildPostEmbed(team, primary, gr, rsvps, fills, existingFooterText(i.Message))
+	embed := buildPostEmbed(team, primary, gr, rsvps, fills, names, existingFooterText(i.Message))
 	if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseUpdateMessage,
 		Data: &discordgo.InteractionResponseData{
@@ -915,7 +921,20 @@ func (b *bot) handleGetMyDetails(s *discordgo.Session, i *discordgo.InteractionC
 
 	player, ok := matchPlayer(team, user)
 	if !ok {
-		ephemeral(s, i, "You're not on this trial — no roster slot matches your Discord handle. Ask your raid lead to set your handle to `"+displayName(user)+"`.")
+		// A user who signed up to fill an open slot via the dropdown has no
+		// roster handle, so match them to the slot they filled instead. Someone
+		// on the general fill list isn't tied to a slot, so there's no build.
+		p, found, onFillList := b.fillSignupPlayer(ctx, i, team, user)
+		switch {
+		case found:
+			player, ok = p, true
+		case onFillList:
+			ephemeral(s, i, "You're on the fill list, which isn't tied to a specific slot — so there's no build to send yet. Sign up for an open slot to get its build details.")
+			return
+		}
+	}
+	if !ok {
+		ephemeral(s, i, "You're not on this trial — no roster slot matches your Discord handle, and you haven't signed up to fill an open slot. Ask your raid lead to set your handle to `"+displayName(user)+"`, or use the signup dropdown to fill an open slot.")
 		return
 	}
 
@@ -944,6 +963,35 @@ func (b *bot) handleGetMyDetails(s *discordgo.Session, i *discordgo.InteractionC
 	if err != nil {
 		log.Printf("details: ephemeral fallback: %v", err)
 	}
+}
+
+// fillSignupPlayer resolves the user's signup on this post (via the signup
+// dropdown). When they filled an open slot, it returns that slot's roster player
+// (found=true). When they're on the general fill list (no specific slot), it
+// returns onFillList=true so callers can explain there's no build to send.
+func (b *bot) fillSignupPlayer(ctx context.Context, i *discordgo.InteractionCreate, team *models.Team, user *discordgo.User) (player models.Player, found, onFillList bool) {
+	if i.Message == nil {
+		return models.Player{}, false, false
+	}
+	fills, err := b.discord.ListFills(ctx, i.Message.ID)
+	if err != nil {
+		log.Printf("details: list fills: %v", err)
+		return models.Player{}, false, false
+	}
+	for _, f := range fills {
+		if f.DiscordUserID != user.ID {
+			continue
+		}
+		if f.Slot == models.PostFillList {
+			return models.Player{}, false, true
+		}
+		for _, p := range team.Players {
+			if p.Slot == f.Slot {
+				return p, true, false
+			}
+		}
+	}
+	return models.Player{}, false, false
 }
 
 // --- /coreteam login ---

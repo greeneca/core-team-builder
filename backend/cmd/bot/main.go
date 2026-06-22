@@ -55,6 +55,7 @@ func run() error {
 		discord:    models.NewDiscordStore(pool),
 		premade:    models.NewPremadeStore(pool),
 		appBaseURL: cfg.AppBaseURL,
+		nameCache:  newHandleNameCache(),
 	}
 
 	session, err := discordgo.New("Bot " + cfg.Discord.BotToken)
