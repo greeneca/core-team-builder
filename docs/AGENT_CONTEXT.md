@@ -505,8 +505,11 @@ column; the `User` JSON model hides it (`json:"-"`).
 - **What it is** (`027_discord.sql`): a separate Go binary (`backend/cmd/bot`,
   built into the same image and run via the `bot` compose **profile**) that
   connects out to the Discord gateway with `bwmarrin/discordgo`. It shares the
-  database (same stores) but exposes **no inbound port**. It registers one slash
-  command, `/coreteam`, with subcommands:
+  database (same stores) but exposes **no inbound port**. It registers the
+  `/coreteam` slash command (plus two top-level aliases `/post` and `/signup`
+  that dispatch to the same handlers as `/coreteam post` and `/coreteam signup`
+  — see `botCommands` in `commands.go` and the `data.Name` switch in
+  `onCommand`). `/coreteam` subcommands:
   - `link code:<code>` — links the invoking Discord user to an app account using
     a one-time code generated in the web UI.
   - `setup` — (Manage Channels) binds the current channel to one of the linked
@@ -681,15 +684,26 @@ the `pre_made` flag on (see "Pre-made trial run" under Teams). Tables in
 - **Scheduler** (`runScheduler`, started as a goroutine from `cmd/bot/main.go`,
   tied to the shutdown context) — the bot's **only** time-based worker. It polls
   every `schedulerInterval` (60s, plus an immediate pass on startup):
-  - **15 min before** (`DueThreadRuns`): creates a thread off the post
-    (`MessageThreadStartComplex`) and posts a message tagging every signup;
-    `MarkThreadStarted`.
+  - **At post time** (`finishPremadeDM` → `createRunThread`): a discussion thread
+    is created off the post (`MessageThreadStartComplex`) with an intro message
+    inviting players to chat; the id is stored via `SetRunThread` (leaving
+    `thread_started_at` NULL).
+  - **15 min before** (`DueThreadRuns`): posts a message in that thread pinging
+    every signup; `MarkThreadStarted` (records the ping ran). If the thread is
+    somehow missing (older run, or post-time creation failed) it's created here as
+    a fallback.
   - **2 h after** (`DueCleanupRuns`): deletes the thread + post; `MarkCleanedUp`.
   Both are tracked by timestamp columns on `premade_runs`, so each fires **exactly
   once** and **catches up** if the bot was offline at the trigger time (cleanups
   are processed before threads, so a long-offline finished run is removed rather
-  than getting a late thread). The bot needs **Create Public Threads / Manage
-  Threads / Manage Messages** permissions for these (see `docs/DEPLOYMENT.md`).
+  than getting a late thread). Thread deletion (both here and the manual **Delete
+  run** button) uses `threadCleanupID`: a thread is started *off the post*, so its
+  channel id equals the post's message id — when `thread_id` wasn't recorded but a
+  start was attempted (`thread_started_at` set), cleanup falls back to the message
+  id so an out-of-band thread (bot restarted mid-start, or a channel that
+  auto-creates threads) is still removed rather than orphaned. The bot needs
+  **Create Public Threads / Manage Threads / Manage Messages** permissions for
+  these (see `docs/DEPLOYMENT.md`).
 
 ## Member pool / recruitment (current)
 

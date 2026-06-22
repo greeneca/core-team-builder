@@ -141,8 +141,8 @@ func (b *bot) handlePremadeDelete(s *discordgo.Session, i *discordgo.Interaction
 	// Acknowledge privately first (the message this interaction came from is
 	// about to be deleted), then tear down the post/thread and mark it done.
 	ephemeral(s, i, "Deleted this run.")
-	if run.ThreadID != "" {
-		if _, err := s.ChannelDelete(run.ThreadID); err != nil {
+	if threadID := threadCleanupID(run); threadID != "" {
+		if _, err := s.ChannelDelete(threadID); err != nil {
 			log.Printf("premade delete: delete thread (run %d): %v", run.ID, err)
 		}
 	}

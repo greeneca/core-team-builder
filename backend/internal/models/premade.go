@@ -279,10 +279,11 @@ func (s *PremadeStore) PromoteToSlot(ctx context.Context, runID int64, slot int,
 	return &e, true, nil
 }
 
-// DueThreadRuns returns posted runs whose thread should be started now (within
-// 15 minutes of the scheduled time) but hasn't been, and that aren't past
-// cleanup. Catch-up safe: if the bot was offline, these are returned as soon as
-// it polls again.
+// DueThreadRuns returns posted runs whose signups should be pinged now (within
+// 15 minutes of the scheduled time) but haven't been, and that aren't past
+// cleanup. thread_started_at marks the ping as done (the discussion thread
+// itself is created earlier, at post time). Catch-up safe: if the bot was
+// offline, these are returned as soon as it polls again.
 func (s *PremadeStore) DueThreadRuns(ctx context.Context, now time.Time) ([]PremadeRun, error) {
 	const q = `
 		SELECT ` + premadeRunCols + `
@@ -325,7 +326,17 @@ func (s *PremadeStore) queryRuns(ctx context.Context, q string, args ...any) ([]
 	return out, rows.Err()
 }
 
-// MarkThreadStarted records that the run's thread was created.
+// SetRunThread records the run's discussion thread id without marking the
+// 15-minute signup ping as done (thread_started_at stays NULL). The thread is
+// created when the run is first posted; MarkThreadStarted later records that the
+// signups were pinged.
+func (s *PremadeStore) SetRunThread(ctx context.Context, runID int64, threadID string) error {
+	_, err := s.pool.Exec(ctx, `UPDATE premade_runs SET thread_id = $1 WHERE id = $2`, threadID, runID)
+	return err
+}
+
+// MarkThreadStarted records that the run's signups were pinged in its thread
+// (the 15-minute job), storing the thread id used.
 func (s *PremadeStore) MarkThreadStarted(ctx context.Context, runID int64, threadID string) error {
 	_, err := s.pool.Exec(ctx, `UPDATE premade_runs SET thread_id = $1, thread_started_at = now() WHERE id = $2`, threadID, runID)
 	return err

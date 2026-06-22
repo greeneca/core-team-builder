@@ -451,8 +451,12 @@ func (b *bot) finishPremadeDM(ctx context.Context, s *discordgo.Session, sess *m
 	if err := b.premade.SetRunMessage(ctx, run.ID, msg.ID); err != nil {
 		log.Printf("premade dm: set message id: %v", err)
 	}
+	// Create the discussion thread now so players can talk about the trial right
+	// away; the signup ping is still sent ~15 min before start (tagRunSignups).
+	run.MessageID = msg.ID
+	b.createRunThread(ctx, s, run)
 	_ = b.premade.DeleteSession(ctx, sess.DiscordUserID)
-	b.dmSend(s, sess.DMChannelID, fmt.Sprintf("Posted **%s** for <t:%d:F>. Players can claim slots from the post now.", run.Title, run.ScheduledAt.Unix()))
+	b.dmSend(s, sess.DMChannelID, fmt.Sprintf("Posted **%s** for <t:%d:F>. Players can claim slots from the post now, and discuss in its thread.", run.Title, run.ScheduledAt.Unix()))
 }
 
 // dmSend sends a plain DM message, logging (not surfacing) any failure.

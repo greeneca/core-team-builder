@@ -79,14 +79,16 @@ func run() error {
 	if appID == "" {
 		appID = session.State.User.ID
 	}
-	if _, err := session.ApplicationCommandCreate(appID, cfg.Discord.GuildID, coreTeamCommand); err != nil {
-		return err
+	for _, cmd := range botCommands {
+		if _, err := session.ApplicationCommandCreate(appID, cfg.Discord.GuildID, cmd); err != nil {
+			return err
+		}
 	}
 	scope := "globally"
 	if cfg.Discord.GuildID != "" {
 		scope = "to guild " + cfg.Discord.GuildID
 	}
-	log.Printf("bot ready as %s; /coreteam registered %s", session.State.User.Username, scope)
+	log.Printf("bot ready as %s; /coreteam, /post, /signup registered %s", session.State.User.Username, scope)
 
 	// Background loop for pre-made trial runs (thread 15 min before, cleanup 2 h
 	// after). Stops when ctx is cancelled on shutdown.

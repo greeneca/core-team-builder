@@ -20,10 +20,11 @@ const schedulerInterval = 60 * time.Second
 const premadeThreadAutoArchive = 1440
 
 // runScheduler runs the pre-made-run background loop until ctx is cancelled. It
-// is the bot's only time-based worker: it creates the run thread ~15 minutes
-// before the scheduled start (tagging everyone who signed up) and deletes the
-// post + thread ~2 hours after. Both actions are tracked in the DB so they fire
-// exactly once and are caught up after a restart.
+// is the bot's only time-based worker: it pings everyone who signed up in the
+// run's discussion thread ~15 minutes before the scheduled start, and deletes
+// the post + thread ~2 hours after. (The thread itself is created up front when
+// the run is posted — see createRunThread.) Both actions are tracked in the DB
+// so they fire exactly once and are caught up after a restart.
 func (b *bot) runScheduler(ctx context.Context, session *discordgo.Session) {
 	// Run an immediate pass on startup so anything that came due while the bot
 	// was offline is handled right away, then on each tick.
@@ -55,14 +56,14 @@ func (b *bot) schedulerTick(ctx context.Context, session *discordgo.Session) {
 		b.cleanupRun(ctx, session, run)
 	}
 
-	threads, err := b.withTimeout(ctx, func(c context.Context) ([]models.PremadeRun, error) {
+	tags, err := b.withTimeout(ctx, func(c context.Context) ([]models.PremadeRun, error) {
 		return b.premade.DueThreadRuns(c, now)
 	})
 	if err != nil {
-		log.Printf("scheduler: due threads: %v", err)
+		log.Printf("scheduler: due signup tags: %v", err)
 	}
-	for _, run := range threads {
-		b.startRunThread(ctx, session, run)
+	for _, run := range tags {
+		b.tagRunSignups(ctx, session, run)
 	}
 }
 
@@ -74,9 +75,16 @@ func (b *bot) withTimeout(ctx context.Context, fn func(context.Context) ([]model
 	return fn(c)
 }
 
-// startRunThread creates the run's thread, tags everyone who signed up, and
-// records that it ran.
-func (b *bot) startRunThread(ctx context.Context, session *discordgo.Session, run models.PremadeRun) {
+// premadeThreadIntro is posted in a run's discussion thread when the run is
+// first posted, inviting players to chat about the trial. The signup ping is a
+// separate message sent ~15 minutes before the start (see tagRunSignups).
+const premadeThreadIntro = "🗣️ Discuss this trial here — strategy, builds, swaps, and questions. Everyone who signed up will be pinged here about 15 minutes before it starts."
+
+// createRunThread starts the run's discussion thread off its post and posts the
+// intro message, then records the thread id. It's called when the run is first
+// posted so the thread exists immediately; the signup ping happens later via
+// tagRunSignups. Returns the thread id, or "" if the thread couldn't be created.
+func (b *bot) createRunThread(ctx context.Context, session *discordgo.Session, run *models.PremadeRun) string {
 	name := strings.TrimSpace(run.Title)
 	if name == "" {
 		name = "Trial run"
@@ -86,11 +94,36 @@ func (b *bot) startRunThread(ctx context.Context, session *discordgo.Session, ru
 		AutoArchiveDuration: premadeThreadAutoArchive,
 	})
 	if err != nil {
-		// Most likely the post was deleted manually; don't retry forever.
-		log.Printf("scheduler: start thread (run %d): %v", run.ID, err)
+		log.Printf("premade: create thread (run %d): %v", run.ID, err)
+		return ""
+	}
+	if _, err := session.ChannelMessageSend(thread.ID, premadeThreadIntro); err != nil {
+		log.Printf("premade: thread intro (run %d): %v", run.ID, err)
+	}
+	c, cancel := context.WithTimeout(ctx, 10*time.Second)
+	if err := b.premade.SetRunThread(c, run.ID, thread.ID); err != nil {
+		log.Printf("premade: set thread id (run %d): %v", run.ID, err)
+	}
+	cancel()
+	run.ThreadID = thread.ID
+	return thread.ID
+}
+
+// tagRunSignups pings everyone who signed up, in the run's discussion thread,
+// ~15 minutes before the scheduled start, and records that the ping ran. The
+// thread is normally created up front when the run is posted (createRunThread);
+// if it's missing here (an older run, or post-time creation failed) we create it
+// now as a fallback so the ping always lands somewhere.
+func (b *bot) tagRunSignups(ctx context.Context, session *discordgo.Session, run models.PremadeRun) {
+	threadID := run.ThreadID
+	if threadID == "" {
+		threadID = b.createRunThread(ctx, session, &run)
+	}
+	if threadID == "" {
+		// No thread available (e.g. the post was deleted); don't retry forever.
 		c, cancel := context.WithTimeout(ctx, 10*time.Second)
 		if err := b.premade.MarkThreadStarted(c, run.ID, ""); err != nil {
-			log.Printf("scheduler: mark thread started (run %d): %v", run.ID, err)
+			log.Printf("scheduler: mark signups tagged (run %d): %v", run.ID, err)
 		}
 		cancel()
 		return
@@ -103,33 +136,50 @@ func (b *bot) startRunThread(ctx context.Context, session *discordgo.Session, ru
 		log.Printf("scheduler: list signups (run %d): %v", run.ID, err)
 	}
 
-	content := "Starting soon!"
+	content := "Starting soon — no one has signed up yet."
 	if len(signups) > 0 {
 		mentions := make([]string, 0, len(signups))
 		for _, sg := range signups {
 			mentions = append(mentions, "<@"+sg.DiscordUserID+">")
 		}
 		content = "Starting soon — " + strings.Join(mentions, " ")
-	} else {
-		content = "Starting soon — no one has signed up yet."
 	}
-	if _, err := session.ChannelMessageSend(thread.ID, content); err != nil {
+	if _, err := session.ChannelMessageSend(threadID, content); err != nil {
 		log.Printf("scheduler: thread tag (run %d): %v", run.ID, err)
 	}
 
 	c, cancel = context.WithTimeout(ctx, 10*time.Second)
-	if err := b.premade.MarkThreadStarted(c, run.ID, thread.ID); err != nil {
-		log.Printf("scheduler: mark thread started (run %d): %v", run.ID, err)
+	if err := b.premade.MarkThreadStarted(c, run.ID, threadID); err != nil {
+		log.Printf("scheduler: mark signups tagged (run %d): %v", run.ID, err)
 	}
 	cancel()
+}
+
+// threadCleanupID returns the channel id of the post's thread to delete during
+// cleanup, or "" when no thread should exist. A thread started from a message
+// shares that message's id, so when thread_id wasn't recorded we fall back to
+// the message id. This covers threads that exist out-of-band from our stored
+// id — e.g. the bot restarted between creating the thread and persisting its id
+// (the retry then fails and blanks thread_id), or the channel auto-creates
+// threads so our explicit start failed. The fallback is gated on a thread start
+// having been attempted (thread_started_at set) so runs that never had a thread
+// don't get a spurious delete.
+func threadCleanupID(run *models.PremadeRun) string {
+	if run.ThreadID != "" {
+		return run.ThreadID
+	}
+	if run.ThreadStartedAt != nil {
+		return run.MessageID
+	}
+	return ""
 }
 
 // cleanupRun deletes the run's thread and post, then records that cleanup ran.
 // Missing-message/thread errors are tolerated (manual deletion) so the run is
 // still marked done.
 func (b *bot) cleanupRun(ctx context.Context, session *discordgo.Session, run models.PremadeRun) {
-	if run.ThreadID != "" {
-		if _, err := session.ChannelDelete(run.ThreadID); err != nil {
+	if threadID := threadCleanupID(&run); threadID != "" {
+		if _, err := session.ChannelDelete(threadID); err != nil {
 			log.Printf("scheduler: delete thread (run %d): %v", run.ID, err)
 		}
 	}

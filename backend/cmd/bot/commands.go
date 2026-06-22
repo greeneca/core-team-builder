@@ -135,6 +135,23 @@ var coreTeamCommand = &discordgo.ApplicationCommand{
 	},
 }
 
+// postCommand and signupCommand are top-level aliases that map to the same
+// actions as /coreteam post and /coreteam signup, so users can run /post and
+// /signup directly. They carry no options and are dispatched by name in
+// onCommand.
+var postCommand = &discordgo.ApplicationCommand{
+	Name:        "post",
+	Description: "Post this channel's trial overview with a Get my details button",
+}
+
+var signupCommand = &discordgo.ApplicationCommand{
+	Name:        "signup",
+	Description: "Post a scheduled run from one of your pre-made teams (per-slot signups)",
+}
+
+// botCommands is every slash command the bot registers on startup.
+var botCommands = []*discordgo.ApplicationCommand{coreTeamCommand, postCommand, signupCommand}
+
 // onInteraction dispatches every interaction to the right handler.
 func (b *bot) onInteraction(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	switch i.Type {
@@ -149,6 +166,15 @@ func (b *bot) onInteraction(s *discordgo.Session, i *discordgo.InteractionCreate
 
 func (b *bot) onCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	data := i.ApplicationCommandData()
+	// Top-level aliases for the matching /coreteam subcommands.
+	switch data.Name {
+	case "post":
+		b.handlePost(s, i)
+		return
+	case "signup":
+		b.handlePremade(s, i)
+		return
+	}
 	if len(data.Options) == 0 {
 		return
 	}
