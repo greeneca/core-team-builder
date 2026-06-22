@@ -316,9 +316,12 @@ func roleCountSuffix(filled, total int) string {
 // response) followed by slot, name, class, and abbreviated gear from the primary
 // encounter. Returns nil when there are no players.
 //
-// When an open slot (no Discord handle) has a fill signup in fillBySlot, that
-// player's name segment shows the filler's display name with a `fill` tag and
-// the icon is forced to ✅ (signing up to fill counts as coming).
+// A slot is fillable in two cases: it has no Discord handle (an "open" slot), or
+// its assigned player marked themselves "not coming" (RSVP ❌, an "absent"
+// slot). When such a slot has a fill signup in fillBySlot, that player's name
+// segment shows the filler's display name with a `fill` tag and the icon is
+// forced to ✅ (signing up to fill counts as coming). For an absent slot the tag
+// also notes who the filler is covering for, e.g. "fill for Bob".
 //
 // names overrides the displayed name for a slot with the player's resolved
 // Discord display name (so the roster shows the Discord username instead of the
@@ -346,10 +349,16 @@ func rosterLines(team *models.Team, primary *models.Encounter, marks map[int]str
 		if n := strings.TrimSpace(names[p.Slot]); n != "" {
 			name = n
 		}
+		assigned := strings.TrimSpace(p.DiscordHandle) != ""
 		icon := rsvpIcon(marks[p.Slot])
 		filler := strings.TrimSpace(fillBySlot[p.Slot])
 		if filler != "" {
-			name = filler + " `fill`"
+			if assigned {
+				// Covering for an assigned player who marked themselves out.
+				name = filler + " `fill for " + name + "`"
+			} else {
+				name = filler + " `fill`"
+			}
 			icon = "\u2705" // ✅ — signing up to fill is an implicit "coming".
 		}
 		parts := []string{
@@ -361,10 +370,11 @@ func rosterLines(team *models.Team, primary *models.Encounter, marks map[int]str
 			parts = append(parts, "WW")
 		}
 		parts = append(parts, gearAbbrevList(bySlot[p.Slot].Gear))
-		// A slot counts toward the role's signup tally when it has a real
-		// assigned player (Discord handle) or an open slot has been filled; the
-		// remainder are open slots still needing a signup.
-		covered := strings.TrimSpace(p.DiscordHandle) != "" || filler != ""
+		// A slot counts toward the role's signup tally when someone is covering
+		// it: an assigned player who hasn't declined, or any slot a filler took.
+		// An open slot, or an assigned player who marked "not coming" with no
+		// filler yet, still needs a signup.
+		covered := filler != "" || (assigned && marks[p.Slot] != models.RSVPNo)
 		rows = append(rows, row{
 			role:   p.Role,
 			line:   icon + " " + strings.Join(parts, " · "),

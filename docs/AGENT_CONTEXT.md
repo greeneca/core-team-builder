@@ -524,17 +524,19 @@ column; the `User` JSON model hides it (`json:"-"`).
     viewer's own timezone — no more per-tz list), the roster grouped by role with
     abbreviated gear (Markdown lines, one player each, RSVP icon beside the name;
     each role header shows a `(filled/total)` count, where a slot is "filled" when
-    it has an assigned Discord handle or an open slot has been filled). Each
+    someone is covering it — an assigned player who hasn't declined, or any slot a
+    filler took; an open slot, or an assigned player who marked "not coming" with
+    no filler yet, still needs a signup). Each
     player's name is the **resolved Discord display name** for their handle:
     mention/ID handles are looked up live (guild nick → global name → username,
     cached in `handleNameCache`, resolved by `resolveRosterNames`), and plain
     `@username` text handles are shown as the username (minus the `@`).
     a **Fill list** section, and groupings. Carries a button row
     (**✅ Coming**, **❌ Not coming** (RSVP), **Get My Build Details**) plus a
-    **signup dropdown** (`post_fill_select`) whenever the roster has any open
-    slots (slots with no Discord handle). Built by `discordfmt.BuildPost`; the bot
-    wraps the parts in the embed and attaches the controls via
-    `postComponents(team, fills)`.
+    **signup dropdown** (`post_fill_select`) whenever the roster has any fillable
+    slots (open slots, or slots whose assigned player marked themselves **not
+    coming**). Built by `discordfmt.BuildPost`; the bot wraps the parts in the
+    embed and attaches the controls via `postComponents(team, fills, marks)`.
   - `recruit` — posts the team's **recruitment post** as an embed (the team's
     free-form `signup_post` body, or a default prompt) with a single **I'm
     Interested** button. Pressing it starts an interactive **DM intake flow**
@@ -579,19 +581,29 @@ column; the `User` JSON model hides it (`json:"-"`).
     omitted. A user has one RSVP per post; pressing the other button switches it.
     Re-posting starts a fresh tally.
   - **Signup dropdown** (`post_fill_select`, `handlePostFill`) → lets anyone sign
-    up to cover an **open slot** (a roster slot with no `discord_handle`) or join
-    the general **fill list**. Options list each open, unclaimed slot plus
+    up to cover a **fillable slot** or join the general **fill list**. A slot is
+    fillable when it's **open** (a roster slot with no `discord_handle`) or its
+    assigned player marked themselves **not coming** (RSVP ❌, an "absent" slot —
+    `isFillableSlot` checks the live roster + RSVP marks). Options list each
+    fillable, unclaimed slot (absent slots labelled "Fill for <name>") plus
     **Join the fill list** and **Remove my signup**; the row is omitted entirely
-    when the roster has no open slots. Users already on the roster (matched via
-    `matchPlayer`) are blocked from filling an open slot or joining the fill list
-    (they don't need to). Picking a slot stores a row in
-    `discord_post_fills` (validated against the live roster; a taken slot returns
+    when the roster has no fillable slots. Users already on the roster (matched
+    via `matchPlayer`) are blocked from filling a slot or joining the fill list
+    (they don't need to). Picking a slot stores a row in `discord_post_fills`
+    (validated against the live roster + RSVPs; a taken slot returns
     `ErrSlotTaken`); a filled slot then renders the filler's name with a
-    `` `fill` `` tag and an **automatic ✅** (signing up to fill counts as coming,
-    independent of RSVPs). Fill-list backups appear in the **Fill list** section.
-    A user holds at most one signup per post, so each choice replaces the prior
-    one; the post is re-rendered in place via `renderPostUpdate` (shared with the
-    RSVP buttons). No account link is required (like RSVPs).
+    `` `fill` `` tag (or `` `fill for <name>` `` when covering an absent player)
+    and an **automatic ✅** (signing up to fill counts as coming, independent of
+    RSVPs). Fill-list backups appear in the **Fill list** section. A user holds at
+    most one signup per post, so each choice replaces the prior one; the post is
+    re-rendered in place via `renderPostUpdate` (shared with the RSVP buttons). No
+    account link is required (like RSVPs).
+  - **Returning player reclaims their slot**: when a roster player presses **✅
+    Coming** and someone had signed up to fill their slot while they were out,
+    `displaceFillerForReturningPlayer` moves that filler to the fill list
+    (`DiscordStore.MoveFillToList`, slot → `PostFillList`) and DMs them that
+    they've been bumped to backup (`dmFillerDisplaced`). Best-effort: failures are
+    logged and never block the RSVP or post refresh.
 - **"Posted by" footer**: both the `/coreteam post` overview and the premade
   `/coreteam signup` run post carry a Discord **embed footer** ("Posted by
   <name>") noting who posted. The overview uses the invoking user's display name

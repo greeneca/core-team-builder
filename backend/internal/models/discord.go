@@ -297,6 +297,31 @@ func (s *DiscordStore) LeaveFill(ctx context.Context, messageID, discordUserID s
 	return err
 }
 
+// MoveFillToList moves a specific-slot fill (slot > 0) for a posted message to
+// the general fill list (PostFillList), returning the moved fill. found=false
+// when nobody was filling that slot. Used when a slot's assigned player returns
+// (RSVPs "coming"): their slot is theirs again, so the displaced filler becomes
+// a backup on the fill list rather than being dropped.
+func (s *DiscordStore) MoveFillToList(ctx context.Context, messageID string, slot int) (PostFill, bool, error) {
+	if slot <= 0 {
+		return PostFill{}, false, nil
+	}
+	const q = `
+		UPDATE discord_post_fills
+		SET slot = $1, updated_at = now()
+		WHERE message_id = $2 AND slot = $3
+		RETURNING slot, discord_user_id, discord_username`
+	var f PostFill
+	err := s.pool.QueryRow(ctx, q, PostFillList, messageID, slot).Scan(&f.Slot, &f.DiscordUserID, &f.DiscordUsername)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return PostFill{}, false, nil
+	}
+	if err != nil {
+		return PostFill{}, false, err
+	}
+	return f, true, nil
+}
+
 // ListFills returns all signups for a posted message, ordered by when each was
 // set (so displayed lists are stable).
 func (s *DiscordStore) ListFills(ctx context.Context, messageID string) ([]PostFill, error) {
