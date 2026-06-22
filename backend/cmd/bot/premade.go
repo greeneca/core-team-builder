@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -474,6 +475,8 @@ func (b *bot) claimSimple(ctx context.Context, s *discordgo.Session, i *discordg
 		if hadPrior && priorSlot != slot {
 			b.promoteFreedSlot(ctx, s, run, team, priorSlot, priorRole)
 		}
+		// Pack the freed prior role so empty slots stay at the bottom.
+		b.compactSimpleSignups(ctx, run, team)
 		b.renderPremadeUpdate(ctx, s, i, run)
 		return
 	}
@@ -496,6 +499,84 @@ func firstOpenSlotForRole(team *models.Team, taken map[int]bool, role string) (i
 		return 0, false
 	}
 	return best, true
+}
+
+// compactSimpleSignups shuffles a simple-signup run's claimants into the
+// lowest-numbered slots of their role, so any empty slots sit at the bottom of
+// each role group (the behaviour people expect when someone leaves, switches
+// role, or un-signs). It's a no-op for specific-signup teams (where slots carry
+// distinct, deliberately-chosen builds) and when nothing would move.
+// Best-effort: errors are logged and the post still renders.
+func (b *bot) compactSimpleSignups(ctx context.Context, run *models.PremadeRun, team *models.Team) {
+	if !team.SimpleSignup {
+		return
+	}
+	signups, err := b.premade.ListSignups(ctx, run.ID)
+	if err != nil {
+		log.Printf("premade: compact list signups: %v", err)
+		return
+	}
+	compacted, changed := compactedSimpleAssignment(team, signups)
+	if !changed {
+		return
+	}
+	if err := b.premade.ReplaceSignups(ctx, run.ID, compacted); err != nil {
+		log.Printf("premade: compact replace signups: %v", err)
+	}
+}
+
+// compactedSimpleAssignment computes a slot reassignment that packs each role's
+// claimants into that role's lowest-numbered slots (preserving their relative
+// order), so empty slots end up at the bottom of each role group. signups must
+// be slot-ordered (as ListSignups returns). It returns the new signup set and
+// whether any user's slot actually changed. Signups on slots no longer present
+// on the roster are left untouched.
+func compactedSimpleAssignment(team *models.Team, signups []models.PremadeSignup) ([]models.PremadeSignup, bool) {
+	roleBySlot := map[int]string{}
+	slotsByRole := map[string][]int{}
+	for _, p := range team.Players {
+		roleBySlot[p.Slot] = p.Role
+		slotsByRole[p.Role] = append(slotsByRole[p.Role], p.Slot)
+	}
+	for r := range slotsByRole {
+		sort.Ints(slotsByRole[r])
+	}
+
+	claimantsByRole := map[string][]models.PremadeSignup{}
+	out := make([]models.PremadeSignup, 0, len(signups))
+	for _, sg := range signups {
+		role, ok := roleBySlot[sg.Slot]
+		if !ok {
+			out = append(out, sg) // slot no longer on the roster; leave as-is
+			continue
+		}
+		claimantsByRole[role] = append(claimantsByRole[role], sg)
+	}
+	for role, claimants := range claimantsByRole {
+		slots := slotsByRole[role]
+		for idx, sg := range claimants {
+			slot := sg.Slot
+			if idx < len(slots) {
+				slot = slots[idx]
+			}
+			out = append(out, models.PremadeSignup{
+				Slot:            slot,
+				DiscordUserID:   sg.DiscordUserID,
+				DiscordUsername: sg.DiscordUsername,
+			})
+		}
+	}
+
+	oldByUser := make(map[string]int, len(signups))
+	for _, sg := range signups {
+		oldByUser[sg.DiscordUserID] = sg.Slot
+	}
+	for _, sg := range out {
+		if oldByUser[sg.DiscordUserID] != sg.Slot {
+			return out, true
+		}
+	}
+	return out, false
 }
 
 // handlePremadeLeave releases the presser's claimed slot and/or waitlist entry.
@@ -547,6 +628,10 @@ func (b *bot) handlePremadeLeave(s *discordgo.Session, i *discordgo.InteractionC
 	if held {
 		b.promoteFreedSlot(ctx, s, run, team, freedSlot, freedRole)
 	}
+
+	// In simple signup, shuffle remaining claimants up so empty slots stay at
+	// the bottom of each role group.
+	b.compactSimpleSignups(ctx, run, team)
 
 	b.renderPremadeUpdate(ctx, s, i, run)
 }

@@ -307,7 +307,11 @@ column; the `User` JSON model hides it (`json:"-"`).
   counts), and claiming takes the first open slot matching the chosen role
   (`handlePremadeClaim` → `claimSimple`, retrying on slot races). When simple
   signup is on, the **Encounters Enabled** toggle is hidden (encounters don't
-  apply to a name/role-only template).
+  apply to a name/role-only template). On a leave / role switch / un-sign the
+  remaining claimants are **packed up** within each role so empty slots stay at
+  the bottom (`compactSimpleSignups` → `compactedSimpleAssignment` →
+  `PremadeStore.ReplaceSignups`); specific signup never compacts (slots there
+  carry deliberately-chosen builds).
 - **Waitlist** (`038_premade_waitlist.sql`): `teams.waitlist_enabled BOOLEAN`
   (default **false**) — a "Team Features" checkbox shown only when **Pre-made** is
   on. When on, a "Join a waitlist (role is full)" select appears on the post for
@@ -732,6 +736,10 @@ the `pre_made` flag on (see "Pre-made trial run" under Teams). Tables in
   **claim** select instead lists **roles** with open counts
   (`premadeSimpleComponents`) and claiming a role takes the first open matching
   slot (`claimSimple` → `firstOpenSlotForRole`, retrying on `ErrSlotTaken`).
+  After a leave, role switch, or un-sign the remaining claimants are packed into
+  each role's lowest slots so empty slots sit at the bottom
+  (`compactSimpleSignups` runs after any waitlist promotion, before the post is
+  re-rendered).
 - **Waitlist** (`teams.waitlist_enabled`, see Teams above): when on,
   `premadeWaitlistRow` adds a **join waitlist** select (`premade_wait`) listing
   roles that are currently full; the post shows a per-role "__Waitlist__" block

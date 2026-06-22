@@ -190,6 +190,31 @@ func (s *PremadeStore) ListSignups(ctx context.Context, runID int64) ([]PremadeS
 	return out, rows.Err()
 }
 
+// ReplaceSignups atomically replaces all of a run's slot signups with the given
+// set, in one transaction. Used by simple-signup compaction to shuffle
+// claimants into the lowest open slots of their role so empty slots stay at the
+// bottom. The caller must ensure each slot appears at most once.
+func (s *PremadeStore) ReplaceSignups(ctx context.Context, runID int64, signups []PremadeSignup) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx, `DELETE FROM premade_signups WHERE run_id = $1`, runID); err != nil {
+		return err
+	}
+	const ins = `
+		INSERT INTO premade_signups (run_id, slot, discord_user_id, discord_username)
+		VALUES ($1, $2, $3, $4)`
+	for _, sg := range signups {
+		if _, err := tx.Exec(ctx, ins, runID, sg.Slot, sg.DiscordUserID, sg.DiscordUsername); err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
+}
+
 // JoinWaitlist puts a user on the run's waitlist for a role. One entry per user
 // per run: switching roles replaces the entry and resets queue position.
 func (s *PremadeStore) JoinWaitlist(ctx context.Context, runID int64, role, discordUserID, discordUsername string) error {
