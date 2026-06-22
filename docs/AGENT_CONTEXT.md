@@ -575,7 +575,9 @@ column; the `User` JSON model hides it (`json:"-"`).
     up to cover an **open slot** (a roster slot with no `discord_handle`) or join
     the general **fill list**. Options list each open, unclaimed slot plus
     **Join the fill list** and **Remove my signup**; the row is omitted entirely
-    when the roster has no open slots. Picking a slot stores a row in
+    when the roster has no open slots. Users already on the roster (matched via
+    `matchPlayer`) are blocked from filling an open slot or joining the fill list
+    (they don't need to). Picking a slot stores a row in
     `discord_post_fills` (validated against the live roster; a taken slot returns
     `ErrSlotTaken`); a filled slot then renders the filler's name with a
     `` `fill` `` tag and an **automatic ✅** (signing up to fill counts as coming,

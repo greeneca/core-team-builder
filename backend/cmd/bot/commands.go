@@ -744,19 +744,9 @@ func (b *bot) handlePostFill(s *discordgo.Session, i *discordgo.InteractionCreat
 			ephemeral(s, i, "Something went wrong. Please try again.")
 			return
 		}
-	case postFillListValue:
-		if err := b.discord.ClaimFill(ctx, i.Message.ID, i.ChannelID, models.PostFillList, user.ID, displayName(user)); err != nil {
-			log.Printf("post fill: join list: %v", err)
-			ephemeral(s, i, "Something went wrong. Please try again.")
-			return
-		}
 	default:
-		slot, err := strconv.Atoi(choice)
-		if err != nil || slot <= 0 {
-			return
-		}
-		// Validate against the live roster so a stale dropdown can't claim a slot
-		// that has since been assigned a real player.
+		// Both joining the fill list and filling an open slot are validated
+		// against the live roster, so load the team once for both.
 		teamID, err := b.discord.GetChannelTeam(ctx, i.ChannelID)
 		if err != nil {
 			log.Printf("post fill: get binding: %v", err)
@@ -769,6 +759,28 @@ func (b *bot) handlePostFill(s *discordgo.Session, i *discordgo.InteractionCreat
 			ephemeral(s, i, "Something went wrong. Please try again.")
 			return
 		}
+		// A user already assigned to a roster slot doesn't need (and shouldn't)
+		// sign up as a fill — neither for an open slot nor the fill list.
+		if _, ok := matchPlayer(team, user); ok {
+			ephemeral(s, i, "You're already on this team's roster, so you don't need to sign up to fill an open slot or the fill list.")
+			return
+		}
+
+		if choice == postFillListValue {
+			if err := b.discord.ClaimFill(ctx, i.Message.ID, i.ChannelID, models.PostFillList, user.ID, displayName(user)); err != nil {
+				log.Printf("post fill: join list: %v", err)
+				ephemeral(s, i, "Something went wrong. Please try again.")
+				return
+			}
+			break
+		}
+
+		slot, err := strconv.Atoi(choice)
+		if err != nil || slot <= 0 {
+			return
+		}
+		// Validate against the live roster so a stale dropdown can't claim a slot
+		// that has since been assigned a real player.
 		if !isOpenSlot(team, slot) {
 			ephemeral(s, i, "That slot already has a player assigned. Pick an open slot or the fill list.")
 			return
