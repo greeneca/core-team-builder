@@ -610,6 +610,11 @@ column; the `User` JSON model hides it (`json:"-"`).
     slot opened so they can sign up from the post (`dmFillListOpening`). Skipped
     when the presser isn't a roster player or the slot already has a filler.
     Best-effort (logged only).
+  - **Post links in DMs**: notification DMs (`dmFillerDisplaced`,
+    `dmFillListOpening`, premade `dmPromoted`) and the premade `/coreteam signup`
+    final confirmation DM append a Discord jump link back to the post via
+    `messageURL`/`postLinkSuffix`. The link is omitted when the channel/message
+    aren't known so the message still reads cleanly.
 - **"Posted by" footer**: both the `/coreteam post` overview and the premade
   `/coreteam signup` run post carry a Discord **embed footer** ("Posted by
   <name>") noting who posted. The overview uses the invoking user's display name

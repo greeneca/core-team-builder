@@ -779,19 +779,21 @@ func (b *bot) displaceFillerForReturningPlayer(ctx context.Context, s *discordgo
 	if !found {
 		return
 	}
-	b.dmFillerDisplaced(s, moved.DiscordUserID, team.Name, displayName(user))
+	b.dmFillerDisplaced(s, moved.DiscordUserID, team.Name, displayName(user), messageURL(i.GuildID, i.ChannelID, i.Message.ID))
 }
 
 // dmFillerDisplaced notifies a filler (by Discord user ID) that the slot they
 // signed up to fill has been reclaimed by its returning player, and that they've
-// been moved to the fill list as a backup. Failures are logged, not surfaced.
-func (b *bot) dmFillerDisplaced(s *discordgo.Session, fillerUserID, teamName, returningName string) {
+// been moved to the fill list as a backup. postURL (when non-empty) links back
+// to the post. Failures are logged, not surfaced.
+func (b *bot) dmFillerDisplaced(s *discordgo.Session, fillerUserID, teamName, returningName, postURL string) {
 	dm, err := s.UserChannelCreate(fillerUserID)
 	if err != nil {
 		log.Printf("rsvp: dm filler (create channel): %v", err)
 		return
 	}
 	msg := fmt.Sprintf("Heads up: **%s** is now coming to **%s**, so the slot you signed up to fill is theirs again. I've moved you to the fill list as a backup — thanks for being ready to step in!", returningName, teamName)
+	msg += postLinkSuffix(postURL)
 	if _, err := s.ChannelMessageSend(dm.ID, msg); err != nil {
 		log.Printf("rsvp: dm filler (send): %v", err)
 	}
@@ -831,15 +833,17 @@ func (b *bot) notifyFillListOfOpening(ctx context.Context, s *discordgo.Session,
 		}
 	}
 	role := team.RoleLabel(p.Role)
+	postURL := messageURL(i.GuildID, i.ChannelID, i.Message.ID)
 	for _, f := range backups {
-		b.dmFillListOpening(s, f.DiscordUserID, team.Name, displayName(user), role)
+		b.dmFillListOpening(s, f.DiscordUserID, team.Name, displayName(user), role, postURL)
 	}
 }
 
 // dmFillListOpening notifies a fill-list backup (by Discord user ID) that a slot
 // opened up because its assigned player declined, so they can sign up from the
-// post. Failures are logged, not surfaced.
-func (b *bot) dmFillListOpening(s *discordgo.Session, backupUserID, teamName, droppedName, role string) {
+// post. postURL (when non-empty) links back to the post. Failures are logged,
+// not surfaced.
+func (b *bot) dmFillListOpening(s *discordgo.Session, backupUserID, teamName, droppedName, role, postURL string) {
 	dm, err := s.UserChannelCreate(backupUserID)
 	if err != nil {
 		log.Printf("rsvp: dm fill list (create channel): %v", err)
@@ -850,6 +854,7 @@ func (b *bot) dmFillListOpening(s *discordgo.Session, backupUserID, teamName, dr
 		slot = "A " + r + " slot"
 	}
 	msg := fmt.Sprintf("%s just opened on **%s** — **%s** marked themselves not coming. You're on the fill list, so head to the post and sign up to fill it if you can make it!", slot, teamName, droppedName)
+	msg += postLinkSuffix(postURL)
 	if _, err := s.ChannelMessageSend(dm.ID, msg); err != nil {
 		log.Printf("rsvp: dm fill list (send): %v", err)
 	}
@@ -1310,6 +1315,29 @@ func displayName(u *discordgo.User) string {
 		return u.GlobalName
 	}
 	return u.Username
+}
+
+// messageURL builds a clickable Discord jump link to a specific message, used so
+// DMs can point recipients straight back to the post. Returns "" when the
+// channel or message is unknown (the caller should then omit the link).
+func messageURL(guildID, channelID, messageID string) string {
+	if channelID == "" || messageID == "" {
+		return ""
+	}
+	g := guildID
+	if g == "" {
+		g = "@me"
+	}
+	return "https://discord.com/channels/" + g + "/" + channelID + "/" + messageID
+}
+
+// postLinkSuffix returns a trailing "jump to the post" line to append to a DM,
+// or "" when no link is available so the message reads naturally either way.
+func postLinkSuffix(postURL string) string {
+	if postURL == "" {
+		return ""
+	}
+	return "\n\n" + postURL
 }
 
 // hasManageChannels reports whether the invoking member has the Manage Channels

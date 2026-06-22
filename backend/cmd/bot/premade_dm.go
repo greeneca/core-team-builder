@@ -456,7 +456,9 @@ func (b *bot) finishPremadeDM(ctx context.Context, s *discordgo.Session, sess *m
 	run.MessageID = msg.ID
 	b.createRunThread(ctx, s, run)
 	_ = b.premade.DeleteSession(ctx, sess.DiscordUserID)
-	b.dmSend(s, sess.DMChannelID, fmt.Sprintf("Posted **%s** for <t:%d:F>. Players can claim slots from the post now, and discuss in its thread.", run.Title, run.ScheduledAt.Unix()))
+	done := fmt.Sprintf("Posted **%s** for <t:%d:F>. Players can claim slots from the post now, and discuss in its thread.", run.Title, run.ScheduledAt.Unix())
+	done += postLinkSuffix(messageURL(sess.GuildID, sess.ChannelID, msg.ID))
+	b.dmSend(s, sess.DMChannelID, done)
 }
 
 // dmSend sends a plain DM message, logging (not surfacing) any failure.

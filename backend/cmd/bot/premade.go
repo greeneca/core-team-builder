@@ -653,6 +653,7 @@ func (b *bot) dmPromoted(s *discordgo.Session, entry *models.PremadeWaitlistEntr
 		title = team.Name
 	}
 	msg := fmt.Sprintf("You're off the waitlist! A %s slot opened up for **%s** (<t:%d:F>) and you've been moved into slot %d.", role, title, run.ScheduledAt.Unix(), slot)
+	msg += postLinkSuffix(messageURL(run.GuildID, run.ChannelID, run.MessageID))
 	if _, err := s.ChannelMessageSend(dm.ID, msg); err != nil {
 		log.Printf("premade: promote dm send: %v", err)
 	}
