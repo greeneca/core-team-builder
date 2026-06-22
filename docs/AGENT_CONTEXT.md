@@ -586,8 +586,9 @@ column; the `User` JSON model hides it (`json:"-"`).
     assigned player marked themselves **not coming** (RSVP ❌, an "absent" slot —
     `isFillableSlot` checks the live roster + RSVP marks). Options list each
     fillable, unclaimed slot (absent slots labelled "Fill for <name>") plus
-    **Join the fill list** and **Remove my signup**; the row is omitted entirely
-    when the roster has no fillable slots. Users already on the roster (matched
+    **Join the fill list** and **Remove my signup**; the dropdown is **always
+    shown** (even on a fully staffed post) so people can volunteer as backups when
+    no slot is open. Users already on the roster (matched
     via `matchPlayer`) are blocked from filling a slot or joining the fill list
     (they don't need to). Picking a slot stores a row in `discord_post_fills`
     (validated against the live roster + RSVPs; a taken slot returns
@@ -604,6 +605,11 @@ column; the `User` JSON model hides it (`json:"-"`).
     (`DiscordStore.MoveFillToList`, slot → `PostFillList`) and DMs them that
     they've been bumped to backup (`dmFillerDisplaced`). Best-effort: failures are
     logged and never block the RSVP or post refresh.
+  - **Slot opens for backups**: when a roster player presses **❌ Not coming**,
+    `notifyFillListOfOpening` DMs everyone on the general fill list that their
+    slot opened so they can sign up from the post (`dmFillListOpening`). Skipped
+    when the presser isn't a roster player or the slot already has a filler.
+    Best-effort (logged only).
 - **"Posted by" footer**: both the `/coreteam post` overview and the premade
   `/coreteam signup` run post carry a Discord **embed footer** ("Posted by
   <name>") noting who posted. The overview uses the invoking user's display name

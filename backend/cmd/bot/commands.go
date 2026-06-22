@@ -52,11 +52,12 @@ const (
 )
 
 // postComponents are the controls attached to a posted trial overview: a button
-// row (the two RSVP buttons + the per-player details button) and, when the
-// roster has any fillable slots, a signup dropdown so players can fill a slot or
-// join the general fill list. marks is the slot -> RSVP status map (so slots
-// whose assigned player declined become fillable). Defined once so the initial
-// post and every in-place update render the same controls.
+// row (the two RSVP buttons + the per-player details button) and a signup
+// dropdown so players can fill a slot or join the general fill list (the
+// dropdown is always shown so people can volunteer as backups even when no slot
+// is open). marks is the slot -> RSVP status map (so slots whose assigned player
+// declined become fillable). Defined once so the initial post and every in-place
+// update render the same controls.
 func postComponents(team *models.Team, fills []models.PostFill, marks map[int]string) []discordgo.MessageComponent {
 	rows := []discordgo.MessageComponent{
 		discordgo.ActionsRow{Components: []discordgo.MessageComponent{
@@ -88,9 +89,10 @@ func postComponents(team *models.Team, fills []models.PostFill, marks map[int]st
 // postFillSelectRow builds the signup dropdown: one option per fillable roster
 // slot that isn't already taken by a filler, plus "Join the fill list" and
 // "Remove my signup". A slot is fillable when it has no Discord handle (open) or
-// its assigned player marked themselves "not coming" (absent, per marks).
-// Returns ok=false when the roster has no fillable slots at all, so a fully
-// staffed post shows only the RSVP buttons.
+// its assigned player marked themselves "not coming" (absent, per marks). The
+// "Join the fill list" / "Remove my signup" options are always present, so the
+// dropdown is shown even on a fully staffed post (people can still volunteer as
+// backups). ok=false only when team is nil.
 func postFillSelectRow(team *models.Team, fills []models.PostFill, marks map[int]string) (discordgo.MessageComponent, bool) {
 	if team == nil {
 		return nil, false
@@ -102,14 +104,12 @@ func postFillSelectRow(team *models.Team, fills []models.PostFill, marks map[int
 		}
 	}
 	opts := make([]discordgo.SelectMenuOption, 0, len(team.Players)+2)
-	hasFillable := false
 	for _, p := range team.Players { // store returns players slot-ordered
 		assigned := strings.TrimSpace(p.DiscordHandle) != ""
 		absent := assigned && marks[p.Slot] == models.RSVPNo
 		if assigned && !absent {
 			continue // slot has an assigned player who hasn't declined
 		}
-		hasFillable = true
 		if filled[p.Slot] {
 			continue // already claimed by a filler
 		}
@@ -127,9 +127,6 @@ func postFillSelectRow(team *models.Team, fills []models.PostFill, marks map[int
 			Emoji: &discordgo.ComponentEmoji{Name: team.RoleEmoji(p.Role)},
 		})
 	}
-	if !hasFillable {
-		return nil, false
-	}
 	opts = append(opts,
 		discordgo.SelectMenuOption{
 			Label:       "Join the fill list",
@@ -146,7 +143,7 @@ func postFillSelectRow(team *models.Team, fills []models.PostFill, marks map[int
 	return discordgo.ActionsRow{Components: []discordgo.MessageComponent{
 		discordgo.SelectMenu{
 			CustomID:    postFillSelectID,
-			Placeholder: "Sign up to fill a slot",
+			Placeholder: "Sign up to fill a slot or join the fill list",
 			Options:     opts,
 		},
 	}}, true
@@ -741,6 +738,11 @@ func (b *bot) handleRSVP(s *discordgo.Session, i *discordgo.InteractionCreate, s
 	if status == models.RSVPYes {
 		b.displaceFillerForReturningPlayer(ctx, s, i, user)
 	}
+	// A roster player marking themselves not coming opens their slot: let the
+	// fill-list backups know so they can grab it. Best-effort.
+	if status == models.RSVPNo {
+		b.notifyFillListOfOpening(ctx, s, i, user)
+	}
 
 	// Rebuild the post from current team data so each responder's ✅/❌ lands
 	// beside their name in the roster (the RSVP is saved regardless).
@@ -792,6 +794,64 @@ func (b *bot) dmFillerDisplaced(s *discordgo.Session, fillerUserID, teamName, re
 	msg := fmt.Sprintf("Heads up: **%s** is now coming to **%s**, so the slot you signed up to fill is theirs again. I've moved you to the fill list as a backup — thanks for being ready to step in!", returningName, teamName)
 	if _, err := s.ChannelMessageSend(dm.ID, msg); err != nil {
 		log.Printf("rsvp: dm filler (send): %v", err)
+	}
+}
+
+// notifyFillListOfOpening DMs everyone currently on the general fill list that a
+// roster slot just opened — its assigned player (the RSVP presser) marked
+// themselves not coming — so backups can grab it from the post. It does nothing
+// when the presser isn't a roster player (a non-roster decline opens nothing) or
+// when the slot already has a filler. Best-effort: failures are logged only.
+func (b *bot) notifyFillListOfOpening(ctx context.Context, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User) {
+	teamID, err := b.discord.GetChannelTeam(ctx, i.ChannelID)
+	if err != nil {
+		return
+	}
+	team, err := b.teams.Get(ctx, teamID)
+	if err != nil {
+		log.Printf("rsvp: load team for fill-list notify: %v", err)
+		return
+	}
+	p, ok := matchPlayer(team, user)
+	if !ok {
+		return // a non-roster decline doesn't open a slot
+	}
+	fills, err := b.discord.ListFills(ctx, i.Message.ID)
+	if err != nil {
+		log.Printf("rsvp: list fills for notify: %v", err)
+		return
+	}
+	var backups []models.PostFill
+	for _, f := range fills {
+		if f.Slot == p.Slot {
+			return // slot already has a filler, so nothing newly opened
+		}
+		if f.Slot == models.PostFillList {
+			backups = append(backups, f)
+		}
+	}
+	role := team.RoleLabel(p.Role)
+	for _, f := range backups {
+		b.dmFillListOpening(s, f.DiscordUserID, team.Name, displayName(user), role)
+	}
+}
+
+// dmFillListOpening notifies a fill-list backup (by Discord user ID) that a slot
+// opened up because its assigned player declined, so they can sign up from the
+// post. Failures are logged, not surfaced.
+func (b *bot) dmFillListOpening(s *discordgo.Session, backupUserID, teamName, droppedName, role string) {
+	dm, err := s.UserChannelCreate(backupUserID)
+	if err != nil {
+		log.Printf("rsvp: dm fill list (create channel): %v", err)
+		return
+	}
+	slot := "A slot"
+	if r := strings.TrimSpace(role); r != "" {
+		slot = "A " + r + " slot"
+	}
+	msg := fmt.Sprintf("%s just opened on **%s** — **%s** marked themselves not coming. You're on the fill list, so head to the post and sign up to fill it if you can make it!", slot, teamName, droppedName)
+	if _, err := s.ChannelMessageSend(dm.ID, msg); err != nil {
+		log.Printf("rsvp: dm fill list (send): %v", err)
 	}
 }
 
