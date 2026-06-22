@@ -437,7 +437,7 @@ func (b *bot) finishPremadeDM(ctx context.Context, s *discordgo.Session, sess *m
 		return
 	}
 
-	embed := b.premadeEmbed(team, run, primary, nil, nil)
+	embed := b.premadeEmbed(ctx, team, run, primary, nil, nil)
 	msg, err := s.ChannelMessageSendComplex(sess.ChannelID, &discordgo.MessageSend{
 		Embeds:     []*discordgo.MessageEmbed{embed},
 		Components: premadeComponents(team, nil),

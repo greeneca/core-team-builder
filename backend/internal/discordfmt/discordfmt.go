@@ -30,9 +30,16 @@ import (
 // (models.RSVPYes / models.RSVPNo); a ✅ or ❌ icon is rendered beside that
 // player's name in the roster. Players without an entry show a neutral ▫️.
 //
+// fillBySlot maps an open roster slot (one with no Discord handle) to the
+// display name of the user who signed up to fill it via the post's signup
+// dropdown. A filled slot shows that name with a `fill` tag and an automatic ✅
+// (regardless of any RSVP). fillList holds the display names on the general
+// "fill list" (backups not tied to a specific slot), rendered in their own
+// section.
+//
 // The self-required penetration/crit and missing self-buffs now live in the
 // per-player build-details DM (see PlayerDetail), not on this post.
-func BuildPost(team *models.Team, primary *models.Encounter, groupings []models.Grouping, marks map[int]string) (title, description string) {
+func BuildPost(team *models.Team, primary *models.Encounter, groupings []models.Grouping, marks map[int]string, fillBySlot map[int]string, fillList []string) (title, description string) {
 	title = team.Name
 
 	var L []string
@@ -47,11 +54,16 @@ func BuildPost(team *models.Team, primary *models.Encounter, groupings []models.
 
 	// Roster grouped by role. Rendered as Markdown (not a code block) so each
 	// player's RSVP status shows as a ✅/❌/▫️ icon beside their name.
-	if rl := rosterLines(team, primary, marks); len(rl) > 0 {
+	if rl := rosterLines(team, primary, marks, fillBySlot); len(rl) > 0 {
 		if len(L) > 0 {
 			L = append(L, "")
 		}
 		L = append(L, rl...)
+	}
+
+	if fl := fillListLines(fillList); len(fl) > 0 {
+		L = append(L, "")
+		L = append(L, fl...)
 	}
 
 	if gl := formatGroupings(team, groupings); len(gl) > 0 {
@@ -190,7 +202,8 @@ func claimantDisplay(username, discordUserID string) string {
 
 // premadeRosterLines renders the roster grouped by role for a pre-made run: each
 // slot shows its number, the slot's roster name, class, and either the
-// claimant's name or "open".
+// claimant's name or "open". Each role header carries a (claimed/total) signup
+// count so it's easy to see how many slots are still open.
 func premadeRosterLines(team *models.Team, primary *models.Encounter, claimants map[int]models.PremadeSignup) []string {
 	bySlot := map[int]models.Loadout{}
 	if primary != nil {
@@ -202,9 +215,13 @@ func premadeRosterLines(team *models.Team, primary *models.Encounter, claimants 
 	if len(players) == 0 {
 		return nil
 	}
-	type row struct{ role, line string }
+	type row struct {
+		role, line string
+		filled     bool
+	}
 	rows := make([]row, 0, len(players))
 	for _, p := range players {
+		_, claimed := claimants[p.Slot]
 		claim := "_open_"
 		if sg, ok := claimants[p.Slot]; ok {
 			if name := claimantDisplay(sg.DiscordUsername, sg.DiscordUserID); name != "" {
@@ -235,7 +252,7 @@ func premadeRosterLines(team *models.Team, primary *models.Encounter, claimants 
 				claim,
 			)
 		}
-		rows = append(rows, row{role: p.Role, line: strings.Join(parts, " · ")})
+		rows = append(rows, row{role: p.Role, line: strings.Join(parts, " · "), filled: claimed})
 	}
 
 	rolesPresent := make([]string, 0, len(rows))
@@ -248,6 +265,7 @@ func premadeRosterLines(team *models.Team, primary *models.Encounter, claimants 
 	first := true
 	for _, g := range groups {
 		var grp []row
+		filled := 0
 		for _, r := range rows {
 			if g.value == "" {
 				if r.role == "" {
@@ -260,6 +278,11 @@ func premadeRosterLines(team *models.Team, primary *models.Encounter, claimants 
 		if len(grp) == 0 {
 			continue
 		}
+		for _, r := range grp {
+			if r.filled {
+				filled++
+			}
+		}
 		if !first {
 			L = append(L, "")
 		}
@@ -268,6 +291,7 @@ func premadeRosterLines(team *models.Team, primary *models.Encounter, claimants 
 		if g.value != "" {
 			header = team.RoleEmoji(g.value) + " " + header
 		}
+		header += roleCountSuffix(filled, len(grp))
 		L = append(L, header)
 		for _, r := range grp {
 			L = append(L, r.line)
@@ -276,12 +300,22 @@ func premadeRosterLines(team *models.Team, primary *models.Encounter, claimants 
 	return L
 }
 
+// roleCountSuffix renders the per-role signup count appended to a role header,
+// e.g. " (2/4)" — filled slots out of the role's total.
+func roleCountSuffix(filled, total int) string {
+	return fmt.Sprintf(" (%d/%d)", filled, total)
+}
+
 // rosterLines renders the roster grouped by role (the team's own roles in their
 // defined order, then any "Other" for unset roles) as Markdown lines. Each
 // player is one line prefixed by an RSVP icon (✅ coming / ❌ not coming / ▫️ no
 // response) followed by slot, name, class, and abbreviated gear from the primary
 // encounter. Returns nil when there are no players.
-func rosterLines(team *models.Team, primary *models.Encounter, marks map[int]string) []string {
+//
+// When an open slot (no Discord handle) has a fill signup in fillBySlot, that
+// player's name segment shows the filler's display name with a `fill` tag and
+// the icon is forced to ✅ (signing up to fill counts as coming).
+func rosterLines(team *models.Team, primary *models.Encounter, marks map[int]string, fillBySlot map[int]string) []string {
 	bySlot := map[int]models.Loadout{}
 	if primary != nil {
 		for _, lo := range primary.Loadouts {
@@ -295,21 +329,34 @@ func rosterLines(team *models.Team, primary *models.Encounter, marks map[int]str
 	}
 	type row struct {
 		role, line string
+		filled     bool
 	}
 	rows := make([]row, 0, len(players))
 	for _, p := range players {
+		name := who(p)
+		icon := rsvpIcon(marks[p.Slot])
+		filler := strings.TrimSpace(fillBySlot[p.Slot])
+		if filler != "" {
+			name = filler + " `fill`"
+			icon = "\u2705" // ✅ — signing up to fill is an implicit "coming".
+		}
 		parts := []string{
 			fmt.Sprintf("%d.", p.Slot),
-			who(p),
+			name,
 			classOrDash(p.Class),
 		}
 		if p.Werewolf {
 			parts = append(parts, "WW")
 		}
 		parts = append(parts, gearAbbrevList(bySlot[p.Slot].Gear))
+		// A slot counts toward the role's signup tally when it has a real
+		// assigned player (Discord handle) or an open slot has been filled; the
+		// remainder are open slots still needing a signup.
+		covered := strings.TrimSpace(p.DiscordHandle) != "" || filler != ""
 		rows = append(rows, row{
-			role: p.Role,
-			line: rsvpIcon(marks[p.Slot]) + " " + strings.Join(parts, " · "),
+			role:   p.Role,
+			line:   icon + " " + strings.Join(parts, " · "),
+			filled: covered,
 		})
 	}
 
@@ -323,6 +370,7 @@ func rosterLines(team *models.Team, primary *models.Encounter, marks map[int]str
 	first := true
 	for _, g := range groups {
 		var grp []row
+		filled := 0
 		for _, r := range rows {
 			if g.value == "" {
 				if r.role == "" {
@@ -335,6 +383,11 @@ func rosterLines(team *models.Team, primary *models.Encounter, marks map[int]str
 		if len(grp) == 0 {
 			continue
 		}
+		for _, r := range grp {
+			if r.filled {
+				filled++
+			}
+		}
 		if !first {
 			L = append(L, "")
 		}
@@ -343,10 +396,32 @@ func rosterLines(team *models.Team, primary *models.Encounter, marks map[int]str
 		if g.value != "" {
 			header = team.RoleEmoji(g.value) + " " + header
 		}
+		header += roleCountSuffix(filled, len(grp))
 		L = append(L, header)
 		for _, r := range grp {
 			L = append(L, r.line)
 		}
+	}
+	return L
+}
+
+// fillListLines renders the general "fill list" section: backups who signed up
+// via the post's dropdown without taking a specific slot. Each is shown with a
+// ✅ (they're available to fill). Returns nil when nobody is on the list.
+func fillListLines(names []string) []string {
+	if len(names) == 0 {
+		return nil
+	}
+	L := []string{"__Fill list__"}
+	for _, n := range names {
+		name := strings.TrimSpace(n)
+		if name == "" {
+			continue
+		}
+		L = append(L, "\u2705 "+name)
+	}
+	if len(L) == 1 {
+		return nil
 	}
 	return L
 }

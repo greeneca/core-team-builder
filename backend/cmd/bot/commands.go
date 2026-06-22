@@ -31,14 +31,29 @@ type bot struct {
 const (
 	embedTitleLimit       = 256
 	embedDescriptionLimit = 4096
+	embedFooterLimit      = 2048
 	embedColor            = 0x5865F2
 )
 
-// postComponents are the buttons attached to a posted trial overview: the two
-// RSVP buttons (coming / not coming) and the per-player details button. Defined
-// once so /coreteam post and the RSVP update both render the same row.
-func postComponents() []discordgo.MessageComponent {
-	return []discordgo.MessageComponent{
+// postedByPrefix labels the embed footer noting who posted a signup (e.g.
+// "Posted by Ada"). Shared by the /coreteam post overview and premade run posts.
+const postedByPrefix = "Posted by "
+
+// Custom IDs / sentinel values for the post's signup dropdown (fill open slots
+// or join the general fill list).
+const (
+	postFillSelectID   = "post_fill_select"
+	postFillListValue  = "filllist"
+	postFillLeaveValue = "leave"
+)
+
+// postComponents are the controls attached to a posted trial overview: a button
+// row (the two RSVP buttons + the per-player details button) and, when the
+// roster has any open slots (no Discord handle), a signup dropdown so players
+// can fill an open slot or join the general fill list. Defined once so the
+// initial post and every in-place update render the same controls.
+func postComponents(team *models.Team, fills []models.PostFill) []discordgo.MessageComponent {
+	rows := []discordgo.MessageComponent{
 		discordgo.ActionsRow{Components: []discordgo.MessageComponent{
 			discordgo.Button{
 				Label:    "Coming",
@@ -59,6 +74,69 @@ func postComponents() []discordgo.MessageComponent {
 			},
 		}},
 	}
+	if row, ok := postFillSelectRow(team, fills); ok {
+		rows = append(rows, row)
+	}
+	return rows
+}
+
+// postFillSelectRow builds the signup dropdown: one option per open roster slot
+// (a slot with no Discord handle) that isn't already taken by a filler, plus
+// "Join the fill list" and "Remove my signup". Returns ok=false when the roster
+// has no open slots at all, so a fully-staffed post shows only the RSVP buttons.
+func postFillSelectRow(team *models.Team, fills []models.PostFill) (discordgo.MessageComponent, bool) {
+	if team == nil {
+		return nil, false
+	}
+	filled := map[int]bool{}
+	for _, f := range fills {
+		if f.Slot > 0 {
+			filled[f.Slot] = true
+		}
+	}
+	opts := make([]discordgo.SelectMenuOption, 0, len(team.Players)+2)
+	hasOpen := false
+	for _, p := range team.Players { // store returns players slot-ordered
+		if strings.TrimSpace(p.DiscordHandle) != "" {
+			continue // slot already has an assigned player
+		}
+		hasOpen = true
+		if filled[p.Slot] {
+			continue // already claimed by a filler
+		}
+		// Leave room for the two trailing options (Discord caps a select at 25).
+		if len(opts) >= 23 {
+			continue
+		}
+		opts = append(opts, discordgo.SelectMenuOption{
+			Label: truncate(slotOptionLabel(team, p), 100),
+			Value: strconv.Itoa(p.Slot),
+			Emoji: &discordgo.ComponentEmoji{Name: team.RoleEmoji(p.Role)},
+		})
+	}
+	if !hasOpen {
+		return nil, false
+	}
+	opts = append(opts,
+		discordgo.SelectMenuOption{
+			Label:       "Join the fill list",
+			Value:       postFillListValue,
+			Description: "Be a backup for any role",
+			Emoji:       &discordgo.ComponentEmoji{Name: "\U0001F64B"}, // 🙋
+		},
+		discordgo.SelectMenuOption{
+			Label:       "Remove my signup",
+			Value:       postFillLeaveValue,
+			Description: "Leave your slot or the fill list",
+		},
+	)
+	return discordgo.ActionsRow{Components: []discordgo.MessageComponent{
+		discordgo.SelectMenu{
+			CustomID:    postFillSelectID,
+			Placeholder: "Sign up to fill an open slot",
+			Options:     opts,
+		},
+	}}, true
 }
 
 // createTeamOption is the sentinel select value meaning "create a new team".
@@ -234,6 +312,8 @@ func (b *bot) onComponent(s *discordgo.Session, i *discordgo.InteractionCreate) 
 		b.handleRSVP(s, i, models.RSVPYes)
 	case "rsvp_no":
 		b.handleRSVP(s, i, models.RSVPNo)
+	case postFillSelectID:
+		b.handlePostFill(s, i)
 	}
 }
 
@@ -497,12 +577,16 @@ func (b *bot) handlePost(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	// border) and the schedule renders as a per-viewer dynamic timestamp. The
 	// self-required pen/crit moved to the per-player build-details DM. A fresh
 	// post has no RSVPs yet, so no status marks are shown.
-	embed := buildPostEmbed(team, primary, gr, nil)
+	footer := ""
+	if user := invokingUser(i); user != nil {
+		footer = postedByPrefix + displayName(user)
+	}
+	embed := buildPostEmbed(team, primary, gr, nil, nil, footer)
 	err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
 			Embeds:     []*discordgo.MessageEmbed{embed},
-			Components: postComponents(),
+			Components: postComponents(team, nil),
 		},
 	})
 	if err != nil {
@@ -510,16 +594,36 @@ func (b *bot) handlePost(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	}
 }
 
-// buildPostEmbed assembles the channel-post embed from team data and the current
-// RSVPs. Each responding roster member gets a ✅/❌ icon beside their name in the
-// roster. Pass nil rsvps for the initial post.
-func buildPostEmbed(team *models.Team, primary *models.Encounter, gr []models.Grouping, rsvps []models.RSVP) *discordgo.MessageEmbed {
-	title, desc := discordfmt.BuildPost(team, primary, gr, rsvpMarks(team, rsvps))
-	return &discordgo.MessageEmbed{
+// buildPostEmbed assembles the channel-post embed from team data, the current
+// RSVPs, and the current fill signups. Each responding roster member gets a
+// ✅/❌ icon beside their name; each filled open slot shows the filler's name
+// with a `fill` tag and an automatic ✅, and fill-list backups get their own
+// section. footerText, when non-empty, is shown as the embed footer (used to note
+// who posted). Pass nil rsvps/fills for the initial post.
+func buildPostEmbed(team *models.Team, primary *models.Encounter, gr []models.Grouping, rsvps []models.RSVP, fills []models.PostFill, footerText string) *discordgo.MessageEmbed {
+	fillBySlot := map[int]string{}
+	var fillList []string
+	for _, f := range fills {
+		name := strings.TrimSpace(f.DiscordUsername)
+		if name == "" {
+			name = f.DiscordUserID
+		}
+		if f.Slot == models.PostFillList {
+			fillList = append(fillList, name)
+		} else {
+			fillBySlot[f.Slot] = name
+		}
+	}
+	title, desc := discordfmt.BuildPost(team, primary, gr, rsvpMarks(team, rsvps), fillBySlot, fillList)
+	embed := &discordgo.MessageEmbed{
 		Title:       truncate(title, embedTitleLimit),
 		Description: truncate(desc, embedDescriptionLimit),
 		Color:       embedColor,
 	}
+	if footerText = strings.TrimSpace(footerText); footerText != "" {
+		embed.Footer = &discordgo.MessageEmbedFooter{Text: truncate(footerText, embedFooterLimit)}
+	}
+	return embed
 }
 
 // --- /coreteam recruit (recruitment post + DM intake) ---
@@ -606,51 +710,145 @@ func (b *bot) handleRSVP(s *discordgo.Session, i *discordgo.InteractionCreate, s
 		ephemeral(s, i, "Something went wrong saving your RSVP. Please try again.")
 		return
 	}
-	rsvps, err := b.discord.ListRSVPs(ctx, i.Message.ID)
-	if err != nil {
-		log.Printf("rsvp: list: %v", err)
+
+	// Rebuild the post from current team data so each responder's ✅/❌ lands
+	// beside their name in the roster (the RSVP is saved regardless).
+	if err := b.renderPostUpdate(ctx, s, i); err != nil {
+		log.Printf("rsvp: refresh post: %v", err)
 		ephemeral(s, i, "Saved your RSVP, but couldn't refresh the post.")
+	}
+}
+
+// handlePostFill records the presser's signup from the post's dropdown — filling
+// a specific open slot, joining the general fill list, or removing their signup
+// — then re-renders the post in place so the roster shows the change. A user
+// holds at most one signup per post, so each choice replaces the prior one.
+func (b *bot) handlePostFill(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	user := invokingUser(i)
+	if user == nil || i.Message == nil {
+		ephemeral(s, i, "Could not identify your Discord account.")
+		return
+	}
+	values := i.MessageComponentData().Values
+	if len(values) == 0 {
 		return
 	}
 
-	// Rebuild the post from current team data so each responder's ✅/❌ lands
-	// beside their name in the roster. Fall back to keeping the existing embed if
-	// the team can no longer be loaded (the RSVP is still saved).
-	embed, err := b.rsvpEmbed(ctx, i, rsvps)
-	if err != nil {
-		log.Printf("rsvp: rebuild post: %v", err)
-		if len(i.Message.Embeds) > 0 {
-			embed = i.Message.Embeds[0]
-		} else {
-			ephemeral(s, i, "Saved your RSVP, but couldn't refresh the post.")
+	ctx, cancel := handlerContext()
+	defer cancel()
+
+	switch choice := values[0]; choice {
+	case postFillLeaveValue:
+		if err := b.discord.LeaveFill(ctx, i.Message.ID, user.ID); err != nil {
+			log.Printf("post fill: leave: %v", err)
+			ephemeral(s, i, "Something went wrong. Please try again.")
+			return
+		}
+	case postFillListValue:
+		if err := b.discord.ClaimFill(ctx, i.Message.ID, i.ChannelID, models.PostFillList, user.ID, displayName(user)); err != nil {
+			log.Printf("post fill: join list: %v", err)
+			ephemeral(s, i, "Something went wrong. Please try again.")
+			return
+		}
+	default:
+		slot, err := strconv.Atoi(choice)
+		if err != nil || slot <= 0 {
+			return
+		}
+		// Validate against the live roster so a stale dropdown can't claim a slot
+		// that has since been assigned a real player.
+		teamID, err := b.discord.GetChannelTeam(ctx, i.ChannelID)
+		if err != nil {
+			log.Printf("post fill: get binding: %v", err)
+			ephemeral(s, i, "Something went wrong. Please try again.")
+			return
+		}
+		team, err := b.teams.Get(ctx, teamID)
+		if err != nil {
+			log.Printf("post fill: load team: %v", err)
+			ephemeral(s, i, "Something went wrong. Please try again.")
+			return
+		}
+		if !isOpenSlot(team, slot) {
+			ephemeral(s, i, "That slot already has a player assigned. Pick an open slot or the fill list.")
+			return
+		}
+		err = b.discord.ClaimFill(ctx, i.Message.ID, i.ChannelID, slot, user.ID, displayName(user))
+		if errors.Is(err, models.ErrSlotTaken) {
+			ephemeral(s, i, "Someone just signed up to fill that slot. Pick another open slot or the fill list.")
+			return
+		}
+		if err != nil {
+			log.Printf("post fill: claim: %v", err)
+			ephemeral(s, i, "Something went wrong signing you up. Please try again.")
 			return
 		}
 	}
 
-	err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseUpdateMessage,
-		Data: &discordgo.InteractionResponseData{
-			Embeds:     []*discordgo.MessageEmbed{embed},
-			Components: postComponents(),
-		},
-	})
-	if err != nil {
-		log.Printf("rsvp: respond: %v", err)
+	if err := b.renderPostUpdate(ctx, s, i); err != nil {
+		log.Printf("post fill: refresh post: %v", err)
+		ephemeral(s, i, "Saved your signup, but couldn't refresh the post.")
 	}
 }
 
-// rsvpEmbed reloads the team bound to the post's channel and re-renders the full
-// post embed with the current RSVPs (so marks appear beside names).
-func (b *bot) rsvpEmbed(ctx context.Context, i *discordgo.InteractionCreate, rsvps []models.RSVP) (*discordgo.MessageEmbed, error) {
+// existingFooterText returns the footer text on a message's first embed (the
+// post's "Posted by …" note), or "" when there is none.
+func existingFooterText(msg *discordgo.Message) string {
+	if msg == nil || len(msg.Embeds) == 0 {
+		return ""
+	}
+	if f := msg.Embeds[0].Footer; f != nil {
+		return f.Text
+	}
+	return ""
+}
+
+// isOpenSlot reports whether a roster slot exists and has no Discord handle set,
+// so it's eligible to be filled via the signup dropdown.
+func isOpenSlot(team *models.Team, slot int) bool {
+	for _, p := range team.Players {
+		if p.Slot == slot {
+			return strings.TrimSpace(p.DiscordHandle) == ""
+		}
+	}
+	return false
+}
+
+// renderPostUpdate re-renders a posted trial overview in place (embed + controls)
+// from current team data, RSVPs, and fill signups, in response to a button or
+// dropdown interaction on the post. It returns an error only when the post can't
+// be rebuilt (so callers can surface a "saved, but couldn't refresh" notice);
+// failures from the Discord update call itself are logged and swallowed.
+func (b *bot) renderPostUpdate(ctx context.Context, s *discordgo.Session, i *discordgo.InteractionCreate) error {
 	teamID, err := b.discord.GetChannelTeam(ctx, i.ChannelID)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	team, _, primary, gr, err := b.loadTeamData(ctx, teamID)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	return buildPostEmbed(team, primary, gr, rsvps), nil
+	rsvps, err := b.discord.ListRSVPs(ctx, i.Message.ID)
+	if err != nil {
+		return err
+	}
+	fills, err := b.discord.ListFills(ctx, i.Message.ID)
+	if err != nil {
+		return err
+	}
+	// Preserve the "Posted by" footer set on the original post (RSVP/fill updates
+	// re-render the embed from scratch, which would otherwise drop it).
+	embed := buildPostEmbed(team, primary, gr, rsvps, fills, existingFooterText(i.Message))
+	if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseUpdateMessage,
+		Data: &discordgo.InteractionResponseData{
+			Embeds:     []*discordgo.MessageEmbed{embed},
+			Components: postComponents(team, fills),
+		},
+	}); err != nil {
+		log.Printf("post: update respond: %v", err)
+	}
+	return nil
 }
 
 // rsvpMarks matches each RSVP to a roster slot (by Discord ID/handle) and

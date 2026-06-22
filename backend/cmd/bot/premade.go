@@ -760,7 +760,7 @@ func (b *bot) renderPremadeUpdate(ctx context.Context, s *discordgo.Session, i *
 		ephemeral(s, i, "Saved, but couldn't refresh the post.")
 		return
 	}
-	embed := b.premadeEmbed(team, run, primary, signups, waitlist)
+	embed := b.premadeEmbed(ctx, team, run, primary, signups, waitlist)
 	err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseUpdateMessage,
 		Data: &discordgo.InteractionResponseData{
@@ -792,7 +792,7 @@ func (b *bot) refreshPremadePostMessage(ctx context.Context, s *discordgo.Sessio
 	if err != nil {
 		return err
 	}
-	embed := b.premadeEmbed(team, run, primary, signups, waitlist)
+	embed := b.premadeEmbed(ctx, team, run, primary, signups, waitlist)
 	components := premadeComponents(team, signups)
 	_, err = s.ChannelMessageEditComplex(&discordgo.MessageEdit{
 		Channel:    run.ChannelID,
@@ -804,18 +804,37 @@ func (b *bot) refreshPremadePostMessage(ctx context.Context, s *discordgo.Sessio
 }
 
 // premadeEmbed builds the run announcement embed from team data, the current
-// signups, and the current per-role waitlist.
-func (b *bot) premadeEmbed(team *models.Team, run *models.PremadeRun, primary *models.Encounter, signups []models.PremadeSignup, waitlist []models.PremadeWaitlistEntry) *discordgo.MessageEmbed {
+// signups, and the current per-role waitlist. A "Posted by …" footer notes the
+// run's creator when their linked name can be resolved.
+func (b *bot) premadeEmbed(ctx context.Context, team *models.Team, run *models.PremadeRun, primary *models.Encounter, signups []models.PremadeSignup, waitlist []models.PremadeWaitlistEntry) *discordgo.MessageEmbed {
 	claimants := map[int]models.PremadeSignup{}
 	for _, sg := range signups {
 		claimants[sg.Slot] = sg
 	}
 	title, desc := discordfmt.BuildPremadePost(team, run.Title, run.PostOverride, run.ScheduledAt.Unix(), primary, claimants, waitlist)
-	return &discordgo.MessageEmbed{
+	embed := &discordgo.MessageEmbed{
 		Title:       truncate(title, embedTitleLimit),
 		Description: truncate(desc, embedDescriptionLimit),
 		Color:       embedColor,
 	}
+	if poster := b.premadePoster(ctx, run); poster != "" {
+		embed.Footer = &discordgo.MessageEmbedFooter{Text: truncate(postedByPrefix+poster, embedFooterLimit)}
+	}
+	return embed
+}
+
+// premadePoster resolves the display name of the run's creator for the "Posted
+// by" footer, or "" when there's no creator on record or they can't be resolved
+// (e.g. unlinked or deleted account).
+func (b *bot) premadePoster(ctx context.Context, run *models.PremadeRun) string {
+	if run == nil || run.CreatedBy == nil {
+		return ""
+	}
+	link, err := b.discord.GetLink(ctx, *run.CreatedBy)
+	if err != nil || !link.Linked {
+		return ""
+	}
+	return link.DiscordUsername
 }
 
 // premadeComponents builds the post's control rows. In specific signup mode:

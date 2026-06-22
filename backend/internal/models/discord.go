@@ -248,3 +248,75 @@ func (s *DiscordStore) ListRSVPs(ctx context.Context, messageID string) ([]RSVP,
 	}
 	return out, rows.Err()
 }
+
+// PostFillList is the sentinel slot value meaning "the general fill list" (a
+// backup pool not tied to a specific roster slot). Any slot > 0 is a real open
+// roster slot a single user can fill.
+const PostFillList = 0
+
+// PostFill is one Discord user's signup on a posted trial overview: either a
+// specific open roster slot (Slot > 0) or the general fill list
+// (Slot == PostFillList).
+type PostFill struct {
+	Slot            int
+	DiscordUserID   string
+	DiscordUsername string
+}
+
+// ClaimFill records the user's signup for a posted message: an open roster slot
+// (slot > 0) or the general fill list (slot == PostFillList). A user holds at
+// most one signup per message, so any prior choice is released first. When slot
+// > 0 is already held by someone else, the operation rolls back and returns
+// ErrSlotTaken (mirrors PremadeStore.ClaimSlot).
+func (s *DiscordStore) ClaimFill(ctx context.Context, messageID, channelID string, slot int, discordUserID, discordUsername string) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx, `DELETE FROM discord_post_fills WHERE message_id = $1 AND discord_user_id = $2`, messageID, discordUserID); err != nil {
+		return err
+	}
+	const ins = `
+		INSERT INTO discord_post_fills (message_id, channel_id, slot, discord_user_id, discord_username, updated_at)
+		VALUES ($1, $2, $3, $4, $5, now())`
+	if _, err := tx.Exec(ctx, ins, messageID, channelID, slot, discordUserID, discordUsername); err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return ErrSlotTaken
+		}
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// LeaveFill removes the user's signup on a posted message (if any). Idempotent.
+func (s *DiscordStore) LeaveFill(ctx context.Context, messageID, discordUserID string) error {
+	_, err := s.pool.Exec(ctx, `DELETE FROM discord_post_fills WHERE message_id = $1 AND discord_user_id = $2`, messageID, discordUserID)
+	return err
+}
+
+// ListFills returns all signups for a posted message, ordered by when each was
+// set (so displayed lists are stable).
+func (s *DiscordStore) ListFills(ctx context.Context, messageID string) ([]PostFill, error) {
+	const q = `
+		SELECT slot, discord_user_id, discord_username
+		FROM discord_post_fills
+		WHERE message_id = $1
+		ORDER BY updated_at, slot`
+	rows, err := s.pool.Query(ctx, q, messageID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []PostFill
+	for rows.Next() {
+		var f PostFill
+		if err := rows.Scan(&f.Slot, &f.DiscordUserID, &f.DiscordUsername); err != nil {
+			return nil, err
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}

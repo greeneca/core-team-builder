@@ -522,11 +522,15 @@ column; the `User` JSON model hides it (`json:"-"`).
   - `post` — posts the team's **overview** as a boxed embed: title (team name),
     a single dynamic schedule timestamp (`<t:unix:F>`/`<t:unix:R>`, shown in each
     viewer's own timezone — no more per-tz list), the roster grouped by role with
-    abbreviated gear (Markdown lines, one player each, RSVP icon beside the name),
-    and groupings. Carries three buttons:
-    **✅ Coming**, **❌ Not coming** (RSVP), and **Get My Build Details**. Built by
-    `discordfmt.BuildPost`; the bot wraps the parts in the embed and attaches the
-    buttons via `postComponents()`.
+    abbreviated gear (Markdown lines, one player each, RSVP icon beside the name;
+    each role header shows a `(filled/total)` count, where a slot is "filled" when
+    it has an assigned Discord handle or an open slot has been filled),
+    a **Fill list** section, and groupings. Carries a button row
+    (**✅ Coming**, **❌ Not coming** (RSVP), **Get My Build Details**) plus a
+    **signup dropdown** (`post_fill_select`) whenever the roster has any open
+    slots (slots with no Discord handle). Built by `discordfmt.BuildPost`; the bot
+    wraps the parts in the embed and attaches the controls via
+    `postComponents(team, fills)`.
   - `recruit` — posts the team's **recruitment post** as an embed (the team's
     free-form `signup_post` body, or a default prompt) with a single **I'm
     Interested** button. Pressing it starts an interactive **DM intake flow**
@@ -567,6 +571,25 @@ column; the `User` JSON model hides it (`json:"-"`).
     separate Attendance list, and responders who don't match a roster slot are
     omitted. A user has one RSVP per post; pressing the other button switches it.
     Re-posting starts a fresh tally.
+  - **Signup dropdown** (`post_fill_select`, `handlePostFill`) → lets anyone sign
+    up to cover an **open slot** (a roster slot with no `discord_handle`) or join
+    the general **fill list**. Options list each open, unclaimed slot plus
+    **Join the fill list** and **Remove my signup**; the row is omitted entirely
+    when the roster has no open slots. Picking a slot stores a row in
+    `discord_post_fills` (validated against the live roster; a taken slot returns
+    `ErrSlotTaken`); a filled slot then renders the filler's name with a
+    `` `fill` `` tag and an **automatic ✅** (signing up to fill counts as coming,
+    independent of RSVPs). Fill-list backups appear in the **Fill list** section.
+    A user holds at most one signup per post, so each choice replaces the prior
+    one; the post is re-rendered in place via `renderPostUpdate` (shared with the
+    RSVP buttons). No account link is required (like RSVPs).
+- **"Posted by" footer**: both the `/coreteam post` overview and the premade
+  `/coreteam signup` run post carry a Discord **embed footer** ("Posted by
+  <name>") noting who posted. The overview uses the invoking user's display name
+  (preserved across RSVP/fill updates by carrying the existing embed footer
+  forward in `renderPostUpdate`); the run post resolves it from the run's
+  `created_by` via `DiscordStore.GetLink` (`premadePoster`), so it survives the
+  DB-driven re-renders too.
 - **Account linking**: `users.discord_user_id` (unique) / `discord_username` link
   an app account to a Discord identity. The web UI ("Link Discord" topbar button,
   `#discord-modal`) calls `POST /api/discord/link-code` to mint a short,
@@ -582,6 +605,12 @@ column; the `User` JSON model hides it (`json:"-"`).
 - **RSVPs**: `discord_rsvps` (`028_discord_rsvps.sql`) stores one row per
   `(message_id, discord_user_id)` with a `'yes'`/`'no'` status
   (`DiscordStore.SetRSVP`/`ListRSVPs`).
+- **Post fill signups**: `discord_post_fills` (`046_discord_post_fills.sql`)
+  stores one row per `(message_id, discord_user_id)` with a `slot` (`0` =
+  `models.PostFillList` general fill list; `> 0` = a specific open roster slot,
+  unique per message via a partial index). Backs the post's signup dropdown
+  (`DiscordStore.ClaimFill`/`LeaveFill`/`ListFills`); like RSVPs it's keyed by
+  message ID so re-posting starts fresh.
 - **Label data (codegen)**: the bot formats posts using
   `backend/internal/discordfmt` (`BuildPost` for the overview embed + `PlayerDetail`
   for the build-details DM, plus the GROUP-source half of `computePenCoverage` /
@@ -640,7 +669,9 @@ the `pre_made` flag on (see "Pre-made trial run" under Teams). Tables in
 - **Post** (`discordfmt.BuildPremadePost`): title + a single `<t:unix:F>`/`:R`
   schedule timestamp + the run's body (`premade_runs.post_override` when set,
   else the team's `premade_post`) + a per-slot roster showing
-  each slot's name/role/class and either the claimant's mention or "open".
+  each slot's name/role/class and either the claimant's mention or "open". Each
+  role header shows a `(claimed/total)` signup count so it's easy to see how many
+  slots are still open.
   Controls (`premadeComponents`): a **claim** select listing only open slots
   (`premade_claim`; disabled "all taken" placeholder when full), a **details**
   select listing all slots (`premade_details`), and a final button row
