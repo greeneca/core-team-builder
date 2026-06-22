@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Dashboard — Core Team Builder</title>
-  <link rel="stylesheet" href="css/styles.css?v=108" />
+  <link rel="stylesheet" href="css/styles.css?v=110" />
 </head>
 <body>
   <div id="message" class="toast is-hidden" role="alert" aria-live="assertive"></div>
@@ -102,12 +102,13 @@
         <div class="form-actions detail-toolbar-actions">
           <span id="presence-indicator" class="presence-indicator is-hidden" aria-live="polite" title=""></span>
           <button id="members-btn" class="btn btn--ghost btn--sm" type="button">Members Pool</button>
+          <button id="convert-template-btn" class="btn btn--ghost btn--sm is-hidden" type="button" title="Convert this between a regular team and a signup template. The roster and all data are preserved; only how the Discord bot treats it changes.">Convert to template</button>
           <button id="collapse-all-btn" class="btn btn--ghost btn--sm" type="button">Collapse all</button>
           <button id="expand-all-btn" class="btn btn--ghost btn--sm" type="button">Expand all</button>
         </div>
       </div>
 
-      <div class="card mt-4 collapsible section-collapsible">
+      <div id="team-header-card" class="card mt-4 collapsible section-collapsible">
         <div class="section-head collapsible-head">
           <div class="collapsible-head-main">
             <button class="collapse-toggle" type="button" aria-expanded="true" aria-label="Collapse section"></button>
@@ -577,6 +578,6 @@
   <script src="js/gear-skills.js?v=101"></script>
   <script src="js/data.js?v=108"></script>
   <script src="js/components.js?v=100"></script>
-  <script src="js/app.js?v=114"></script>
+  <script src="js/app.js?v=117"></script>
 </body>
 </html>

@@ -170,7 +170,8 @@
     list.innerHTML = "";
     teams.forEach((team) => {
       const card = document.createElement("div");
-      card.className = "team-card";
+      // Tint by mode to match the team detail header (template vs regular team).
+      card.className = "team-card " + (team.pre_made === true ? "is-template" : "is-team");
       const owned = team.owner_id === currentUser.id;
       card.innerHTML = `
         <button class="team-card-open" type="button">
@@ -3014,8 +3015,8 @@
     return !!currentTeam && currentTeam.pre_made === true;
   }
 
-  // Apply pre-made (template) mode: a team's template status is fixed at
-  // creation (there's no in-view toggle), so this only adjusts presentation. In
+  // Apply pre-made (template) mode: presentation adjusts to the team's template
+  // status (toggled in-view via the Convert button, or set at creation). In
   // template mode the recurring schedule, the Post Footer + Recruit Post bot
   // texts, member pool, and per-player Discord handles don't apply, so they're
   // hidden; the Build Details DM footer stays (players can still request build
@@ -3058,6 +3059,19 @@
     if (waitlistToggle) {
       waitlistToggle.checked = waitlistEnabled();
       waitlistToggle.disabled = !canEdit();
+    }
+    // Convert button (editors only): label reflects the direction of conversion.
+    const convertBtn = el("convert-template-btn");
+    if (convertBtn) {
+      convertBtn.textContent = on ? "Convert to team" : "Convert to template";
+      convertBtn.classList.toggle("is-hidden", !canEdit());
+    }
+    // Tint the top header panel so template vs regular team is visible at a
+    // glance (styled in styles.css).
+    const headerCard = el("team-header-card");
+    if (headerCard) {
+      headerCard.classList.toggle("is-template", on);
+      headerCard.classList.toggle("is-team", !on);
     }
   }
 
@@ -3244,8 +3258,51 @@
     currentTeam.auto_share_pool_viewers = e.target.checked;
   });
 
-  // A team's template (pre-made) status is set at creation via the "+ New
-  // Template" button — there's no in-view toggle to change it after the fact.
+  // Convert the open team between a regular team and a signup template. This
+  // only flips the pre_made flag (and persists it) — the roster, encounters,
+  // groupings, and all other data are preserved; converting back restores the
+  // team view. simple_signup is left as-is so a converted team keeps its per-slot
+  // builds (specific signup) unless the editor turns simple signup on.
+  el("convert-template-btn").addEventListener("click", async () => {
+    if (!canEdit() || !currentTeam) return;
+    const toTemplate = !preMade();
+    const ok = confirm(
+      toTemplate
+        ? `Convert “${currentTeam.name}” into a signup template? The roster and all data are kept; the recurring schedule and member pool stop applying, and the Discord bot will treat it as a /coreteam signup template.`
+        : `Convert “${currentTeam.name}” back into a regular team? The roster and all data are kept; signup-template features stop applying.`
+    );
+    if (!ok) return;
+    // Commit any pending edits first so the conversion saves on top of the
+    // latest state (and currentTeam.updated_at is fresh for the version token).
+    await flushAutosave();
+    const name = el("team-name-input").value.trim();
+    if (!name) {
+      showMessage("Team name cannot be empty");
+      return;
+    }
+    currentTeam.pre_made = toTemplate;
+    setSaveStatus("team", "saving");
+    try {
+      currentTeam = await api.saveTeam(currentTeam.id, {
+        ...metaPayload(name),
+        players: [],
+        expected_updated_at: currentTeam.updated_at,
+      });
+      dirtyMeta = false;
+      setSaveStatus("team", "saved");
+      markLocalSaved();
+      renderTeamDetail();
+      showMessage(
+        `Converted “${currentTeam.name}” to a ${toTemplate ? "template" : "team"}.`,
+        "success"
+      );
+    } catch (err) {
+      currentTeam.pre_made = !toTemplate;
+      setSaveStatus("team", "error");
+      handleConcurrentError(err);
+    }
+  });
+
   // Toggle simple (role-based) vs specific (per-slot) signup for templates. The
   // encounters toggle is hidden for simple signups, so re-apply that too.
   el("simple-signup-toggle").addEventListener("change", (e) => {

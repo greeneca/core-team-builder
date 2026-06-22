@@ -283,11 +283,15 @@ column; the `User` JSON model hides it (`json:"-"`).
   members from being shared with unless re-enabled.
 - **Pre-made trial run / template** (`035_team_premade.sql`): `teams.pre_made
   BOOLEAN` (default **false**) + `teams.premade_post TEXT` (default `''`, ≤2000
-  runes). A pre-made team is a "signup template". Template status is set **at
-  creation time** via the teams page's **+ New Template** button (the web UI no
-  longer exposes an in-view toggle to flip `pre_made`): the frontend creates the
+  runes). A pre-made team is a "signup template". Template status can be set **at
+  creation time** via the teams page's **+ New Template** button (creates the
   team, then promotes it with a save that sets `pre_made=true` and
-  `simple_signup=true` (simple signup is the template default). The teams page
+  `simple_signup=true` — simple signup is the template default), **or toggled
+  later** with the **Convert to template / Convert to team** button in the team
+  detail page's "Team Features" section (editors only). Convert flips only
+  `pre_made` and persists it via the normal team save; the roster and all other
+  data are preserved, and `simple_signup` is left unchanged (so a converted team
+  keeps its per-slot builds unless simple signup is turned on). The teams page
   lists templates in their own collapsible **Templates** section, separate from
   standard teams. When a team is a template, the detail UI shows its own
   "Pre-made Run Post" card and **hides** (non-destructively) the trial schedule,
