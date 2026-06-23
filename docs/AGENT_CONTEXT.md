@@ -728,14 +728,20 @@ the `pre_made` flag on (see "Pre-made trial run" under Teams). Tables in
   `cleanupRun` (tears down the post and thread, marks the run cleaned up) then
   ends the session. **Sign up a player** starts a three-step sub-conversation:
   (1) `edit_signup_name` — the editor types a Discord name; the bot searches
-  the guild in two passes: first `GuildMembersSearch` (Discord prefix-only API,
-  fast) then, if fewer than 9 matches were found, `GuildMembers` (up to 1000
-  members fetched locally and filtered with case-insensitive `strings.Contains`)
+  the guild in two passes: first `GuildMembersSearch` called with the
+  lowercased query (Discord prefix-only API, fast; lowercasing ensures
+  case-insensitive behavior regardless of Discord's implementation) then, if
+  fewer than 9 matches were found, `GuildMembers` (up to 1000 members fetched
+  locally and filtered with case-insensitive `strings.Contains`)
   — the two-pass approach ensures non-prefix partial queries (e.g. `"ohn"` →
-  `"Johnny"`) still find the right person. Up to 9 matched options are presented
-  in a `premade_edit_signup_pick` select plus an "add as-is" option for names
-  with no guild match (the typed text is parked in `signup_user_name` on the
-  session; `047_premade_signup_target.sql`);
+  `"Johnny"`) still find the right person. If at least one member matched, the
+  session advances to `edit_signup_pick` and a select is shown with up to 9
+  matched members plus an "add as-is" option. If **no** members matched, the
+  session stays at `edit_signup_name` (so typing another name triggers a fresh
+  search) and only the "add as-is" option is shown — the editor can still add
+  the player by name without a Discord account, or retype to search again. The
+  typed text is always parked in `signup_user_name` on the session
+  (`047_premade_signup_target.sql`);
   (2) `edit_signup_pick` (`handlePremadeEditSignupPick`) — the editor picks a
   member or "raw"; the resolved name is saved in the session and the DM message
   updates to a `premade_edit_signup_slot` slot/role picker; (3)
