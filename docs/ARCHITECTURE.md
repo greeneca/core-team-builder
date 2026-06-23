@@ -505,28 +505,31 @@ moves the head of that slot's role queue into the open slot (transactionally,
 conversation** per Discord user (primary key `discord_user_id`), persisted so a
 half-finished signup survives a bot restart. `step` names the awaited answer
 (create flow: team / tz / title / when / confirm / body; edit flow:
-edit_field / edit_title / edit_when / edit_body); a new `/coreteam signup` or
+edit_field / edit_title / edit_when / edit_body / edit_signup_name /
+edit_signup_pick / edit_signup_slot); a new `/coreteam signup` or
 **Edit run** press overwrites any prior session, and the flow deletes it on
 completion (`finishPremadeDM` / the edit "Done" choice). Typing a cancel word
 (`isCancel`: cancel / stop / quit / abort / exit / nevermind) in the DM at any
 step deletes the session and aborts the conversation:
 
-| column          | type        | notes                                       |
-|-----------------|-------------|---------------------------------------------|
-| discord_user_id | text        | primary key (the runner)                    |
-| app_user_id     | bigint      | FK → `users(id)`, cascade                   |
-| team_id         | bigint      | FK → `teams(id)`, cascade; NULL until chosen|
-| guild_id        | text        | guild the signup was started in             |
-| channel_id      | text        | channel to post the run in                  |
-| dm_channel_id   | text        | the DM channel driving the conversation     |
-| step            | text        | the awaited answer                          |
-| title           | text        | run title (once entered)                    |
-| scheduled_at    | timestamptz | parsed run time, **UTC** (NULL until set)   |
-| post_override   | text        | optional per-run body (default `''`)        |
-| mode            | text        | `''` create flow / `'edit'` editing a run; `041_premade_run_edit.sql` |
-| run_id          | bigint      | FK → `premade_runs(id)`, cascade; the run being edited (`041`) |
-| created_at      | timestamptz | default `now()`                             |
-| updated_at      | timestamptz | bumped on each answer                       |
+| column           | type        | notes                                                        |
+|------------------|-------------|--------------------------------------------------------------|
+| discord_user_id  | text        | primary key (the runner)                                     |
+| app_user_id      | bigint      | FK → `users(id)`, cascade                                    |
+| team_id          | bigint      | FK → `teams(id)`, cascade; NULL until chosen                 |
+| guild_id         | text        | guild the signup was started in                              |
+| channel_id       | text        | channel to post the run in                                   |
+| dm_channel_id    | text        | the DM channel driving the conversation                      |
+| step             | text        | the awaited answer                                           |
+| title            | text        | run title (once entered)                                     |
+| scheduled_at     | timestamptz | parsed run time, **UTC** (NULL until set)                    |
+| post_override    | text        | optional per-run body (default `''`)                         |
+| mode             | text        | `''` create flow / `'edit'` editing a run; `041_premade_run_edit.sql` |
+| run_id           | bigint      | FK → `premade_runs(id)`, cascade; the run being edited (`041`) |
+| signup_user_id   | text        | Discord user ID of the "sign up a player" target (default `''`); `''` for a free-typed name with no Discord match; `047_premade_signup_target.sql` |
+| signup_user_name | text        | display name of the signup target parked between the pick and slot steps (default `''`); `047_premade_signup_target.sql` |
+| created_at       | timestamptz | default `now()`                                              |
+| updated_at       | timestamptz | bumped on each answer                                        |
 
 The runner's remembered timezone lives in `users.timezone` (`040_dm_signup.sql`,
 default `''`): asked once via a DM select, then reused so natural-language times

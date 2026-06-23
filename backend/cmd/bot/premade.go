@@ -28,7 +28,9 @@ import (
 //	premade_wait                       (on the post; value = role to waitlist for)
 //	premade_leave                      (on the post; release the presser's slot/waitlist)
 //	premade_edit                       (on the post; start a DM to edit title/time/body)
-//	premade_edit_field                 (DM select; value = title | when | body | done)
+//	premade_edit_field                 (DM select; value = title | when | body | signup | delete | done)
+//	premade_edit_signup_pick           (DM select; value = a guild member id, or "raw")
+//	premade_edit_signup_slot           (DM select; value = a slot number, or a role in simple mode)
 const (
 	premadePrefix       = "premade_"
 	premadeDMTimezoneID = "premade_dm_tz"
@@ -39,6 +41,9 @@ const (
 	premadeEditID       = "premade_edit"
 	premadeDeleteID     = "premade_delete"
 	premadeEditFieldID  = "premade_edit_field"
+	// Edit-flow "sign up a player" sub-conversation (DM components).
+	premadeEditSignupPickID = "premade_edit_signup_pick"
+	premadeEditSignupSlotID = "premade_edit_signup_slot"
 )
 
 // onPremadeComponent dispatches every premade_* component interaction.
@@ -61,6 +66,10 @@ func (b *bot) onPremadeComponent(s *discordgo.Session, i *discordgo.InteractionC
 		b.handlePremadeDelete(s, i)
 	case id == premadeEditFieldID:
 		b.handlePremadeEditFieldSelect(s, i)
+	case id == premadeEditSignupPickID:
+		b.handlePremadeEditSignupPick(s, i)
+	case id == premadeEditSignupSlotID:
+		b.handlePremadeEditSignupSlot(s, i)
 	}
 }
 
@@ -992,10 +1001,11 @@ func premadeComponents(team *models.Team, signups []models.PremadeSignup) []disc
 }
 
 // premadeActionRow is the post's final button row: "Un-Sign" (any claimant
-// releases their slot), "Edit run", and "Delete run" (both gated to the run's
-// creator / team owner-editor in their handlers — Discord can't hide a button
-// per-user on a shared post, so non-editors get a private rejection instead).
-// Shared by the specific and simple component layouts.
+// releases their slot) and "Edit run" (gated to the run's creator / team
+// owner-editor in its handler — Discord can't hide a button per-user on a shared
+// post, so non-editors get a private rejection instead). Deleting a run and
+// signing up another player both live behind the "Edit run" DM menu. Shared by
+// the specific and simple component layouts.
 func premadeActionRow() discordgo.MessageComponent {
 	return discordgo.ActionsRow{Components: []discordgo.MessageComponent{
 		discordgo.Button{
@@ -1007,11 +1017,6 @@ func premadeActionRow() discordgo.MessageComponent {
 			Label:    "Edit run",
 			Style:    discordgo.PrimaryButton,
 			CustomID: premadeEditID,
-		},
-		discordgo.Button{
-			Label:    "Delete run",
-			Style:    discordgo.DangerButton,
-			CustomID: premadeDeleteID,
 		},
 	}}
 }

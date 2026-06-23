@@ -286,6 +286,12 @@ func (b *bot) onMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) 
 		b.premadeEditWhen(ctx, s, sess, content)
 	case premadeStepEditBody:
 		b.premadeEditBody(ctx, s, sess, content)
+	case premadeStepEditSignupName:
+		b.premadeEditSignupSearch(ctx, s, sess, content)
+	case premadeStepEditSignupPick:
+		b.dmSend(s, sess.DMChannelID, "Please pick a player from the menu above.")
+	case premadeStepEditSignupSlot:
+		b.dmSend(s, sess.DMChannelID, "Please pick a slot from the menu above.")
 	}
 }
 
@@ -556,4 +562,74 @@ func isCancel(s string) bool {
 		return true
 	}
 	return false
+}
+
+// premadeEditSignupSearch handles a free-text name entry in the "sign up a
+// player" sub-flow. It searches the guild for members whose name starts with the
+// query and presents a picker select. The typed text is stored in
+// SignupUserName so the editor can choose "use as-is" without a matched account.
+func (b *bot) premadeEditSignupSearch(ctx context.Context, s *discordgo.Session, sess *models.PremadeSession, query string) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		b.dmSend(s, sess.DMChannelID, "Please type a name to search for.")
+		return
+	}
+
+	// Park the typed text so the "raw" option in the picker can refer back to it.
+	sess.SignupUserName = truncate(query, 100)
+	sess.SignupUserID = ""
+	sess.Step = premadeStepEditSignupPick
+	if err := b.premade.UpsertSession(ctx, sess); err != nil {
+		log.Printf("premade edit: signup search persist: %v", err)
+		b.dmSend(s, sess.DMChannelID, "Something went wrong. Please try again.")
+		return
+	}
+
+	// Search the guild for members whose display name or username starts with
+	// the query (up to 9 results — leave the last slot for the "as-is" option).
+	opts := make([]discordgo.SelectMenuOption, 0, 10)
+	if sess.GuildID != "" {
+		members, err := s.GuildMembersSearch(sess.GuildID, query, 9)
+		if err != nil {
+			log.Printf("premade edit: guild member search: %v", err)
+		}
+		for _, m := range members {
+			if m.User == nil {
+				continue
+			}
+			name := memberDisplayName(m)
+			if name == "" {
+				name = displayName(m.User)
+			}
+			label := name
+			if m.User.Username != name {
+				label += " (@" + m.User.Username + ")"
+			}
+			opts = append(opts, discordgo.SelectMenuOption{
+				Label:       truncate(label, 100),
+				Value:       m.User.ID,
+				Description: "Discord member",
+			})
+		}
+	}
+
+	// Always offer an "add as-is" option so the editor isn't blocked when the
+	// target isn't in the guild member list (e.g. a friend who hasn't joined yet).
+	rawLabel := fmt.Sprintf("Add \"%s\" as-is (no Discord match)", query)
+	opts = append(opts, discordgo.SelectMenuOption{
+		Label:       truncate(rawLabel, 100),
+		Value:       "raw",
+		Description: "Sign up without a matched Discord account",
+	})
+
+	msg := "Pick a matching member, or choose the last option to use the name as typed:"
+	if len(opts) == 1 {
+		msg = fmt.Sprintf("No guild members matched \"%s\". Pick the option below to add them by name anyway:", query)
+	}
+	if _, err := s.ChannelMessageSendComplex(sess.DMChannelID, &discordgo.MessageSend{
+		Content:    msg,
+		Components: selectRow(premadeEditSignupPickID, "Pick a player", 1, 1, opts),
+	}); err != nil {
+		log.Printf("premade edit: signup search send: %v", err)
+	}
 }

@@ -711,21 +711,41 @@ the `pre_made` flag on (see "Pre-made trial run" under Teams). Tables in
   Controls (`premadeComponents`): a **claim** select listing only open slots
   (`premade_claim`; disabled "all taken" placeholder when full), a **details**
   select listing all slots (`premade_details`), and a final button row
-  (`premadeActionRow`) with **Un-Sign** (`premade_leave`), **Edit run**
-  (`premade_edit`), and **Delete run** (`premade_delete`).
+  (`premadeActionRow`) with **Un-Sign** (`premade_leave`) and **Edit run**
+  (`premade_edit`). Deleting a run and signing up another player both live
+  behind the "Edit run" DM menu (see below). Older posts may still carry a
+  standalone **Delete run** button (`premade_delete`); its handler
+  (`handlePremadeDelete`) remains so those posts keep working.
 - **Edit** (`premade_edit` → `handlePremadeEdit`, `cmd/bot/premade_edit.go`):
   visible to everyone but gated to the run's creator or the team's owner/editor
   (`canEditRun`). It opens a DM and reuses the `premade_signup_sessions` row in
   **edit mode** (`mode='edit'`, `run_id` set; `041_premade_run_edit.sql`) to walk
-  a field menu (`premade_edit_field`: title / when / body / done). Each applied
-  field calls `PremadeStore.UpdateRun` and re-renders the posted announcement in
-  place via `refreshPremadePostMessage` (`ChannelMessageEditComplex`), then
-  re-shows the menu so several fields can be edited in one sitting.
+  a field menu (`premade_edit_field`): **Title** / **Date & time** / **Description**
+  / **Sign up a player** / **Delete run** / **Done**. Each title/when/body change
+  calls `PremadeStore.UpdateRun` and re-renders the posted announcement in place
+  via `refreshPremadePostMessage` (`ChannelMessageEditComplex`), then re-shows
+  the menu so several fields can be edited in one sitting. **Delete run** calls
+  `cleanupRun` (tears down the post and thread, marks the run cleaned up) then
+  ends the session. **Sign up a player** starts a three-step sub-conversation:
+  (1) `edit_signup_name` — the editor types a Discord name; the bot searches the
+  guild via `GuildMembersSearch` (up to 9 results) and presents a
+  `premade_edit_signup_pick` select with matched members plus an "add as-is"
+  option for names with no guild match (the typed text is parked in
+  `signup_user_name` on the session; `047_premade_signup_target.sql`);
+  (2) `edit_signup_pick` (`handlePremadeEditSignupPick`) — the editor picks a
+  member or "raw"; the resolved name is saved in the session and the DM message
+  updates to a `premade_edit_signup_slot` slot/role picker; (3)
+  `edit_signup_slot` (`handlePremadeEditSignupSlot`) — the editor picks a slot
+  (specific mode) or role (simple mode, first open matching slot); the bot calls
+  `ClaimSlot` using the target's Discord user ID or a synthetic `"n:<name>"` ID
+  for free-typed names (keeping it distinct from real Discord IDs), compacts
+  simple signups if needed, refreshes the post, and loops back to the field menu.
 - **Delete** (`premade_delete` → `handlePremadeDelete`, `cmd/bot/premade_edit.go`):
-  visible to everyone but gated to the run's creator or the team's owner/editor
-  (`canEditRun`; non-editors get an ephemeral rejection). Deletes the posted
-  message (and thread, if any) and marks the run cleaned up (`MarkCleanedUp`) so
-  it's no longer active.
+  kept for backward compatibility with posts made before the "Delete run" option
+  moved into the Edit DM menu. Gated to the run's creator or the team's
+  owner/editor (`canEditRun`; non-editors get an ephemeral rejection). Calls
+  `cleanupRun` (deletes the post and thread, marks the run cleaned up via
+  `MarkCleanedUp`) so it's no longer active.
 - **Cancel** (`isCancel` in `cmd/bot/premade_dm.go`): typing a cancel word
   (cancel / stop / quit / abort / exit / nevermind) in the DM aborts whatever
   conversation is active. `onMessageCreate` checks it before the step switch, so

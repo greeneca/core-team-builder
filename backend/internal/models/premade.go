@@ -390,12 +390,17 @@ type PremadeSession struct {
 	// Mode is "" for the create flow and "edit" when editing an existing run.
 	Mode string
 	// RunID is the run being edited (Mode == "edit"); nil for the create flow.
-	RunID     *int64
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	RunID *int64
+	// SignupUserID / SignupUserName park the pending "sign up a player" target
+	// between the player-pick and slot-pick component steps of the edit flow.
+	// SignupUserID is "" for a free-typed name with no matched Discord account.
+	SignupUserID   string
+	SignupUserName string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }
 
-const premadeSessionCols = `discord_user_id, app_user_id, team_id, guild_id, channel_id, dm_channel_id, step, title, scheduled_at, post_override, mode, run_id, created_at, updated_at`
+const premadeSessionCols = `discord_user_id, app_user_id, team_id, guild_id, channel_id, dm_channel_id, step, title, scheduled_at, post_override, mode, run_id, signup_user_id, signup_user_name, created_at, updated_at`
 
 func scanSession(row pgx.Row) (*PremadeSession, error) {
 	sess := &PremadeSession{}
@@ -403,6 +408,7 @@ func scanSession(row pgx.Row) (*PremadeSession, error) {
 		&sess.DiscordUserID, &sess.AppUserID, &sess.TeamID, &sess.GuildID,
 		&sess.ChannelID, &sess.DMChannelID, &sess.Step, &sess.Title,
 		&sess.ScheduledAt, &sess.PostOverride, &sess.Mode, &sess.RunID,
+		&sess.SignupUserID, &sess.SignupUserName,
 		&sess.CreatedAt, &sess.UpdatedAt,
 	)
 	if err != nil {
@@ -427,8 +433,8 @@ func (s *PremadeStore) GetSession(ctx context.Context, discordUserID string) (*P
 func (s *PremadeStore) UpsertSession(ctx context.Context, sess *PremadeSession) error {
 	const q = `
 		INSERT INTO premade_signup_sessions
-			(discord_user_id, app_user_id, team_id, guild_id, channel_id, dm_channel_id, step, title, scheduled_at, post_override, mode, run_id, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, now())
+			(discord_user_id, app_user_id, team_id, guild_id, channel_id, dm_channel_id, step, title, scheduled_at, post_override, mode, run_id, signup_user_id, signup_user_name, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, now())
 		ON CONFLICT (discord_user_id) DO UPDATE SET
 			app_user_id = EXCLUDED.app_user_id,
 			team_id = EXCLUDED.team_id,
@@ -441,11 +447,14 @@ func (s *PremadeStore) UpsertSession(ctx context.Context, sess *PremadeSession) 
 			post_override = EXCLUDED.post_override,
 			mode = EXCLUDED.mode,
 			run_id = EXCLUDED.run_id,
+			signup_user_id = EXCLUDED.signup_user_id,
+			signup_user_name = EXCLUDED.signup_user_name,
 			updated_at = now()`
 	_, err := s.pool.Exec(ctx, q,
 		sess.DiscordUserID, sess.AppUserID, sess.TeamID, sess.GuildID,
 		sess.ChannelID, sess.DMChannelID, sess.Step, sess.Title,
 		sess.ScheduledAt, sess.PostOverride, sess.Mode, sess.RunID,
+		sess.SignupUserID, sess.SignupUserName,
 	)
 	return err
 }
