@@ -220,8 +220,14 @@ The `seed` service creates a permanent **admin** account. After bootstrapping:
 
 - [ ] **Refresh-token cleanup** runs in-process (hourly sweep in the backend) —
       no cron needed.
-- [ ] **Database backups:** snapshot the `db-data` volume (or `pg_dump`) on a
-      schedule.
+- [ ] **Database backups:** snapshot the `db-data` volume, or use the on-demand
+      `backup` / `restore` compose services (behind their own profiles, so they
+      are **not** started by a plain `docker compose up`):
+      - Back up: `docker compose --profile backup run --rm backup` writes a
+        timestamped `pg_dump` custom-format file to `./backups/`.
+      - Restore: `RESTORE_FILE=<name>.dump docker compose --profile restore run
+        --rm restore` restores that file (drops existing objects first).
+      Run these on a schedule (e.g. cron invoking the backup service).
 - [ ] **Log monitoring:** watch backend logs for `audit: share lookup miss`
       bursts (username enumeration attempts) and repeated `429`s at the edge.
 - [ ] **Image updates:** rebuild periodically to pick up base-image

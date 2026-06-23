@@ -174,6 +174,98 @@ services:
     mem_limit: 128m
     pids_limit: 100
 
+  # On-demand database backup. Dumps the whole database with pg_dump in the
+  # custom (-Fc) format to a timestamped file under ./backups on the host. Behind
+  # the "backup" profile so it is NOT started by a plain `docker compose up`.
+  # Run it explicitly:  docker compose --profile backup run --rm backup
+  backup:
+    profiles: ["backup"]
+    image: postgres:16-alpine
+    environment:
+      PGHOST: db
+      PGPORT: "5432"
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB}
+    entrypoint:
+      - sh
+      - -c
+      - |
+        set -eu
+        mkdir -p /backups
+        out="/backups/${POSTGRES_DB}-$$(date +%Y%m%d-%H%M%S).dump"
+        echo "Backing up database '$$PGDATABASE' to $$out ..."
+        pg_dump --format=custom --no-owner --no-privileges --file "$$out"
+        echo "Backup complete: $$out"
+    volumes:
+      - ./backups:/backups
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - ctb-net
+    restart: "no"
+    # Hardening. One-shot job; no extra caps needed (network egress only),
+    # block setuid escalation, bound resource usage.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 256m
+    pids_limit: 100
+
+  # On-demand database restore. Restores a pg_dump custom-format file from
+  # ./backups into the database, dropping existing objects first. Behind the
+  # "restore" profile so it is NOT started by a plain `docker compose up`. Set
+  # RESTORE_FILE to the dump's name (relative to ./backups) and run:
+  #   RESTORE_FILE=core_team_builder-20260623-143000.dump \
+  #     docker compose --profile restore run --rm restore
+  restore:
+    profiles: ["restore"]
+    image: postgres:16-alpine
+    environment:
+      PGHOST: db
+      PGPORT: "5432"
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB}
+      RESTORE_FILE: ${RESTORE_FILE:-}
+    entrypoint:
+      - sh
+      - -c
+      - |
+        set -eu
+        if [ -z "$${RESTORE_FILE:-}" ]; then
+          echo "ERROR: set RESTORE_FILE to a dump filename under ./backups." >&2
+          echo "Available backups:" >&2
+          ls -1 /backups 2>/dev/null || echo "  (none)" >&2
+          exit 1
+        fi
+        src="/backups/$$RESTORE_FILE"
+        if [ ! -f "$$src" ]; then
+          echo "ERROR: $$src not found." >&2
+          exit 1
+        fi
+        echo "Restoring '$$src' into database '$$PGDATABASE' ..."
+        pg_restore --clean --if-exists --no-owner --no-privileges \
+          --dbname "$$PGDATABASE" "$$src"
+        echo "Restore complete."
+    volumes:
+      - ./backups:/backups:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - ctb-net
+    restart: "no"
+    # Hardening. One-shot job; same posture as the backup service.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 256m
+    pids_limit: 100
+
   frontend:
     build: ./frontend
     image: ctb-frontend
