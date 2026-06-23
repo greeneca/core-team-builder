@@ -422,7 +422,7 @@ func (b *bot) finishPremadeDM(ctx context.Context, s *discordgo.Session, sess *m
 		}
 	}
 
-	team, _, primary, _, err := b.loadTeamData(ctx, teamID)
+	team, _, primary, gr, err := b.loadTeamData(ctx, teamID)
 	if err != nil {
 		log.Printf("premade dm: finish load team: %v", err)
 		b.dmSend(s, sess.DMChannelID, "Could not load that team. Please run /coreteam signup again.")
@@ -441,7 +441,7 @@ func (b *bot) finishPremadeDM(ctx context.Context, s *discordgo.Session, sess *m
 		return
 	}
 
-	embed := b.premadeEmbed(ctx, team, run, primary, nil, nil)
+	embed := b.premadeEmbed(ctx, team, run, primary, gr, nil, nil)
 	msg, err := s.ChannelMessageSendComplex(sess.ChannelID, &discordgo.MessageSend{
 		Embeds:     []*discordgo.MessageEmbed{embed},
 		Components: premadeComponents(team, nil),

@@ -837,7 +837,7 @@ func (b *bot) premadeRunForMessage(ctx context.Context, s *discordgo.Session, i 
 
 // renderPremadeUpdate re-renders the run post in place with the current signups.
 func (b *bot) renderPremadeUpdate(ctx context.Context, s *discordgo.Session, i *discordgo.InteractionCreate, run *models.PremadeRun) {
-	team, _, primary, _, err := b.loadTeamData(ctx, run.TeamID)
+	team, _, primary, gr, err := b.loadTeamData(ctx, run.TeamID)
 	if err != nil {
 		log.Printf("premade: render load team: %v", err)
 		ephemeral(s, i, "Saved, but couldn't refresh the post.")
@@ -855,7 +855,7 @@ func (b *bot) renderPremadeUpdate(ctx context.Context, s *discordgo.Session, i *
 		ephemeral(s, i, "Saved, but couldn't refresh the post.")
 		return
 	}
-	embed := b.premadeEmbed(ctx, team, run, primary, signups, waitlist)
+	embed := b.premadeEmbed(ctx, team, run, primary, gr, signups, waitlist)
 	err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseUpdateMessage,
 		Data: &discordgo.InteractionResponseData{
@@ -875,7 +875,7 @@ func (b *bot) refreshPremadePostMessage(ctx context.Context, s *discordgo.Sessio
 	if run.MessageID == "" || run.ChannelID == "" {
 		return nil
 	}
-	team, _, primary, _, err := b.loadTeamData(ctx, run.TeamID)
+	team, _, primary, gr, err := b.loadTeamData(ctx, run.TeamID)
 	if err != nil {
 		return err
 	}
@@ -887,7 +887,7 @@ func (b *bot) refreshPremadePostMessage(ctx context.Context, s *discordgo.Sessio
 	if err != nil {
 		return err
 	}
-	embed := b.premadeEmbed(ctx, team, run, primary, signups, waitlist)
+	embed := b.premadeEmbed(ctx, team, run, primary, gr, signups, waitlist)
 	components := premadeComponents(team, signups)
 	_, err = s.ChannelMessageEditComplex(&discordgo.MessageEdit{
 		Channel:    run.ChannelID,
@@ -901,12 +901,12 @@ func (b *bot) refreshPremadePostMessage(ctx context.Context, s *discordgo.Sessio
 // premadeEmbed builds the run announcement embed from team data, the current
 // signups, and the current per-role waitlist. A "Posted by …" footer notes the
 // run's creator when their linked name can be resolved.
-func (b *bot) premadeEmbed(ctx context.Context, team *models.Team, run *models.PremadeRun, primary *models.Encounter, signups []models.PremadeSignup, waitlist []models.PremadeWaitlistEntry) *discordgo.MessageEmbed {
+func (b *bot) premadeEmbed(ctx context.Context, team *models.Team, run *models.PremadeRun, primary *models.Encounter, gr []models.Grouping, signups []models.PremadeSignup, waitlist []models.PremadeWaitlistEntry) *discordgo.MessageEmbed {
 	claimants := map[int]models.PremadeSignup{}
 	for _, sg := range signups {
 		claimants[sg.Slot] = sg
 	}
-	title, desc := discordfmt.BuildPremadePost(team, run.Title, run.PostOverride, run.ScheduledAt.Unix(), primary, claimants, waitlist)
+	title, desc := discordfmt.BuildPremadePost(team, run.Title, run.PostOverride, run.ScheduledAt.Unix(), primary, gr, claimants, waitlist)
 	embed := &discordgo.MessageEmbed{
 		Title:       truncate(title, embedTitleLimit),
 		Description: truncate(desc, embedDescriptionLimit),

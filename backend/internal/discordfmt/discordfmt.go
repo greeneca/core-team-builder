@@ -70,7 +70,7 @@ func BuildPost(team *models.Team, primary *models.Encounter, groupings []models.
 		L = append(L, fl...)
 	}
 
-	if gl := formatGroupings(team, groupings); len(gl) > 0 {
+	if gl := formatGroupings(team, groupings, fillBySlot, names); len(gl) > 0 {
 		L = append(L, "")
 		L = append(L, gl...)
 	}
@@ -95,7 +95,12 @@ func BuildPost(team *models.Team, primary *models.Encounter, groupings []models.
 //
 // postOverride, when non-empty, replaces the team's default premade post body
 // (team.PremadePost) for this run.
-func BuildPremadePost(team *models.Team, title, postOverride string, scheduledUnix int64, primary *models.Encounter, claimants map[int]models.PremadeSignup, waitlist []models.PremadeWaitlistEntry) (string, string) {
+//
+// groupings is the roster's mechanic split, rendered only on advanced
+// (specific) signup runs — simple (role-only) runs hide per-slot detail, so they
+// omit groupings. Each grouping member shows the claimant who holds that slot,
+// falling back to the roster slot name when it's still open.
+func BuildPremadePost(team *models.Team, title, postOverride string, scheduledUnix int64, primary *models.Encounter, groupings []models.Grouping, claimants map[int]models.PremadeSignup, waitlist []models.PremadeWaitlistEntry) (string, string) {
 	if strings.TrimSpace(title) == "" {
 		title = team.Name
 	}
@@ -119,6 +124,14 @@ func BuildPremadePost(team *models.Team, title, postOverride string, scheduledUn
 			L = append(L, "")
 		}
 		L = append(L, rl...)
+	}
+	// Groupings appear only on advanced (specific) signup runs; simple
+	// (role-only) runs hide per-slot detail. Members track each slot's claimant.
+	if !team.SimpleSignup {
+		if gl := formatGroupings(team, groupings, premadeClaimNames(claimants), nil); len(gl) > 0 {
+			L = append(L, "")
+			L = append(L, gl...)
+		}
 	}
 	if wl := premadeWaitlistLines(team, waitlist); len(wl) > 0 {
 		L = append(L, "")
@@ -202,6 +215,20 @@ func claimantDisplay(username, discordUserID string) string {
 		return name
 	}
 	return discordUserID
+}
+
+// premadeClaimNames maps each claimed slot to its claimant's display name, used
+// to render grouping members by who actually holds the slot (open slots are
+// absent and fall back to the roster slot name).
+func premadeClaimNames(claimants map[int]models.PremadeSignup) map[int]string {
+	if len(claimants) == 0 {
+		return nil
+	}
+	out := make(map[int]string, len(claimants))
+	for slot, sg := range claimants {
+		out[slot] = claimantDisplay(sg.DiscordUsername, sg.DiscordUserID)
+	}
+	return out
 }
 
 // premadeRosterLines renders the roster grouped by role for a pre-made run: each
@@ -734,20 +761,35 @@ func exportSlotName(team *models.Team, slot int) string {
 	return fmt.Sprintf("Slot %d", slot)
 }
 
+// groupingSlotName resolves the name shown for a slot inside the Groupings
+// section so it tracks who actually holds the slot, matching the roster above:
+// a slot someone signed up to fill shows the filler's name; an assigned slot
+// shows the player's resolved Discord display name; otherwise it falls back to
+// the static roster slot name (or "Slot N").
+func groupingSlotName(team *models.Team, slot int, fillBySlot, names map[int]string) string {
+	if fill := strings.TrimSpace(fillBySlot[slot]); fill != "" {
+		return fill
+	}
+	if n := strings.TrimSpace(names[slot]); n != "" {
+		return n
+	}
+	return exportSlotName(team, slot)
+}
+
 // formatGroupings renders a section listing each grouping's numbered groups and
-// assigned players. Returns nil when there are none.
-func formatGroupings(team *models.Team, groupings []models.Grouping) []string {
+// assigned players. Member names track the claimed/filled slot (via fillBySlot
+// and names) so they stay in sync with the roster above. Groupings with no
+// assigned members are skipped, and the whole section is omitted (returns nil)
+// when there are no groupings — or none with any members.
+func formatGroupings(team *models.Team, groupings []models.Grouping, fillBySlot, names map[int]string) []string {
 	if len(groupings) == 0 {
 		return nil
 	}
 	L := []string{"**Groupings**"}
+	emitted := false
 	for _, g := range groupings {
-		name := strings.TrimSpace(g.Name)
-		if name == "" {
-			name = "Grouping"
-		}
-		L = append(L, "")
-		L = append(L, fmt.Sprintf("__%s__", name))
+		groupLines := make([]string, 0, len(g.Groups))
+		hasMember := false
 		for _, grp := range g.Groups {
 			label := strings.TrimSpace(grp.Name)
 			if label == "" {
@@ -757,14 +799,31 @@ func formatGroupings(team *models.Team, groupings []models.Grouping) []string {
 			sort.Ints(slots)
 			members := make([]string, 0, len(slots))
 			for _, s := range slots {
-				members = append(members, fmt.Sprintf("%d. %s", s, exportSlotName(team, s)))
+				members = append(members, fmt.Sprintf("%d. %s", s, groupingSlotName(team, s, fillBySlot, names)))
 			}
 			line := "—"
 			if len(members) > 0 {
 				line = strings.Join(members, ", ")
+				hasMember = true
 			}
-			L = append(L, fmt.Sprintf("• %s: %s", label, line))
+			groupLines = append(groupLines, fmt.Sprintf("• %s: %s", label, line))
 		}
+		// An empty grouping (no slots assigned to any of its groups) adds no
+		// useful information, so skip it entirely.
+		if !hasMember {
+			continue
+		}
+		name := strings.TrimSpace(g.Name)
+		if name == "" {
+			name = "Grouping"
+		}
+		L = append(L, "")
+		L = append(L, fmt.Sprintf("__%s__", name))
+		L = append(L, groupLines...)
+		emitted = true
+	}
+	if !emitted {
+		return nil
 	}
 	return L
 }
