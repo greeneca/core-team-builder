@@ -220,18 +220,50 @@
         </div>
       </div>
 
-      <!-- Encounters: manage the team's encounters (add / rename / delete).
-           The chip selector below attaches flush as this card's bottom section
-           (squared bottom corners) and splits off into a sticky strip on scroll. -->
-      <div id="encounters-manage-card" class="card mt-4 encounters-manage-card collapsible section-collapsible">
-        <div class="section-head collapsible-head">
-          <div class="collapsible-head-main">
-            <button class="collapse-toggle" type="button" aria-expanded="true" aria-label="Collapse section"></button>
-            <h2 style="margin: 0;">Encounters<span class="info-indicator" tabindex="0" role="img" aria-label="How encounters work: Encounters are per-fight loadout setups for your team. Add the Default/Trash encounters or bosses from a single trial, then give each player their gear and skills for that fight. Use the chips below to switch the active encounter you are editing. When adding an encounter you can copy gear and skills from an existing one." data-tip="Encounters are per-fight loadout setups for your team. Add the Default/Trash encounters or bosses from a single trial, then give each player their gear and skills for that fight. Use the chips below to switch the active encounter you are editing. When adding an encounter you can copy gear & skills from an existing one.">i</span></h2>
+      <!-- Rosters: switch between / manage a team's lineups. Each roster owns its
+           own players, encounters, and groupings; one is marked active (★) and
+           used by the Discord bot. Hidden for templates. -->
+      <div id="rosters-panel" class="rosters-panel mt-4">
+        <h3 class="rosters-panel-title">Rosters<span class="info-indicator" tabindex="0" role="img" aria-label="Rosters: A team can have multiple rosters (lineups), each with its own players, encounters, and groupings. Click a roster to view/edit it. The starred roster is the active one used by the Discord bot for posts and build details. Use + New roster to add one (optionally copying an existing roster)." data-tip="A team can have multiple rosters (lineups), each with its own players, encounters, and groupings. Click a roster to view/edit it. The starred (★) roster is the active one used by the Discord bot. Use + New roster to add one (optionally copying an existing roster).">i</span></h3>
+        <div class="rosters-bar-row">
+          <div id="rosters-bar" class="rosters-bar"></div>
+          <button id="add-roster-btn" class="btn btn--ghost btn--sm is-hidden" type="button">+ New roster</button>
+        </div>
+
+        <!-- Add-roster picker: free-text name + optional "copy from" source.
+             Mirrors the add-encounter form. -->
+        <form id="add-roster-form" class="add-roster-form is-hidden mt-4">
+          <div class="form-group">
+            <label for="add-roster-name">Roster name</label>
+            <input id="add-roster-name" class="input" type="text" maxlength="100" autocomplete="off" />
           </div>
+          <div class="form-group">
+            <label for="add-roster-copy">Copy From</label>
+            <select id="add-roster-copy" class="input"></select>
+          </div>
+          <div class="form-actions">
+            <button class="btn btn--primary btn--sm" type="submit">Add</button>
+            <button class="btn btn--ghost btn--sm" type="button" id="add-roster-cancel">Cancel</button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Encounters: switch between / manage a roster's per-fight loadouts.
+           Mirrors the rosters panel — chips select the encounter you're editing;
+           the selected chip exposes rename (✎) and delete (✕), and "+ Add
+           Encounter" reveals a name + copy-from picker. Only this panel is sticky:
+           it pins just below the topbar while scrolling the roster so you can
+           switch encounters anytime. The zero-height sentinel above it lets app.js
+           toggle the elevated .is-stuck style. -->
+      <div id="encounters-sentinel" aria-hidden="true"></div>
+      <div id="encounters-panel" class="encounters-panel">
+        <h3 class="encounters-panel-title">Encounters<span class="info-indicator" tabindex="0" role="img" aria-label="How encounters work: Encounters are per-fight loadout setups. Add the Default/Trash encounters or bosses from a single trial, then give each player their gear and skills for that fight. Click a chip to switch the encounter you are editing; its gear and skills appear in the roster below. The selected chip can be renamed or deleted. Use + Add Encounter to add one (optionally copying gear & skills from an existing one)." data-tip="Encounters are per-fight loadout setups. Click a chip to switch the encounter you are editing; its gear & skills show in the roster below. Rename (✎) or delete (✕) the selected chip. Use + Add Encounter to add one (optionally copying gear & skills from an existing one).">i</span></h3>
+        <div class="rosters-bar-row">
+          <div id="encounters-bar" class="rosters-bar encounters-bar"></div>
           <button id="add-encounter-btn" class="btn btn--ghost btn--sm is-hidden" type="button">+ Add Encounter</button>
         </div>
-        <div class="collapsible-body">
+
+        <!-- Add-encounter picker: allow-listed name + optional copy source. -->
         <form id="add-encounter-form" class="add-encounter-form is-hidden mt-4">
           <div class="form-group">
             <label for="add-encounter-name">Encounter</label>
@@ -247,30 +279,15 @@
           </div>
         </form>
 
-        <div id="encounter-controls" class="encounter-controls mt-4 is-hidden">
-          <div class="encounter-title-row">
-            <span class="text-muted">Rename Encounter</span>
-            <strong id="current-encounter-name">…</strong>
-            <select id="encounter-rename" class="input input--sm is-hidden"></select>
-          </div>
-          <div class="form-actions">
-            <span id="encounter-save-status" class="save-status" aria-live="polite"></span>
-            <button id="encounter-delete-btn" class="btn btn--danger btn--sm is-hidden" type="button">Delete Encounter</button>
-          </div>
+        <!-- Inline rename for the selected encounter (allow-listed names), shown
+             when its chip's pencil action is pressed. -->
+        <div id="encounter-rename-row" class="encounter-rename-row is-hidden mt-4">
+          <label for="encounter-rename">Rename</label>
+          <select id="encounter-rename" class="input input--sm"></select>
+          <button id="encounter-rename-cancel" class="btn btn--ghost btn--sm" type="button">Cancel</button>
         </div>
-        </div>
-      </div>
 
-      <!-- Encounter chip selector, in its own titled box. Only this panel is
-           sticky: it pins just below the topbar while scrolling the roster so you
-           can switch encounters anytime. Sitting flush under the encounters card
-           (no top margin) it reads as that card's bottom section, then "splits
-           off" with elevation once pinned. The zero-height sentinel above it lets
-           app.js toggle the elevated .is-stuck style. -->
-      <div id="encounters-sentinel" aria-hidden="true"></div>
-      <div id="encounters-panel" class="encounters-panel">
-        <h3 class="encounters-panel-title">Active Encounter<span class="info-indicator" tabindex="0" role="img" aria-label="Active encounter: Pick the encounter you are editing. Its per-player gear and skills appear in the roster below. This bar stays pinned to the top while you scroll so you can switch encounters anytime." data-tip="Pick the encounter you are editing. Its per-player gear and skills appear in the roster below. This bar stays pinned to the top while you scroll so you can switch encounters anytime.">i</span></h3>
-        <div id="encounters-bar" class="encounters-bar"></div>
+        <span id="encounter-save-status" class="save-status is-hidden" aria-live="polite"></span>
       </div>
 
       <!-- Group Stats: buff coverage, crit damage, and penetration for the
@@ -348,17 +365,6 @@
         </div>
       </div>
 
-        </div>
-      </div>
-
-      <!-- Rosters: switch between / manage a team's lineups. Each roster owns its
-           own players, encounters, and groupings; one is marked active (★) and
-           used by the Discord bot. Hidden for templates. -->
-      <div id="rosters-panel" class="rosters-panel mt-4">
-        <h3 class="rosters-panel-title">Rosters<span class="info-indicator" tabindex="0" role="img" aria-label="Rosters: A team can have multiple rosters (lineups), each with its own players, encounters, and groupings. Click a roster to view/edit it. The starred roster is the active one used by the Discord bot for posts and build details. Use + New roster to add one (optionally copying the current roster)." data-tip="A team can have multiple rosters (lineups), each with its own players, encounters, and groupings. Click a roster to view/edit it. The starred (★) roster is the active one used by the Discord bot. Use + New roster to add one (optionally copying the current roster).">i</span></h3>
-        <div class="rosters-bar-row">
-          <div id="rosters-bar" class="rosters-bar"></div>
-          <button id="add-roster-btn" class="btn btn--ghost btn--sm is-hidden" type="button">+ New roster</button>
         </div>
       </div>
 

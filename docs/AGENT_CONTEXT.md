@@ -391,9 +391,11 @@ column; the `User` JSON model hides it (`json:"-"`).
   (`renderRosterBar`, `#rosters-panel`) lists rosters as chips: click to switch
   (`selectRoster` reloads that roster's lineup/encounters/groupings), ★ to
   activate (`activateRosterFlow`), and ✎/✕ to rename/delete the selected one;
-  "+ New roster" (`createRosterFlow`) prompts a name and offers to copy the
-  current roster. Hidden for templates (pre-made runs are locked to the active
-  roster — see `applyPreMadeMode`).
+  "+ New roster" reveals an inline form (`#add-roster-form`, `openRosterForm`)
+  with a free-text name input and a "Copy From" picker (`populateRosterCopyFromSelect`,
+  defaulting to the current roster, or "None (empty roster)"); submitting runs
+  `createRosterFlow`. This mirrors the add-encounter flow. Hidden for templates
+  (pre-made runs are locked to the active roster — see `applyPreMadeMode`).
 
 ## Encounters model (current)
 
@@ -479,11 +481,10 @@ column; the `User` JSON model hides it (`json:"-"`).
   `components.js`, driven by a `data-tip` attribute) on both the picker options
   **and** the selected chips. Tooltips can be turned off via the topbar
   **Tooltips** checkbox; the choice persists in `localStorage`
-  (`ctb_tooltips_disabled`) via `setTooltipsEnabled`. The **Encounters** heading
-  and the **Active Encounter** panel title each carry a small circled-`i`
-  `.info-indicator` (focusable, with a `data-tip`) that explains how encounters
-  work; these use the same tooltip engine, so they also respect the Tooltips
-  toggle.
+  (`ctb_tooltips_disabled`) via `setTooltipsEnabled`. The **Encounters** panel
+  title carries a small circled-`i` `.info-indicator` (focusable, with a
+  `data-tip`) that explains how encounters work; it uses the same tooltip engine,
+  so it also respects the Tooltips toggle.
 - **Access/permissions**: mirror the roster — any role can read; editors/owner
   can add, rename, delete, and edit loadouts; viewers are read-only. A roster
   cannot delete its **last** encounter.
@@ -493,30 +494,31 @@ column; the `User` JSON model hides it (`json:"-"`).
   `PUT /api/teams/{id}/encounters/{eid}/loadouts`. Mutations return the refreshed
   encounter (with its 12 loadouts).
 - **UI**: encounters are integrated into the single team detail page (there is
-  **no** separate encounter screen). The **Encounters** card holds a bar of
-  selectable chips (the active one is highlighted), an `+ Add Encounter` picker,
-  and an `#encounter-controls` row (current name, rename dropdown, delete, save
-  status). Selecting a chip (`selectEncounter`) loads that encounter's loadouts
-  and refreshes the per-player gear/skill chips inline in the roster — each
-  roster slot renders a `[data-loadout]` block (Gear + Skills searchable lists)
-  below its subclass/class-mastery section (`renderRosterLoadouts`). Loadouts
-  autosave on chip add/remove (or Ctrl/Cmd+S); `selectEncounter` flushes any
-  pending loadout autosave before switching so unsaved edits are never dropped.
-  The chip selector sits in its own titled box (`#encounters-panel`,
-  `.encounters-panel`, header "Active Encounter") that lives outside the
-  encounters card (a direct child of the detail section) so its containing block
-  spans the roster, letting it stay pinned while scrolling. By default it
-  attaches flush beneath the encounters card — the card's bottom corners are
-  squared (`.encounters-manage-card`) and the panel overlaps the border with a
-  `-1px` top margin and squared top corners, so they read as one box. Only this
-  panel is `position: sticky`; the rest of the encounters card (heading, add
-  form, rename/delete controls) scrolls away normally. It pins just beneath the
-  **sticky topbar** at `top: var(--topbar-height)` (the topbar is also
+  **no** separate encounter screen). The **Encounters** panel mirrors the rosters
+  panel (`renderEncountersBar`): a bar of `.roster-chip` chips, one per encounter,
+  plus an `+ Add Encounter` button. Clicking a chip's label (`selectEncounter`)
+  makes it the active encounter; the selected chip exposes inline **rename** (✎,
+  `openEncounterRename`) and **delete** (✕, `deleteEncounterFlow`) actions — there
+  is no "star/active" action (that concept belongs to rosters only), and ✕ is
+  hidden when only one encounter remains. Rename reveals an inline allow-listed
+  name picker (`#encounter-rename-row`); `+ Add Encounter` reveals the
+  `#add-encounter-form` (name + "copy gear & skills from" pickers). Selecting an
+  encounter loads its loadouts and refreshes the per-player gear/skill chips
+  inline in the roster — each roster slot renders a `[data-loadout]` block (Gear +
+  Skills searchable lists) below its subclass/class-mastery section
+  (`renderRosterLoadouts`). Loadouts autosave on chip add/remove (or Ctrl/Cmd+S);
+  `selectEncounter` flushes any pending loadout autosave before switching so
+  unsaved edits are never dropped. The panel is a standalone titled box
+  (`#encounters-panel`, `.encounters-panel`, header "Encounters") that lives as a
+  direct child of the detail section so its containing block spans the roster,
+  letting it stay pinned while scrolling. It is the only `position: sticky` panel.
+  It pins just beneath the **sticky topbar** at `top: var(--topbar-height)` (the
+  topbar is also
   `position: sticky`; `syncTopbarHeight` in `app.js` measures it into that CSS
   var on load/resize). `setupEncounterStickiness` watches a zero-height
   `#encounters-sentinel` via `IntersectionObserver` (top `rootMargin` = topbar
-  height) and toggles an `.is-stuck` class once the panel pins, which rounds all
-  corners and adds elevation so it visibly **splits off** into a floating bar.
+  height) and toggles an `.is-stuck` class once the panel pins, which adds
+  elevation so it visibly **floats** while scrolling.
   The topbar brand ("Core Team Builder", `#brand-home`) is a link back to the
   teams list (SPA navigation, with an `index.html` no-JS fallback). See
   **Autosave (UI)** above.

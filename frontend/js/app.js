@@ -1603,8 +1603,11 @@
   // are excluded so they don't trigger a redundant team save.
   detailView.addEventListener("change", (e) => {
     if (!currentTeam || !canEdit()) return;
-    if (e.target.closest("#add-encounter-form")) return;
-    if (e.target.closest("#encounter-controls")) return;
+    // The encounters panel (add-encounter form, chip rename picker) handles its
+    // own saves, so its select changes must not trigger a team-meta autosave.
+    if (e.target.closest("#encounters-panel")) return;
+    // The rosters panel (add-roster form) likewise manages its own create/save.
+    if (e.target.closest("#rosters-panel")) return;
     if (e.target.closest("[data-loadout]")) return;
     // The "Copy to…" control performs its own save; ignore it here.
     if (e.target.closest("[data-copy]")) return;
@@ -3015,7 +3018,6 @@
     const toggleLabel = el("encounters-enabled-label");
     if (toggleLabel) toggleLabel.classList.toggle("is-hidden", hideToggle);
 
-    el("encounters-manage-card").classList.toggle("is-hidden", !enabled);
     el("encounters-panel").classList.toggle("is-hidden", !enabled);
     el("encounters-sentinel").classList.toggle("is-hidden", !enabled);
   }
@@ -3138,21 +3140,56 @@
   // The encounters bar lets you pick the *current* encounter (whose per-player
   // loadouts are shown inline in the roster) and add new ones. There is no
   // separate encounter page anymore.
+  // The encounters bar mirrors the rosters bar: each encounter is a chip you
+  // click to make active (its per-player loadouts show inline in the roster);
+  // the selected chip exposes rename (✎) and delete (✕) actions for editors.
   function renderEncountersBar() {
     const bar = el("encounters-bar");
+    if (!bar) return;
+    const editable = canEdit();
     bar.innerHTML = "";
     currentEncounters.forEach((enc) => {
-      const chip = document.createElement("button");
-      chip.type = "button";
-      chip.className = "encounter-chip";
-      if (currentEncounter && enc.id === currentEncounter.id) {
-        chip.classList.add("is-active");
+      const chip = document.createElement("div");
+      chip.className = "roster-chip encounter-chip";
+      const selected = currentEncounter && enc.id === currentEncounter.id;
+      if (selected) chip.classList.add("is-selected");
+
+      const label = document.createElement("button");
+      label.type = "button";
+      label.className = "roster-chip-label";
+      label.textContent = enc.name;
+      label.addEventListener("click", () => selectEncounter(enc.id));
+      chip.appendChild(label);
+
+      if (editable && selected) {
+        const rename = document.createElement("button");
+        rename.type = "button";
+        rename.className = "roster-chip-action";
+        rename.textContent = "✎";
+        rename.title = "Rename encounter";
+        rename.addEventListener("click", (e) => {
+          e.stopPropagation();
+          openEncounterRename();
+        });
+        chip.appendChild(rename);
+
+        // Delete only when more than one encounter exists (a roster keeps ≥1).
+        if (currentEncounters.length > 1) {
+          const del = document.createElement("button");
+          del.type = "button";
+          del.className = "roster-chip-action roster-chip-delete";
+          del.textContent = "✕";
+          del.title = "Delete encounter";
+          del.addEventListener("click", (e) => {
+            e.stopPropagation();
+            deleteEncounterFlow();
+          });
+          chip.appendChild(del);
+        }
       }
-      chip.textContent = enc.name;
-      chip.addEventListener("click", () => selectEncounter(enc.id));
       bar.appendChild(chip);
     });
-    el("add-encounter-btn").classList.toggle("is-hidden", !canEdit());
+    el("add-encounter-btn").classList.toggle("is-hidden", !editable);
   }
 
   // resolveActiveRosterId returns the team's active roster id, falling back to
@@ -3229,6 +3266,8 @@
     });
     const addBtn = el("add-roster-btn");
     if (addBtn) addBtn.classList.toggle("is-hidden", !editable);
+    const addForm = el("add-roster-form");
+    if (addForm && !editable) addForm.classList.add("is-hidden");
   }
 
   // Switch the viewed/edited roster: load its lineup, encounters, and groupings.
@@ -3254,20 +3293,42 @@
     }
   }
 
+  // Fill the roster "copy from" picker with the team's existing rosters, plus a
+  // leading "None (empty)" option that starts a fresh roster. Defaults to the
+  // currently selected roster (matching the old "copy current roster" default).
+  function populateRosterCopyFromSelect(select) {
+    const rosters = (currentTeam && currentTeam.rosters) || [];
+    const none = `<option value="">None (empty roster)</option>`;
+    select.innerHTML =
+      none +
+      rosters.map((r) => `<option value="${r.id}">${escapeAttr(r.name)}</option>`).join("");
+    select.value = currentRosterId ? String(currentRosterId) : "";
+  }
+
+  // Reveal the inline add-roster form (name + copy-from picker), mirroring the
+  // add-encounter flow.
+  function openRosterForm() {
+    if (!currentTeam || !canEdit()) return;
+    const form = el("add-roster-form");
+    if (!form) return;
+    populateRosterCopyFromSelect(el("add-roster-copy"));
+    el("add-roster-name").value = "";
+    form.classList.remove("is-hidden");
+    el("add-roster-name").focus();
+  }
+
   async function createRosterFlow() {
     if (!currentTeam || !canEdit()) return;
-    const name = (prompt("New roster name:", "") || "").trim();
-    if (!name) return;
-    let copyFrom = 0;
-    if (
-      confirm(
-        "Copy players, encounters, and groupings from the current roster?\n\nOK = copy, Cancel = start empty."
-      )
-    ) {
-      copyFrom = currentRosterId || 0;
+    const name = (el("add-roster-name").value || "").trim();
+    if (!name) {
+      showMessage("Enter a roster name.", "error");
+      return;
     }
+    const copyRaw = el("add-roster-copy").value;
+    const copyFrom = copyRaw ? Number(copyRaw) : 0;
     try {
       const roster = await api.createRoster(currentTeam.id, name, copyFrom);
+      el("add-roster-form").classList.add("is-hidden");
       currentTeam = await api.getTeam(currentTeam.id);
       await selectRoster(roster.id);
     } catch (err) {
@@ -3291,6 +3352,14 @@
 
   async function activateRosterFlow(rosterId) {
     if (!currentTeam || !canEdit()) return;
+    const roster = (currentTeam.rosters || []).find((r) => r.id === rosterId);
+    if (
+      !confirm(
+        `Make “${roster ? roster.name : "this roster"}” the active roster? The Discord bot will use it for posts and build details.`
+      )
+    ) {
+      return;
+    }
     try {
       currentTeam = await api.activateRoster(currentTeam.id, rosterId);
       renderRosterBar();
@@ -3320,35 +3389,55 @@
     }
   }
 
-  // Show the controls for the currently selected encounter (name, rename,
-  // delete, save status). The loadouts themselves render inline in the roster.
+  // Rename/delete now live on the selected encounter chip (see
+  // renderEncountersBar), so this just keeps the inline rename row collapsed and
+  // resets the loadout save-status indicator for the current selection.
   function renderEncounterControls() {
-    const controls = el("encounter-controls");
-    if (!currentEncounter) {
-      controls.classList.add("is-hidden");
+    const renameRow = el("encounter-rename-row");
+    if (renameRow) renameRow.classList.add("is-hidden");
+    const editable = canEdit();
+    const status = el("encounter-save-status");
+    if (status) status.classList.toggle("is-hidden", !editable || !currentEncounter);
+    if (currentEncounter) setSaveStatus("encounter", "");
+  }
+
+  // Reveal the inline rename picker (allow-listed encounter names) for the
+  // selected encounter. Triggered by the chip's ✎ action.
+  function openEncounterRename() {
+    if (!currentEncounter || !canEdit()) return;
+    const row = el("encounter-rename-row");
+    const select = el("encounter-rename");
+    if (!row || !select) return;
+    const names = currentEncounters.map((enc) => enc.name);
+    populateEncounterNameSelect(select, names, currentEncounter.name);
+    select.value = currentEncounter.name;
+    row.classList.remove("is-hidden");
+    select.focus();
+  }
+
+  // Delete the selected encounter (chip ✕ action). A roster always keeps at
+  // least one encounter, so the ✕ is only shown when more than one exists.
+  async function deleteEncounterFlow() {
+    if (!currentEncounter || !canEdit()) return;
+    if (!confirm(`Delete encounter “${currentEncounter.name}”? This cannot be undone.`)) {
       return;
     }
-    controls.classList.remove("is-hidden");
-
-    const editable = canEdit();
-    el("current-encounter-name").textContent = currentEncounter.name;
-
-    // Editors get a rename dropdown; viewers just see the name.
-    const rename = el("encounter-rename");
-    rename.classList.toggle("is-hidden", !editable);
-    if (editable) {
-      const names = currentEncounters.map((enc) => enc.name);
-      populateEncounterNameSelect(rename, names, currentEncounter.name);
-      rename.value = currentEncounter.name;
+    try {
+      await api.deleteEncounter(currentTeam.id, currentEncounter.id);
+      const { encounters } = await api.listEncounters(currentTeam.id, currentRosterId);
+      currentEncounters = encounters || [];
+      // Fall back to the first remaining encounter.
+      currentEncounter = currentEncounters.length
+        ? await api.getEncounter(currentTeam.id, currentEncounters[0].id)
+        : null;
+      renderEncountersBar();
+      renderEncounterControls();
+      renderRosterLoadouts();
+      refreshBuffCoverage();
+      showMessage("Encounter deleted", "success");
+    } catch (err) {
+      handleError(err);
     }
-
-    // Delete only when editable and more than one encounter exists.
-    el("encounter-delete-btn").classList.toggle(
-      "is-hidden",
-      !editable || currentEncounters.length <= 1
-    );
-    el("encounter-save-status").classList.toggle("is-hidden", !editable);
-    setSaveStatus("encounter", "");
   }
 
   // Switch the selected encounter: load its loadouts, refresh the bar + controls,
@@ -3419,7 +3508,20 @@
   });
 
   const addRosterBtn = el("add-roster-btn");
-  if (addRosterBtn) addRosterBtn.addEventListener("click", createRosterFlow);
+  if (addRosterBtn) addRosterBtn.addEventListener("click", openRosterForm);
+  const addRosterForm = el("add-roster-form");
+  if (addRosterForm) {
+    addRosterForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      createRosterFlow();
+    });
+  }
+  const addRosterCancel = el("add-roster-cancel");
+  if (addRosterCancel) {
+    addRosterCancel.addEventListener("click", () => {
+      el("add-roster-form").classList.add("is-hidden");
+    });
+  }
 
   // Toggle whether the team uses multiple encounters. Turning it off hides the
   // encounters section and snaps the roster back to the first encounter; turning
@@ -3751,6 +3853,7 @@
       currentEncounter = await api.renameEncounter(currentTeam.id, currentEncounter.id, name);
       const { encounters } = await api.listEncounters(currentTeam.id, currentRosterId);
       currentEncounters = encounters || [];
+      el("encounter-rename-row").classList.add("is-hidden");
       renderEncountersBar();
       renderEncounterControls();
       showMessage("Encounter renamed", "success");
@@ -3759,26 +3862,8 @@
     }
   });
 
-  el("encounter-delete-btn").addEventListener("click", async () => {
-    if (!confirm(`Delete encounter “${currentEncounter.name}”? This cannot be undone.`)) {
-      return;
-    }
-    try {
-      await api.deleteEncounter(currentTeam.id, currentEncounter.id);
-      const { encounters } = await api.listEncounters(currentTeam.id, currentRosterId);
-      currentEncounters = encounters || [];
-      // Fall back to the first remaining encounter.
-      currentEncounter = currentEncounters.length
-        ? await api.getEncounter(currentTeam.id, currentEncounters[0].id)
-        : null;
-      renderEncountersBar();
-      renderEncounterControls();
-      renderRosterLoadouts();
-      refreshBuffCoverage();
-      showMessage("Encounter deleted", "success");
-    } catch (err) {
-      handleError(err);
-    }
+  el("encounter-rename-cancel").addEventListener("click", () => {
+    el("encounter-rename-row").classList.add("is-hidden");
   });
 
   // --- Buffs coverage ---

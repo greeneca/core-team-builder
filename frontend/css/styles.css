@@ -949,27 +949,24 @@ a.brand--home:hover {
   gap: var(--space-2);
 }
 
-/* Encounter chip selector lives in its own titled box. By default it sits flush
-   beneath the encounters card (the -1px top margin overlaps their borders and
-   the squared top corners make it read as that card's bottom section). Only this
-   panel is sticky: it pins just below the topbar once scrolled past so you can
-   switch encounters while editing the roster below. The .is-stuck state (toggled
-   from app.js once pinned) rounds it off and adds elevation so it visibly
-   "splits off" into a floating bar. */
+/* The encounters panel is a standalone titled box (mirrors the rosters panel:
+   chips select the active encounter, the selected chip exposes rename/delete, and
+   "+ Add Encounter" reveals the name + copy picker). It is the only sticky panel:
+   it pins just below the topbar once scrolled past so you can switch encounters
+   while editing the roster below. The .is-stuck state (toggled from app.js once
+   pinned) adds elevation so it visibly "floats". */
 .encounters-panel {
-  margin-top: -1px;
+  margin-top: var(--space-4);
   padding: var(--space-3) var(--space-4) var(--space-4);
   background: var(--color-surface);
   border: 1px solid var(--color-border);
-  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+  border-radius: var(--radius-lg);
   position: sticky;
   top: var(--topbar-height, 0);
   z-index: 100;
-  transition: border-radius 0.15s ease, box-shadow 0.15s ease, margin 0.15s ease;
+  transition: box-shadow 0.15s ease;
 }
 .encounters-panel.is-stuck {
-  margin-top: var(--space-4);
-  border-radius: var(--radius-lg);
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5);
 }
 .encounters-panel-title {
@@ -980,35 +977,12 @@ a.brand--home:hover {
   letter-spacing: 0.5px;
   color: var(--color-text-muted);
 }
-/* Square the bottom corners so the chip panel attaches flush below this card. */
-.encounters-manage-card {
-  border-bottom-left-radius: 0;
-  border-bottom-right-radius: 0;
-}
-.encounter-chip {
-  font-family: inherit;
-  font-size: var(--font-size-sm);
-  color: var(--color-text);
-  background: var(--color-surface-alt);
-  border: 1px solid var(--color-border);
-  border-radius: 999px;
-  padding: var(--space-2) var(--space-4);
-  cursor: pointer;
-  transition: border-color 0.15s ease, color 0.15s ease;
-}
-.encounter-chip:hover {
-  border-color: var(--color-accent);
-  color: var(--color-accent-hover);
-}
-/* The currently selected encounter (whose loadouts show in the roster). */
-.encounter-chip.is-active {
-  background: var(--color-accent);
-  border-color: var(--color-accent);
-  color: var(--color-bg);
-  font-weight: 600;
-}
-.encounter-chip.is-active:hover {
-  color: var(--color-bg);
+/* Inline rename picker for the selected encounter chip. */
+.encounter-rename-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
 }
 /* Rosters bar: switch between a team's lineups and manage them. Each roster is a
    chip with a star (active), its name, and (for the selected one) rename/delete
@@ -1090,49 +1064,21 @@ a.brand--home:hover {
   color: var(--color-danger, #d9534f);
 }
 
-.add-encounter-form {
+.add-encounter-form,
+.add-roster-form {
   display: flex;
   align-items: flex-end;
   gap: var(--space-4);
   flex-wrap: wrap;
 }
-.add-encounter-form .form-group { min-width: 16rem; margin: 0; }
-
-/* Controls for the selected encounter (name, rename, delete, save status). */
-.encounter-controls {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-4);
-  padding-top: var(--space-3);
-  border-top: 1px solid var(--color-border);
-}
-/* Title row takes the remaining space and may shrink/wrap, while the actions
-   (save status + Delete) stay pinned to the right even with a long name. */
-.encounter-controls > .encounter-title-row {
-  flex: 1;
-  min-width: 0;
-}
-.encounter-controls > .form-actions {
-  flex-shrink: 0;
-}
+.add-encounter-form .form-group,
+.add-roster-form .form-group { min-width: 16rem; margin: 0; }
 
 /* Per-player loadout block in the roster (below the subclass build). */
 .player-loadout {
   border-top: 1px dashed var(--color-border);
   padding-top: var(--space-3);
 }
-
-/* Encounter detail (loadouts) */
-.encounter-title-row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-4);
-  flex-wrap: wrap;
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-.encounter-title-row .input { max-width: 18rem; }
 
 .loadout-list {
   display: flex;
