@@ -286,10 +286,8 @@ func (b *bot) onMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) 
 		b.premadeEditWhen(ctx, s, sess, content)
 	case premadeStepEditBody:
 		b.premadeEditBody(ctx, s, sess, content)
-	case premadeStepEditSignupName:
+	case premadeStepEditSignupName, premadeStepEditSignupPick:
 		b.premadeEditSignupSearch(ctx, s, sess, content)
-	case premadeStepEditSignupPick:
-		b.dmSend(s, sess.DMChannelID, "Please pick a player from the menu above.")
 	case premadeStepEditSignupSlot:
 		b.dmSend(s, sess.DMChannelID, "Please pick a slot from the menu above.")
 	}
@@ -639,16 +637,10 @@ func (b *bot) premadeEditSignupSearch(ctx context.Context, s *discordgo.Session,
 	}
 
 	// Park the typed text so the "raw" option in the picker can refer back to it.
+	// Always keep the step at edit_signup_name so the editor can type a new name
+	// at any time to run a fresh search, even after results are shown.
 	sess.SignupUserName = truncate(query, 100)
 	sess.SignupUserID = ""
-
-	// When no guild members matched, keep the step at edit_signup_name so the
-	// editor can type a different name to search again. The "add as-is" option
-	// in the picker below is still available for names that genuinely have no
-	// Discord account. When members were found, advance to edit_signup_pick.
-	if len(opts) > 0 {
-		sess.Step = premadeStepEditSignupPick
-	}
 	if err := b.premade.UpsertSession(ctx, sess); err != nil {
 		log.Printf("premade edit: signup search persist: %v", err)
 		b.dmSend(s, sess.DMChannelID, "Something went wrong. Please try again.")
@@ -664,9 +656,12 @@ func (b *bot) premadeEditSignupSearch(ctx context.Context, s *discordgo.Session,
 		Description: "Sign up without a matched Discord account",
 	})
 
-	msg := "Pick a matching member, or choose the last option to use the name as typed:"
-	if len(opts) == 1 {
+	var msg string
+	switch {
+	case len(opts) == 1:
 		msg = fmt.Sprintf("No guild members matched **%s**. You can add them by name using the option below, or type a different name to search again.", query)
+	default:
+		msg = "Pick a matching member, or type a new name to search again:"
 	}
 	if _, err := s.ChannelMessageSendComplex(sess.DMChannelID, &discordgo.MessageSend{
 		Content:    msg,
