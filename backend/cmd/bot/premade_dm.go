@@ -565,9 +565,14 @@ func isCancel(s string) bool {
 }
 
 // premadeEditSignupSearch handles a free-text name entry in the "sign up a
-// player" sub-flow. It searches the guild for members whose name starts with the
-// query and presents a picker select. The typed text is stored in
-// SignupUserName so the editor can choose "use as-is" without a matched account.
+// player" sub-flow. It searches the guild for members whose name contains the
+// query (case-insensitive) and presents a picker select. The typed text is
+// stored in SignupUserName so the editor can choose "use as-is" without a
+// matched account.
+//
+// Discord's GuildMembersSearch API is prefix-only, so it misses non-prefix
+// partial matches (e.g. "ohn" won't find "Johnny"). We supplement it with a
+// local case-insensitive contains pass over the first 1000 guild members.
 func (b *bot) premadeEditSignupSearch(ctx context.Context, s *discordgo.Session, sess *models.PremadeSession, query string) {
 	query = strings.TrimSpace(query)
 	if query == "" {
@@ -585,18 +590,25 @@ func (b *bot) premadeEditSignupSearch(ctx context.Context, s *discordgo.Session,
 		return
 	}
 
-	// Search the guild for members whose display name or username starts with
-	// the query (up to 9 results — leave the last slot for the "as-is" option).
 	opts := make([]discordgo.SelectMenuOption, 0, 10)
 	if sess.GuildID != "" {
-		members, err := s.GuildMembersSearch(sess.GuildID, query, 9)
-		if err != nil {
-			log.Printf("premade edit: guild member search: %v", err)
-		}
-		for _, m := range members {
-			if m.User == nil {
-				continue
+		lq := strings.ToLower(query)
+		seen := make(map[string]bool)
+
+		// memberOpt checks whether m matches the query (case-insensitive contains
+		// on nick, global name, and username) and appends an option if so. The
+		// seen map deduplicates across the two search passes.
+		memberOpt := func(m *discordgo.Member) {
+			if m == nil || m.User == nil || seen[m.User.ID] || len(opts) >= 9 {
+				return
 			}
+			nick := strings.ToLower(m.Nick)
+			uname := strings.ToLower(m.User.Username)
+			gname := strings.ToLower(m.User.GlobalName)
+			if !strings.Contains(nick, lq) && !strings.Contains(uname, lq) && !strings.Contains(gname, lq) {
+				return
+			}
+			seen[m.User.ID] = true
 			name := memberDisplayName(m)
 			if name == "" {
 				name = displayName(m.User)
@@ -610,6 +622,27 @@ func (b *bot) premadeEditSignupSearch(ctx context.Context, s *discordgo.Session,
 				Value:       m.User.ID,
 				Description: "Discord member",
 			})
+		}
+
+		// Pass 1: prefix search — fast, but misses non-prefix partial matches.
+		if members, err := s.GuildMembersSearch(sess.GuildID, query, 9); err != nil {
+			log.Printf("premade edit: guild member search: %v", err)
+		} else {
+			for _, m := range members {
+				memberOpt(m)
+			}
+		}
+
+		// Pass 2: fetch up to 1000 members and filter locally. This catches
+		// non-prefix partial matches that GuildMembersSearch missed.
+		if len(opts) < 9 {
+			if members, err := s.GuildMembers(sess.GuildID, "", 1000); err != nil {
+				log.Printf("premade edit: guild members fetch: %v", err)
+			} else {
+				for _, m := range members {
+					memberOpt(m)
+				}
+			}
 		}
 	}
 
