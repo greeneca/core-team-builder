@@ -163,9 +163,13 @@ type Loadout struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// Encounter is a named fight within a team, with a per-player loadout list.
+// Encounter is a named fight within a roster, with a per-player loadout list.
 type Encounter struct {
-	ID        int64     `json:"id"`
+	ID       int64 `json:"id"`
+	RosterID int64 `json:"roster_id"`
+	// TeamID is resolved via the encounter's roster (encounters no longer carry
+	// team_id directly). It is populated by the read paths so callers can still
+	// verify team ownership.
 	TeamID    int64     `json:"team_id"`
 	Name      string    `json:"name"`
 	Position  int       `json:"position"`
@@ -184,13 +188,13 @@ func NewEncounterStore(pool *pgxpool.Pool) *EncounterStore {
 	return &EncounterStore{pool: pool}
 }
 
-// createDefaultEncounterTx inserts a team's initial "Default" encounter and its
-// 12 empty loadout slots within an existing transaction.
-func createDefaultEncounterTx(ctx context.Context, tx pgx.Tx, teamID int64) error {
+// createDefaultEncounterTx inserts a roster's initial "Default" encounter and
+// its 12 empty loadout slots within an existing transaction.
+func createDefaultEncounterTx(ctx context.Context, tx pgx.Tx, rosterID int64) error {
 	var eid int64
 	if err := tx.QueryRow(ctx,
-		`INSERT INTO encounters (team_id, name, position) VALUES ($1, 'Default', 0) RETURNING id`,
-		teamID,
+		`INSERT INTO encounters (roster_id, name, position) VALUES ($1, 'Default', 0) RETURNING id`,
+		rosterID,
 	).Scan(&eid); err != nil {
 		return err
 	}
@@ -205,14 +209,14 @@ func createDefaultEncounterTx(ctx context.Context, tx pgx.Tx, teamID int64) erro
 }
 
 // copyEncountersTx copies every encounter (and its per-player loadouts) from
-// srcTeamID to dstTeamID within an existing transaction. Used when creating a
-// team as a copy of another. Encounters keep their names and positions.
-func copyEncountersTx(ctx context.Context, tx pgx.Tx, srcTeamID, dstTeamID int64) error {
+// srcRosterID to dstRosterID within an existing transaction. Used when copying a
+// roster (or a whole team). Encounters keep their names and positions.
+func copyEncountersTx(ctx context.Context, tx pgx.Tx, srcRosterID, dstRosterID int64) error {
 	// Read all source encounters first; pgx allows only one active query per
 	// transaction, so we must finish iterating before issuing the inserts below.
 	rows, err := tx.Query(ctx,
-		`SELECT id, name, position FROM encounters WHERE team_id = $1 ORDER BY position, id`,
-		srcTeamID,
+		`SELECT id, name, position FROM encounters WHERE roster_id = $1 ORDER BY position, id`,
+		srcRosterID,
 	)
 	if err != nil {
 		return err
@@ -239,8 +243,8 @@ func copyEncountersTx(ctx context.Context, tx pgx.Tx, srcTeamID, dstTeamID int64
 	for _, src := range srcs {
 		var newID int64
 		if err := tx.QueryRow(ctx,
-			`INSERT INTO encounters (team_id, name, position) VALUES ($1, $2, $3) RETURNING id`,
-			dstTeamID, src.name, src.position,
+			`INSERT INTO encounters (roster_id, name, position) VALUES ($1, $2, $3) RETURNING id`,
+			dstRosterID, src.name, src.position,
 		).Scan(&newID); err != nil {
 			return err
 		}
@@ -256,14 +260,14 @@ func copyEncountersTx(ctx context.Context, tx pgx.Tx, srcTeamID, dstTeamID int64
 	return nil
 }
 
-// ListForTeam returns a team's encounters (without loadouts), ordered.
-func (s *EncounterStore) ListForTeam(ctx context.Context, teamID int64) ([]Encounter, error) {
+// ListForRoster returns a roster's encounters (without loadouts), ordered.
+func (s *EncounterStore) ListForRoster(ctx context.Context, rosterID int64) ([]Encounter, error) {
 	const q = `
-		SELECT id, team_id, name, position, created_at, updated_at
-		FROM encounters
-		WHERE team_id = $1
-		ORDER BY position, id`
-	rows, err := s.pool.Query(ctx, q, teamID)
+		SELECT e.id, e.roster_id, r.team_id, e.name, e.position, e.created_at, e.updated_at
+		FROM encounters e JOIN rosters r ON r.id = e.roster_id
+		WHERE e.roster_id = $1
+		ORDER BY e.position, e.id`
+	rows, err := s.pool.Query(ctx, q, rosterID)
 	if err != nil {
 		return nil, err
 	}
@@ -272,7 +276,7 @@ func (s *EncounterStore) ListForTeam(ctx context.Context, teamID int64) ([]Encou
 	encounters := []Encounter{}
 	for rows.Next() {
 		var e Encounter
-		if err := rows.Scan(&e.ID, &e.TeamID, &e.Name, &e.Position, &e.CreatedAt, &e.UpdatedAt); err != nil {
+		if err := rows.Scan(&e.ID, &e.RosterID, &e.TeamID, &e.Name, &e.Position, &e.CreatedAt, &e.UpdatedAt); err != nil {
 			return nil, err
 		}
 		encounters = append(encounters, e)
@@ -283,8 +287,8 @@ func (s *EncounterStore) ListForTeam(ctx context.Context, teamID int64) ([]Encou
 // Create inserts a new encounter (appended after existing ones) with 12 loadout
 // slots, in a single transaction. When copyFromID is non-zero, each slot's
 // gear/skills are copied from the source encounter (which must belong to the
-// same team); otherwise the slots start empty.
-func (s *EncounterStore) Create(ctx context.Context, teamID int64, name string, copyFromID int64) (*Encounter, error) {
+// same roster); otherwise the slots start empty.
+func (s *EncounterStore) Create(ctx context.Context, rosterID int64, name string, copyFromID int64) (*Encounter, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return nil, err
@@ -293,17 +297,17 @@ func (s *EncounterStore) Create(ctx context.Context, teamID int64, name string, 
 
 	var position int
 	if err := tx.QueryRow(ctx,
-		`SELECT COALESCE(MAX(position), -1) + 1 FROM encounters WHERE team_id = $1`, teamID,
+		`SELECT COALESCE(MAX(position), -1) + 1 FROM encounters WHERE roster_id = $1`, rosterID,
 	).Scan(&position); err != nil {
 		return nil, err
 	}
 
 	e := &Encounter{}
 	if err := tx.QueryRow(ctx,
-		`INSERT INTO encounters (team_id, name, position) VALUES ($1, $2, $3)
-		 RETURNING id, team_id, name, position, created_at, updated_at`,
-		teamID, name, position,
-	).Scan(&e.ID, &e.TeamID, &e.Name, &e.Position, &e.CreatedAt, &e.UpdatedAt); err != nil {
+		`INSERT INTO encounters (roster_id, name, position) VALUES ($1, $2, $3)
+		 RETURNING id, roster_id, name, position, created_at, updated_at`,
+		rosterID, name, position,
+	).Scan(&e.ID, &e.RosterID, &e.Name, &e.Position, &e.CreatedAt, &e.UpdatedAt); err != nil {
 		return nil, err
 	}
 
@@ -317,7 +321,7 @@ func (s *EncounterStore) Create(ctx context.Context, teamID int64, name string, 
 
 	if copyFromID != 0 {
 		// Copy gear/skills/potions/crit inputs slot-for-slot from the source. The
-		// join on encounters(team_id) ensures we only ever copy within the same team.
+		// join on encounters(roster_id) ensures we only ever copy within the same roster.
 		if _, err := tx.Exec(ctx,
 			`UPDATE encounter_loadouts dst
 			 SET gear = src.gear, skills = src.skills, potions = src.potions,
@@ -333,9 +337,9 @@ func (s *EncounterStore) Create(ctx context.Context, teamID int64, name string, 
 			 JOIN encounters e ON e.id = src.encounter_id
 			 WHERE dst.encounter_id = $1
 			   AND src.encounter_id = $2
-			   AND e.team_id = $3
+			   AND e.roster_id = $3
 			   AND dst.slot = src.slot`,
-			e.ID, copyFromID, teamID,
+			e.ID, copyFromID, rosterID,
 		); err != nil {
 			return nil, err
 		}
@@ -351,10 +355,10 @@ func (s *EncounterStore) Create(ctx context.Context, teamID int64, name string, 
 func (s *EncounterStore) Get(ctx context.Context, encounterID int64) (*Encounter, error) {
 	e := &Encounter{}
 	const q = `
-		SELECT id, team_id, name, position, created_at, updated_at
-		FROM encounters WHERE id = $1`
+		SELECT e.id, e.roster_id, r.team_id, e.name, e.position, e.created_at, e.updated_at
+		FROM encounters e JOIN rosters r ON r.id = e.roster_id WHERE e.id = $1`
 	err := s.pool.QueryRow(ctx, q, encounterID).Scan(
-		&e.ID, &e.TeamID, &e.Name, &e.Position, &e.CreatedAt, &e.UpdatedAt,
+		&e.ID, &e.RosterID, &e.TeamID, &e.Name, &e.Position, &e.CreatedAt, &e.UpdatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrEncounterNotFound
@@ -384,10 +388,10 @@ func (s *EncounterStore) Get(ctx context.Context, encounterID int64) (*Encounter
 	return e, rows.Err()
 }
 
-// CountForTeam returns how many encounters a team has.
-func (s *EncounterStore) CountForTeam(ctx context.Context, teamID int64) (int, error) {
+// CountForRoster returns how many encounters a roster has.
+func (s *EncounterStore) CountForRoster(ctx context.Context, rosterID int64) (int, error) {
 	var n int
-	err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM encounters WHERE team_id = $1`, teamID).Scan(&n)
+	err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM encounters WHERE roster_id = $1`, rosterID).Scan(&n)
 	return n, err
 }
 

@@ -21,6 +21,13 @@ const CLIENT_ID =
   (window.crypto && window.crypto.randomUUID && window.crypto.randomUUID()) ||
   `c${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
+// rosterQuery builds the optional "?roster_id=..." suffix for roster-scoped
+// endpoints. An empty/falsy rosterId yields "" so the backend defaults to the
+// team's active roster.
+function rosterQuery(rosterId) {
+  return rosterId ? `?roster_id=${encodeURIComponent(rosterId)}` : "";
+}
+
 const api = {
   // In-flight refresh shared across concurrent 401s so the single-use refresh
   // token is only rotated once.
@@ -311,11 +318,54 @@ const api = {
 
   // Save a single roster slot (finer-grained than saveTeam). payload is one
   // player object; include expected_updated_at for optimistic concurrency (a
-  // stale save returns 409). Returns the refreshed player.
-  savePlayer(id, slot, payload) {
-    return this.request(`/api/teams/${id}/players/${slot}`, {
+  // stale save returns 409). rosterId targets a specific roster (default: the
+  // team's active roster). Returns the refreshed player.
+  savePlayer(id, slot, payload, rosterId) {
+    return this.request(
+      `/api/teams/${id}/players/${slot}${rosterQuery(rosterId)}`,
+      { method: "PUT", body: payload }
+    );
+  },
+
+  // --- Rosters ---
+
+  // List a team's rosters: { rosters: [...], active_roster_id }.
+  listRosters(teamId) {
+    return this.request(`/api/teams/${teamId}/rosters`);
+  },
+
+  // Create a roster. copyFrom (optional) is an existing roster id on the same
+  // team whose players/encounters/groupings are copied into the new one.
+  createRoster(teamId, name, copyFrom) {
+    return this.request(`/api/teams/${teamId}/rosters`, {
+      method: "POST",
+      body: { name, copy_from: copyFrom || null },
+    });
+  },
+
+  // Fetch one roster with its 12-player lineup.
+  getRoster(teamId, rosterId) {
+    return this.request(`/api/teams/${teamId}/rosters/${rosterId}`);
+  },
+
+  renameRoster(teamId, rosterId, name) {
+    return this.request(`/api/teams/${teamId}/rosters/${rosterId}`, {
       method: "PUT",
-      body: payload,
+      body: { name },
+    });
+  },
+
+  deleteRoster(teamId, rosterId) {
+    return this.request(`/api/teams/${teamId}/rosters/${rosterId}`, {
+      method: "DELETE",
+    });
+  },
+
+  // Mark a roster as the team's active one (used by the Discord bot). Returns
+  // the refreshed team.
+  activateRoster(teamId, rosterId) {
+    return this.request(`/api/teams/${teamId}/rosters/${rosterId}/activate`, {
+      method: "POST",
     });
   },
 
@@ -360,14 +410,16 @@ const api = {
 
   // --- Encounters ---
 
-  listEncounters(teamId) {
-    return this.request(`/api/teams/${teamId}/encounters`);
+  // rosterId targets a specific roster (default: the team's active roster).
+  listEncounters(teamId, rosterId) {
+    return this.request(`/api/teams/${teamId}/encounters${rosterQuery(rosterId)}`);
   },
 
   // copyFrom (optional) is an existing encounter id whose per-player gear/skills
   // are copied into the new encounter; pass a falsy value for an empty one.
-  createEncounter(teamId, name, copyFrom) {
-    return this.request(`/api/teams/${teamId}/encounters`, {
+  // rosterId targets a specific roster (default: the team's active roster).
+  createEncounter(teamId, name, copyFrom, rosterId) {
+    return this.request(`/api/teams/${teamId}/encounters${rosterQuery(rosterId)}`, {
       method: "POST",
       body: { name, copy_from: copyFrom || null },
     });
@@ -409,12 +461,14 @@ const api = {
 
   // --- Groupings ---
 
-  listGroupings(teamId) {
-    return this.request(`/api/teams/${teamId}/groupings`);
+  // rosterId targets a specific roster (default: the team's active roster).
+  listGroupings(teamId, rosterId) {
+    return this.request(`/api/teams/${teamId}/groupings${rosterQuery(rosterId)}`);
   },
 
-  createGrouping(teamId, name, groupCount) {
-    return this.request(`/api/teams/${teamId}/groupings`, {
+  // rosterId targets a specific roster (default: the team's active roster).
+  createGrouping(teamId, name, groupCount, rosterId) {
+    return this.request(`/api/teams/${teamId}/groupings${rosterQuery(rosterId)}`, {
       method: "POST",
       body: { name, group_count: groupCount },
     });

@@ -1213,7 +1213,10 @@ func (b *bot) loadTeamData(ctx context.Context, teamID int64) (*models.Team, []m
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
-	list, err := b.encounters.ListForTeam(ctx, teamID)
+	// All composition (players, encounters, groupings) hangs off the active
+	// roster. team.Players is already the active roster's lineup (TeamStore.Get);
+	// load its encounters and groupings by the active roster id.
+	list, err := b.encounters.ListForRoster(ctx, team.ActiveRosterID)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -1237,7 +1240,7 @@ func (b *bot) loadTeamData(ctx context.Context, teamID int64) (*models.Team, []m
 	if len(full) > 0 {
 		primary = &full[0]
 	}
-	gr, err := b.groupings.ListForTeam(ctx, teamID)
+	gr, err := b.groupings.ListForRoster(ctx, team.ActiveRosterID)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}

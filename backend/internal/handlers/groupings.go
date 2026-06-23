@@ -49,7 +49,11 @@ func (s *Server) handleListGroupings(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	groupings, err := s.groupings.ListForTeam(r.Context(), teamID)
+	rosterID, ok := s.resolveRoster(w, r, teamID)
+	if !ok {
+		return
+	}
+	groupings, err := s.groupings.ListForRoster(r.Context(), rosterID)
 	if err != nil {
 		log.Printf("list groupings: %v", err)
 		writeError(w, http.StatusInternalServerError, "could not load groupings")
@@ -95,6 +99,10 @@ func (s *Server) handleCreateGrouping(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "you do not have permission to edit this team")
 		return
 	}
+	rosterID, ok := s.resolveRoster(w, r, teamID)
+	if !ok {
+		return
+	}
 
 	var req groupingCreateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -111,7 +119,7 @@ func (s *Server) handleCreateGrouping(w http.ResponseWriter, r *http.Request) {
 	}
 	count := clampGroupCount(req.GroupCount)
 
-	n, err := s.groupings.CountForTeam(r.Context(), teamID)
+	n, err := s.groupings.CountForRoster(r.Context(), rosterID)
 	if err != nil {
 		log.Printf("count groupings: %v", err)
 		writeError(w, http.StatusInternalServerError, "could not create grouping")
@@ -122,7 +130,7 @@ func (s *Server) handleCreateGrouping(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	grouping, err := s.groupings.Create(r.Context(), teamID, name, count)
+	grouping, err := s.groupings.Create(r.Context(), rosterID, name, count)
 	if err != nil {
 		log.Printf("create grouping: %v", err)
 		writeError(w, http.StatusInternalServerError, "could not create grouping")

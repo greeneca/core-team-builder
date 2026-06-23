@@ -46,6 +46,7 @@ func run() error {
 
 	users := models.NewUserStore(pool)
 	teams := models.NewTeamStore(pool)
+	rosters := models.NewRosterStore(pool)
 	encounters := models.NewEncounterStore(pool)
 	groupings := models.NewGroupingStore(pool)
 	members := models.NewMemberStore(pool)
@@ -80,6 +81,7 @@ func run() error {
 	srv := handlers.New(handlers.Config{
 		Users:            users,
 		Teams:            teams,
+		Rosters:          rosters,
 		Encounters:       encounters,
 		Groupings:        groupings,
 		Members:          members,

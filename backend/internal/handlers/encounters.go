@@ -50,7 +50,11 @@ func (s *Server) handleListEncounters(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	encounters, err := s.encounters.ListForTeam(r.Context(), teamID)
+	rosterID, ok := s.resolveRoster(w, r, teamID)
+	if !ok {
+		return
+	}
+	encounters, err := s.encounters.ListForRoster(r.Context(), rosterID)
 	if err != nil {
 		log.Printf("list encounters: %v", err)
 		writeError(w, http.StatusInternalServerError, "could not load encounters")
@@ -88,6 +92,10 @@ func (s *Server) handleCreateEncounter(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "you do not have permission to edit this team")
 		return
 	}
+	rosterID, ok := s.resolveRoster(w, r, teamID)
+	if !ok {
+		return
+	}
 
 	var req encounterNameRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -95,7 +103,7 @@ func (s *Server) handleCreateEncounter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Name = strings.TrimSpace(req.Name)
-	existing, err := s.encounters.ListForTeam(r.Context(), teamID)
+	existing, err := s.encounters.ListForRoster(r.Context(), rosterID)
 	if err != nil {
 		log.Printf("list encounters: %v", err)
 		writeError(w, http.StatusInternalServerError, "could not create encounter")
@@ -127,7 +135,7 @@ func (s *Server) handleCreateEncounter(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	enc, err := s.encounters.Create(r.Context(), teamID, req.Name, copyFrom)
+	enc, err := s.encounters.Create(r.Context(), rosterID, req.Name, copyFrom)
 	if err != nil {
 		log.Printf("create encounter: %v", err)
 		writeError(w, http.StatusInternalServerError, "could not create encounter")
@@ -145,7 +153,7 @@ func (s *Server) handleGetEncounter(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleUpdateEncounter(w http.ResponseWriter, r *http.Request) {
-	teamID, role, enc, ok := s.encounterAccess(w, r)
+	_, role, enc, ok := s.encounterAccess(w, r)
 	if !ok {
 		return
 	}
@@ -160,7 +168,7 @@ func (s *Server) handleUpdateEncounter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Name = strings.TrimSpace(req.Name)
-	existing, err := s.encounters.ListForTeam(r.Context(), teamID)
+	existing, err := s.encounters.ListForRoster(r.Context(), enc.RosterID)
 	if err != nil {
 		log.Printf("list encounters: %v", err)
 		writeError(w, http.StatusInternalServerError, "could not update encounter")
@@ -187,7 +195,7 @@ func (s *Server) handleUpdateEncounter(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteEncounter(w http.ResponseWriter, r *http.Request) {
-	teamID, role, enc, ok := s.encounterAccess(w, r)
+	_, role, enc, ok := s.encounterAccess(w, r)
 	if !ok {
 		return
 	}
@@ -196,7 +204,7 @@ func (s *Server) handleDeleteEncounter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	count, err := s.encounters.CountForTeam(r.Context(), teamID)
+	count, err := s.encounters.CountForRoster(r.Context(), enc.RosterID)
 	if err != nil {
 		log.Printf("count encounters: %v", err)
 		writeError(w, http.StatusInternalServerError, "could not delete encounter")

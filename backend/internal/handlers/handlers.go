@@ -53,6 +53,7 @@ const (
 type Server struct {
 	users            *models.UserStore
 	teams            *models.TeamStore
+	rosters          *models.RosterStore
 	encounters       *models.EncounterStore
 	groupings        *models.GroupingStore
 	members          *models.MemberStore
@@ -73,6 +74,7 @@ type Server struct {
 type Config struct {
 	Users            *models.UserStore
 	Teams            *models.TeamStore
+	Rosters          *models.RosterStore
 	Encounters       *models.EncounterStore
 	Groupings        *models.GroupingStore
 	Members          *models.MemberStore
@@ -108,6 +110,7 @@ func New(c Config) *Server {
 	return &Server{
 		users:            c.Users,
 		teams:            c.Teams,
+		rosters:          c.Rosters,
 		encounters:       c.Encounters,
 		groupings:        c.Groupings,
 		members:          c.Members,
@@ -172,6 +175,17 @@ func (s *Server) Routes() http.Handler {
 	mux.Handle("DELETE /api/teams/{id}/members/{userID}", protected(s.handleUnshareTeam))
 	mux.Handle("DELETE /api/teams/{id}/membership", protected(s.handleLeaveTeam))
 	mux.Handle("PUT /api/teams/{id}/players/{slot}", protected(s.handleSavePlayer))
+
+	// Rosters: each team has one or more rosters (its 12-player lineup +
+	// encounters + groupings) with exactly one active. The collection/player
+	// endpoints above and the encounter/grouping list/create endpoints below
+	// target a roster via the optional ?roster_id= query (default: active).
+	mux.Handle("GET /api/teams/{id}/rosters", protected(s.handleListRosters))
+	mux.Handle("POST /api/teams/{id}/rosters", protected(s.handleCreateRoster))
+	mux.Handle("GET /api/teams/{id}/rosters/{rid}", protected(s.handleGetRoster))
+	mux.Handle("PUT /api/teams/{id}/rosters/{rid}", protected(s.handleRenameRoster))
+	mux.Handle("DELETE /api/teams/{id}/rosters/{rid}", protected(s.handleDeleteRoster))
+	mux.Handle("POST /api/teams/{id}/rosters/{rid}/activate", protected(s.handleActivateRoster))
 
 	// Live collaboration: Server-Sent Events stream of team changes + presence.
 	// EventSource cannot send an Authorization header, so this route authenticates

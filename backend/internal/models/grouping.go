@@ -25,10 +25,13 @@ type GroupingGroup struct {
 	Slots       []int  `json:"slots"`
 }
 
-// Grouping splits a team's roster into a set of numbered groups (e.g. ice cages
-// or slayer stacks). A player may belong to at most one group per grouping.
+// Grouping splits a roster into a set of numbered groups (e.g. ice cages or
+// slayer stacks). A player may belong to at most one group per grouping.
 type Grouping struct {
-	ID         int64           `json:"id"`
+	ID       int64 `json:"id"`
+	RosterID int64 `json:"roster_id"`
+	// TeamID is resolved via the grouping's roster (groupings no longer carry
+	// team_id directly). Populated by the read paths for team-ownership checks.
 	TeamID     int64           `json:"team_id"`
 	Name       string          `json:"name"`
 	GroupCount int             `json:"group_count"`
@@ -58,12 +61,13 @@ func emptyGroups(count int) []GroupingGroup {
 	return groups
 }
 
-// ListForTeam returns a team's groupings (each fully populated with its groups
-// and member slots), ordered by position.
-func (s *GroupingStore) ListForTeam(ctx context.Context, teamID int64) ([]Grouping, error) {
+// ListForRoster returns a roster's groupings (each fully populated with its
+// groups and member slots), ordered by position.
+func (s *GroupingStore) ListForRoster(ctx context.Context, rosterID int64) ([]Grouping, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, team_id, name, group_count, position, created_at, updated_at
-		 FROM groupings WHERE team_id = $1 ORDER BY position, id`, teamID)
+		`SELECT g.id, g.roster_id, r.team_id, g.name, g.group_count, g.position, g.created_at, g.updated_at
+		 FROM groupings g JOIN rosters r ON r.id = g.roster_id
+		 WHERE g.roster_id = $1 ORDER BY g.position, g.id`, rosterID)
 	if err != nil {
 		return nil, err
 	}
@@ -71,7 +75,7 @@ func (s *GroupingStore) ListForTeam(ctx context.Context, teamID int64) ([]Groupi
 	idx := map[int64]int{}
 	for rows.Next() {
 		var g Grouping
-		if err := rows.Scan(&g.ID, &g.TeamID, &g.Name, &g.GroupCount, &g.Position, &g.CreatedAt, &g.UpdatedAt); err != nil {
+		if err := rows.Scan(&g.ID, &g.RosterID, &g.TeamID, &g.Name, &g.GroupCount, &g.Position, &g.CreatedAt, &g.UpdatedAt); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -91,7 +95,7 @@ func (s *GroupingStore) ListForTeam(ctx context.Context, teamID int64) ([]Groupi
 	nrows, err := s.pool.Query(ctx,
 		`SELECT gg.grouping_id, gg.group_number, gg.name
 		 FROM grouping_groups gg JOIN groupings g ON g.id = gg.grouping_id
-		 WHERE g.team_id = $1`, teamID)
+		 WHERE g.roster_id = $1`, rosterID)
 	if err != nil {
 		return nil, err
 	}
@@ -116,7 +120,7 @@ func (s *GroupingStore) ListForTeam(ctx context.Context, teamID int64) ([]Groupi
 	mrows, err := s.pool.Query(ctx,
 		`SELECT gm.grouping_id, gm.group_number, gm.player_slot
 		 FROM grouping_members gm JOIN groupings g ON g.id = gm.grouping_id
-		 WHERE g.team_id = $1 ORDER BY gm.player_slot`, teamID)
+		 WHERE g.roster_id = $1 ORDER BY gm.player_slot`, rosterID)
 	if err != nil {
 		return nil, err
 	}
@@ -139,9 +143,9 @@ func (s *GroupingStore) ListForTeam(ctx context.Context, teamID int64) ([]Groupi
 func (s *GroupingStore) Get(ctx context.Context, groupingID int64) (*Grouping, error) {
 	g := &Grouping{}
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, team_id, name, group_count, position, created_at, updated_at
-		 FROM groupings WHERE id = $1`, groupingID).Scan(
-		&g.ID, &g.TeamID, &g.Name, &g.GroupCount, &g.Position, &g.CreatedAt, &g.UpdatedAt)
+		`SELECT g.id, g.roster_id, r.team_id, g.name, g.group_count, g.position, g.created_at, g.updated_at
+		 FROM groupings g JOIN rosters r ON r.id = g.roster_id WHERE g.id = $1`, groupingID).Scan(
+		&g.ID, &g.RosterID, &g.TeamID, &g.Name, &g.GroupCount, &g.Position, &g.CreatedAt, &g.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrGroupingNotFound
 	}
@@ -190,16 +194,16 @@ func (s *GroupingStore) Get(ctx context.Context, groupingID int64) (*Grouping, e
 	return g, mrows.Err()
 }
 
-// CountForTeam returns how many groupings a team has.
-func (s *GroupingStore) CountForTeam(ctx context.Context, teamID int64) (int, error) {
+// CountForRoster returns how many groupings a roster has.
+func (s *GroupingStore) CountForRoster(ctx context.Context, rosterID int64) (int, error) {
 	var n int
-	err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM groupings WHERE team_id = $1`, teamID).Scan(&n)
+	err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM groupings WHERE roster_id = $1`, rosterID).Scan(&n)
 	return n, err
 }
 
 // Create inserts a new grouping (appended after existing ones) with groupCount
 // blank-named groups, in a single transaction.
-func (s *GroupingStore) Create(ctx context.Context, teamID int64, name string, groupCount int) (*Grouping, error) {
+func (s *GroupingStore) Create(ctx context.Context, rosterID int64, name string, groupCount int) (*Grouping, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return nil, err
@@ -208,15 +212,15 @@ func (s *GroupingStore) Create(ctx context.Context, teamID int64, name string, g
 
 	var position int
 	if err := tx.QueryRow(ctx,
-		`SELECT COALESCE(MAX(position), -1) + 1 FROM groupings WHERE team_id = $1`, teamID,
+		`SELECT COALESCE(MAX(position), -1) + 1 FROM groupings WHERE roster_id = $1`, rosterID,
 	).Scan(&position); err != nil {
 		return nil, err
 	}
 
 	var id int64
 	if err := tx.QueryRow(ctx,
-		`INSERT INTO groupings (team_id, name, group_count, position) VALUES ($1, $2, $3, $4) RETURNING id`,
-		teamID, name, groupCount, position,
+		`INSERT INTO groupings (roster_id, name, group_count, position) VALUES ($1, $2, $3, $4) RETURNING id`,
+		rosterID, name, groupCount, position,
 	).Scan(&id); err != nil {
 		return nil, err
 	}
@@ -294,12 +298,12 @@ func (s *GroupingStore) Delete(ctx context.Context, groupingID int64) error {
 }
 
 // copyGroupingsTx copies every grouping (names, group names, and member
-// assignments) from srcTeamID to dstTeamID within an existing transaction. Used
-// when creating a team as a copy of another.
-func copyGroupingsTx(ctx context.Context, tx pgx.Tx, srcTeamID, dstTeamID int64) error {
+// assignments) from srcRosterID to dstRosterID within an existing transaction.
+// Used when copying a roster (or a whole team).
+func copyGroupingsTx(ctx context.Context, tx pgx.Tx, srcRosterID, dstRosterID int64) error {
 	rows, err := tx.Query(ctx,
-		`SELECT id, name, group_count, position FROM groupings WHERE team_id = $1 ORDER BY position, id`,
-		srcTeamID)
+		`SELECT id, name, group_count, position FROM groupings WHERE roster_id = $1 ORDER BY position, id`,
+		srcRosterID)
 	if err != nil {
 		return err
 	}
@@ -326,8 +330,8 @@ func copyGroupingsTx(ctx context.Context, tx pgx.Tx, srcTeamID, dstTeamID int64)
 	for _, src := range srcs {
 		var newID int64
 		if err := tx.QueryRow(ctx,
-			`INSERT INTO groupings (team_id, name, group_count, position) VALUES ($1, $2, $3, $4) RETURNING id`,
-			dstTeamID, src.name, src.groupCount, src.position,
+			`INSERT INTO groupings (roster_id, name, group_count, position) VALUES ($1, $2, $3, $4) RETURNING id`,
+			dstRosterID, src.name, src.groupCount, src.position,
 		).Scan(&newID); err != nil {
 			return err
 		}

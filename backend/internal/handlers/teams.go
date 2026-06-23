@@ -276,26 +276,16 @@ func (s *Server) handleUpdateTeam(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	validRole := make(map[string]bool, len(roles))
-	for _, rl := range roles {
-		validRole[rl.Key] = true
-	}
 
-	players := make([]models.Player, 0, len(req.Players))
-	for _, p := range req.Players {
-		player, verr := validatePlayer(p, validRole)
-		if verr != nil {
-			writeError(w, http.StatusBadRequest, verr.Error())
-			return
-		}
-		players = append(players, player)
-	}
+	// Roster lineups live under rosters now (saved via the per-slot player
+	// endpoint), so this team save is metadata-only and ignores any players in
+	// the payload.
 
 	var expected time.Time
 	if req.ExpectedUpdatedAt != nil {
 		expected = *req.ExpectedUpdatedAt
 	}
-	if err := s.teams.Save(r.Context(), teamID, req.Name, days, scheduleTime, req.EncountersEnabled, postFooter, dmFooter, signupPost, req.AutoSharePoolViewers, req.PreMade, premadePost, req.SimpleSignup, req.WaitlistEnabled, roles, players, expected); err != nil {
+	if err := s.teams.Save(r.Context(), teamID, req.Name, days, scheduleTime, req.EncountersEnabled, postFooter, dmFooter, signupPost, req.AutoSharePoolViewers, req.PreMade, premadePost, req.SimpleSignup, req.WaitlistEnabled, roles, expected); err != nil {
 		if errors.Is(err, models.ErrVersionConflict) {
 			writeError(w, http.StatusConflict, "this team was changed by someone else; reload to get the latest")
 			return
@@ -400,6 +390,11 @@ func (s *Server) handleSavePlayer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	rosterID, ok := s.resolveRoster(w, r, teamID)
+	if !ok {
+		return
+	}
+
 	slot, err := strconv.Atoi(r.PathValue("slot"))
 	if err != nil || slot < 1 || slot > models.TeamSize {
 		writeError(w, http.StatusBadRequest, "invalid player slot")
@@ -434,7 +429,7 @@ func (s *Server) handleSavePlayer(w http.ResponseWriter, r *http.Request) {
 	if req.ExpectedUpdatedAt != nil {
 		expected = *req.ExpectedUpdatedAt
 	}
-	saved, err := s.teams.SavePlayer(r.Context(), teamID, player, expected)
+	saved, err := s.teams.SavePlayer(r.Context(), rosterID, player, expected)
 	if errors.Is(err, models.ErrVersionConflict) {
 		writeError(w, http.StatusConflict, "this slot was changed by someone else; reload to get the latest")
 		return

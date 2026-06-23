@@ -1010,6 +1010,86 @@ a.brand--home:hover {
 .encounter-chip.is-active:hover {
   color: var(--color-bg);
 }
+/* Rosters bar: switch between a team's lineups and manage them. Each roster is a
+   chip with a star (active), its name, and (for the selected one) rename/delete
+   actions. Modeled on the encounters panel but not sticky. */
+.rosters-panel {
+  padding: var(--space-3) var(--space-4) var(--space-4);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+}
+.rosters-panel-title {
+  margin: 0 0 var(--space-3);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--color-text-muted);
+}
+.rosters-bar-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+.rosters-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.roster-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  padding: 0 var(--space-2);
+  transition: border-color 0.15s ease;
+}
+.roster-chip.is-selected {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 1px var(--color-accent);
+}
+.roster-chip-label {
+  font-family: inherit;
+  font-size: var(--font-size-sm);
+  color: var(--color-text);
+  background: transparent;
+  border: none;
+  padding: var(--space-2) var(--space-2);
+  cursor: pointer;
+}
+.roster-chip.is-selected .roster-chip-label {
+  font-weight: 600;
+  color: var(--color-accent-hover);
+}
+.roster-chip-star,
+.roster-chip-action {
+  font-family: inherit;
+  font-size: var(--font-size-sm);
+  line-height: 1;
+  background: transparent;
+  border: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  padding: var(--space-1);
+  border-radius: 999px;
+}
+.roster-chip-star.is-active {
+  color: var(--color-warning, #e0a800);
+}
+.roster-chip-star:disabled {
+  cursor: default;
+}
+.roster-chip-action:hover {
+  color: var(--color-accent-hover);
+}
+.roster-chip-delete:hover {
+  color: var(--color-danger, #d9534f);
+}
+
 .add-encounter-form {
   display: flex;
   align-items: flex-end;

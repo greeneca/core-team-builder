@@ -228,6 +228,7 @@ rows. Managed via `PasswordResetStore`.
 | simple_signup  | boolean           | pre-made role-based "simple" signup (hides class/gear + details, claims first matching slot); default `false`; `037_team_simple_signup.sql` |
 | waitlist_enabled | boolean         | pre-made per-role waitlist (auto-promote on freed slot); default `false`; `038_premade_waitlist.sql` |
 | roles          | jsonb             | customizable roster roles `[{key,label}]`; default Tank/Healer/DPS/Support DPS; `042_team_roles.sql` |
+| active_roster_id | bigint          | FK → `rosters(id)`, set null; the roster the bot uses + the app shows by default; `048_rosters.sql` |
 | created_at     | timestamptz       | default `now()`                            |
 | updated_at     | timestamptz       | auto-updated via trigger                   |
 
@@ -270,13 +271,39 @@ runs").
 The owner is stored here as a `role = 'owner'` row, so any access check is a
 single membership lookup.
 
+### `rosters`
+
+A **roster** (`048_rosters.sql`) is a named lineup within a team. A team can have
+several rosters (cap **50**, `models.MaxRostersPerTeam`) and always designates
+exactly one as **active** (`teams.active_roster_id`). Each roster fully owns its
+composition: its 12 `players`, its `encounters` (+ loadouts), and its
+`groupings`. The Discord bot always uses the active roster; the web app can view,
+edit, create, rename, copy, delete, and activate any roster.
+
+| column     | type              | notes                              |
+|------------|-------------------|------------------------------------|
+| id         | bigint (IDENTITY) | primary key                        |
+| team_id    | bigint            | FK → `teams(id)`, cascade          |
+| name       | varchar(100)      | default `'Main'`                   |
+| position   | int               | display order; default `0`         |
+| created_at | timestamptz       | default `now()`                    |
+| updated_at | timestamptz       | auto-updated via trigger           |
+
+Existing teams were backfilled with a single `'Main'` roster (set active) that
+owns all their prior players/encounters/groupings. Managed via `RosterStore`;
+HTTP under `/api/teams/{id}/rosters` (list/create with optional `copy_from`,
+get, rename, delete, and `…/activate`). The roster-scoped collection endpoints
+(`players/{slot}`, `encounters`, `groupings`) take an optional `?roster_id=`
+query and default to the active roster when omitted. Templates (pre-made runs)
+are locked to the active roster — the roster switcher is hidden in pre-made mode.
+
 ### `players`
 
 | column         | type         | notes                                    |
 |----------------|--------------|------------------------------------------|
 | id             | bigint (IDENTITY) | primary key                         |
-| team_id        | bigint       | FK → `teams(id)`, cascade                |
-| slot           | smallint     | 1–12, unique per team                    |
+| roster_id      | bigint       | FK → `rosters(id)`, cascade; `048_rosters.sql` (was `team_id`) |
+| slot           | smallint     | 1–12, unique per roster                  |
 | name           | varchar(100) | default `''`                             |
 | discord_handle | varchar(100) | default `''`                             |
 | role           | varchar(20)  | `''`/`tank`/`healer`/`dps`/`support_dps` |
@@ -288,9 +315,11 @@ single membership lookup.
 | created_at     | timestamptz  | default `now()`                          |
 | updated_at     | timestamptz  | auto-updated via trigger                 |
 
-Every team is created with all 12 player slots pre-populated (in a single
+Every roster is created with all 12 player slots pre-populated (in a single
 transaction), so slots are edited rather than added/removed. New slots default
-their roles to 2 tanks / 2 healers / 8 dps. Class, skill-line, and mastery
+their roles to 2 tanks / 2 healers / 8 dps. Players belong to a **roster** (not
+the team directly) since `048_rosters.sql`; `teams.active_roster_id` selects
+which roster's lineup the bot and the default web view use. Class, skill-line, and mastery
 values are validated against allow-lists in the backend
 (`internal/models/eso.go`). Roles are **per-team** (`teams.roles` JSONB, migration
 `042`): each player's role is validated against its team's own role set rather
@@ -301,14 +330,14 @@ apply (drawn from the player's class) and the skill lines are blanked.
 
 ### `encounters` + `encounter_loadouts`
 
-`encounters` (`007_encounters.sql`) holds per-team named fights:
+`encounters` (`007_encounters.sql`) holds per-roster named fights:
 
 | column     | type              | notes                                 |
 |------------|-------------------|---------------------------------------|
 | id         | bigint (IDENTITY) | primary key                           |
-| team_id    | bigint            | FK → `teams(id)`, cascade             |
+| roster_id  | bigint            | FK → `rosters(id)`, cascade; `048_rosters.sql` (was `team_id`) |
 | name       | varchar(100)      | `Default`, `Trash`, or a trial boss   |
-| position   | int               | ordering within the team              |
+| position   | int               | ordering within the roster            |
 | created_at | timestamptz       | default `now()`                       |
 | updated_at | timestamptz       | auto-updated via trigger              |
 
@@ -333,11 +362,11 @@ apply (drawn from the player's class) and the skill lines are blanked.
 | scribed_buffs | text[]   | group buffs a player's scribed (grimoire) skill provides (default `{}`); counted toward Group Buffs coverage; `032_loadout_scribed_buffs.sql` |
 | banner_bearer_focus | text | Focus Script chosen for the Banner Bearer grimoire (default `''`); informational only; `033_loadout_banner_bearer_focus.sql` |
 
-Every team has at least one encounter (`Default`), created with the team and
+Every roster has at least one encounter (`Default`), created with the roster and
 backfilled for existing teams. Encounter names are validated against
-`ValidEncounterNames` and must be **unique per team** and all from a **single
+`ValidEncounterNames` and must be **unique per roster** and all from a **single
 trial** (plus the always-allowed `General` group) — see
-`ValidateEncounterSelection`, with a unique index on `encounters(team_id, name)`
+`ValidateEncounterSelection`, with a unique index on `encounters(roster_id, name)`
 as a DB backstop. gear/skill/potion/cp_blue/crit_dmg/pen_extra/scribed_buffs
 items are free-form (sanitized, not allow-listed); mundus and banner_bearer_focus
 are trimmed strings and the armor counts are clamped to 0–7 — the searchable
@@ -353,8 +382,8 @@ inputs feed the penetration calculator (see "Penetration model"); `players.race`
 
 ### `groupings` + `grouping_groups` + `grouping_members`
 
-A **grouping** (`020_groupings.sql`) splits a team's roster into numbered groups
-for mechanics (e.g. ice cages, slayer stacks). A team may have several; a player
+A **grouping** (`020_groupings.sql`) splits a roster into numbered groups
+for mechanics (e.g. ice cages, slayer stacks). A roster may have several; a player
 belongs to at most one group per grouping.
 
 `groupings`:
@@ -362,10 +391,10 @@ belongs to at most one group per grouping.
 | column      | type              | notes                                |
 |-------------|-------------------|--------------------------------------|
 | id          | bigint (IDENTITY) | primary key                          |
-| team_id     | bigint            | FK → `teams(id)`, cascade            |
+| roster_id   | bigint            | FK → `rosters(id)`, cascade; `048_rosters.sql` (was `team_id`) |
 | name        | varchar(100)      | default `'Grouping'`                 |
 | group_count | int               | 1–12 (CHECK), default `2`            |
-| position    | int               | ordering within the team             |
+| position    | int               | ordering within the roster           |
 | created_at  | timestamptz       | default `now()`                      |
 | updated_at  | timestamptz       | auto-updated via trigger             |
 

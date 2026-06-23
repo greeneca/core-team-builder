@@ -351,6 +351,17 @@
         </div>
       </div>
 
+      <!-- Rosters: switch between / manage a team's lineups. Each roster owns its
+           own players, encounters, and groupings; one is marked active (★) and
+           used by the Discord bot. Hidden for templates. -->
+      <div id="rosters-panel" class="rosters-panel mt-4">
+        <h3 class="rosters-panel-title">Rosters<span class="info-indicator" tabindex="0" role="img" aria-label="Rosters: A team can have multiple rosters (lineups), each with its own players, encounters, and groupings. Click a roster to view/edit it. The starred roster is the active one used by the Discord bot for posts and build details. Use + New roster to add one (optionally copying the current roster)." data-tip="A team can have multiple rosters (lineups), each with its own players, encounters, and groupings. Click a roster to view/edit it. The starred (★) roster is the active one used by the Discord bot. Use + New roster to add one (optionally copying the current roster).">i</span></h3>
+        <div class="rosters-bar-row">
+          <div id="rosters-bar" class="rosters-bar"></div>
+          <button id="add-roster-btn" class="btn btn--ghost btn--sm is-hidden" type="button">+ New roster</button>
+        </div>
+      </div>
+
       <!-- Roster -->
       <div id="roster-card" class="card mt-4 collapsible section-collapsible">
         <div class="section-head collapsible-head">

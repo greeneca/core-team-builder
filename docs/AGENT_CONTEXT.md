@@ -8,13 +8,16 @@ quickly. Keep it current when the architecture changes.
 `core-team-builder` helps design and organize a **trial core team** for *The
 Elder Scrolls Online*. It provides accounts + login and **teams**: a user can
 own multiple teams and share them with others (viewer/editor roles). Each team
-has a trial schedule (days + a UTC time shown in each viewer's own zone) and a
-fixed 12-player roster — name,
-discord handle, role, ESO class, and a per-player build (either a subclassed set
-of 3 skill lines or 2 class masteries). Teams also have **encounters** (Default,
-Trash, or a trial boss), each holding a per-player gear/skills loadout, and
-**groupings** (named sets of numbered groups for mechanics, e.g. ice cages or
-slayer stacks). A team can set two **Discord bot footers** (free-form text the
+has a trial schedule (days + a UTC time shown in each viewer's own zone) and one
+or more **rosters** — a roster is a fixed 12-player lineup (name,
+discord handle, role, ESO class, and a per-player build: either a subclassed set
+of 3 skill lines or 2 class masteries) that also owns its own **encounters**
+(Default, Trash, or a trial boss, each holding a per-player gear/skills loadout)
+and **groupings** (named sets of numbered groups for mechanics, e.g. ice cages or
+slayer stacks). A team always has exactly one **active** roster
+(`teams.active_roster_id`) — the one the Discord bot uses and the web app shows
+by default — and the app can create/rename/copy/delete/activate rosters (see
+"Rosters model"). A team can set two **Discord bot footers** (free-form text the
 bot appends to its `/coreteam post` overview and its build-details DM). Each
 team also keeps a **member pool** — prospective players who signed up via the
 bot's `/coreteam recruit` post (an interactive DM gathers their availability,
@@ -161,9 +164,10 @@ column; the `User` JSON model hides it (`json:"-"`).
   `003_share_roles.sql` converts legacy `member` rows to `editor`.
 - **Copy on create**: `POST /api/teams` accepts an optional `copy_from` team id;
   when set, `TeamStore.Create` seeds the new team from that source — its trial
-  schedule, the full 12-player roster, and every encounter with its per-player
-  loadouts (`copyEncountersTx` in `encounter.go`). Sharing/membership is **never**
-  copied; the new team is owned solely by the creator. The handler validates the
+  schedule and **every roster** (preserving which is active), each with its full
+  12-player lineup and every encounter (with per-player loadouts) and grouping
+  (`copyPlayersTx`/`copyEncountersTx`/`copyGroupingsTx`). Sharing/membership is
+  **never** copied; the new team is owned solely by the creator. The handler validates the
   caller can access the source (`teams.Access`) and reports a missing/forbidden
   source as a generic error so other users' teams stay hidden. The new-team form
   has a **"Copy from team"** picker whose first option, "None (empty team)",
@@ -247,13 +251,13 @@ column; the `User` JSON model hides it (`json:"-"`).
   a roster toggle next to "Subclassed". When checked it adds the default werewolf
   skills (`models.WerewolfDefaultSkills` / `WEREWOLF_DEFAULT_SKILLS`) to that
   slot's `encounter_loadouts.skills`; unchecking removes the full Werewolf skill
-  line (`models.WerewolfSkills`). The flag applies to **every** encounter: the UI
-  updates the currently-shown encounter's skill chips for immediate feedback, and
-  `TeamStore.Save` reconciles all of the team's encounters for that slot
-  (`reconcileWerewolfSkillsTx`). The `/coreteam post` overview and `/coreteam
-  signup` post tag a werewolf slot with **`WW`** before its gear. Note: because
-  reconciliation runs on every team save, a non-werewolf slot can't keep a
-  manually-added werewolf-line skill.
+  line (`models.WerewolfSkills`). The flag applies to **every** encounter on the
+  roster: the UI updates the currently-shown encounter's skill chips for immediate
+  feedback, and `TeamStore.SavePlayer` reconciles all of the **roster's**
+  encounters for that slot (`reconcileWerewolfSkillsTx`). The `/coreteam post`
+  overview and `/coreteam signup` post tag a werewolf slot with **`WW`** before
+  its gear. Note: because reconciliation runs on every per-slot save, a
+  non-werewolf slot can't keep a manually-added werewolf-line skill.
 - **Endpoints** (all JWT-protected): `GET/POST /api/teams`,
   `GET/PUT/DELETE /api/teams/{id}`, `POST /api/teams/{id}/share`,
   `DELETE /api/teams/{id}/members/{userID}` (owner removes a member),
@@ -329,14 +333,17 @@ column; the `User` JSON model hides it (`json:"-"`).
   edited from the "Discord bot footers" controls on the team page. The footers
   are consumed by the bot only (`discordfmt.BuildPost` / `discordfmt.PlayerDetail`);
   the old web-app clipboard export (detailed post / condensed list) was removed.
-- **Save-all**: `PUT /api/teams/{id}` is the single "save everything" call —
-  body is `{ name, schedule_days, schedule_time,
-  encounters_enabled, post_footer, dm_footer, signup_post, auto_share_pool_viewers, pre_made, premade_post, simple_signup, waitlist_enabled, players: [{slot,name,discord_handle,role,class,subclassed,skill_line_1..3,mastery_1..2,werewolf}] }`
-  and the backend (`TeamStore.Save`) updates team meta + roster in one
-  transaction (there is no per-player save endpoint). `schedule_time` is sent in
+- **Save-all**: `PUT /api/teams/{id}` is the team **metadata** save — body is
+  `{ name, schedule_days, schedule_time,
+  encounters_enabled, post_footer, dm_footer, signup_post, auto_share_pool_viewers, pre_made, premade_post, simple_signup, waitlist_enabled, roles }`
+  and the backend (`TeamStore.Save`) updates only team meta (it no longer touches
+  players). Roster lineups are saved **per slot** via
+  `PUT /api/teams/{id}/players/{slot}` (optional `?roster_id=`, default active),
+  so the UI sends `players: []` here. `schedule_time` is sent in
   UTC (the UI converts from the viewer's current zone,
-  `Intl.DateTimeFormat().resolvedOptions().timeZone`, before saving). Groupings
-  are **not** part of this call — they have their own endpoints (see below).
+  `Intl.DateTimeFormat().resolvedOptions().timeZone`, before saving). Players,
+  encounters, and groupings are **not** part of this call — they belong to a
+  roster and have their own roster-scoped endpoints (see "Rosters model" below).
 - **Autosave (UI)**: there are no Save buttons. Changes are persisted
   automatically and debounced/coalesced (~700ms) via `scheduleAutosave` in
   `app.js`: text inputs save on `change` (blur — "input finished"), while
@@ -345,32 +352,78 @@ column; the `User` JSON model hides it (`json:"-"`).
   inline `save-status` shows "Saving…/Saved", errors use a toast, and Ctrl/Cmd+S
   forces an immediate save.
 
+## Rosters model (current)
+
+- **What it is** (`048_rosters.sql`): a **roster** is a named 12-player lineup
+  within a team. A team can hold up to **50** rosters
+  (`models.MaxRostersPerTeam`) and always points at exactly one **active** roster
+  (`teams.active_roster_id`). Each roster fully owns its composition — its
+  `players`, `encounters` (+ loadouts), and `groupings` all key off `roster_id`
+  (the old per-team `team_id` columns were moved onto rosters in the migration).
+- **Migration**: `048_rosters.sql` adds `rosters`, adds `teams.active_roster_id`,
+  backfills one `'Main'` roster per existing team (set active) owning its existing
+  players/encounters/groupings, swaps the `team_id` columns to `roster_id`, and
+  rewrites `notify_team_change()` so those tables still resolve a team id (via
+  `rosters`) for the realtime feed (plus a new `rosters` change trigger).
+- **Backend**: `models.Roster` + `RosterStore` (`internal/models/roster.go`):
+  `ListForTeam`, `Get` (with players), `Create(teamID, name, copyFromRosterID)`
+  (seeds 12 default slots + a Default encounter, or copies players/encounters/
+  groupings from another roster on the **same** team via `copyPlayersTx` /
+  `copyEncountersTx` / `copyGroupingsTx`), `Rename`, `SetActive`, `Delete`
+  (blocks the **last** roster, promotes a new active when needed),
+  `ActiveForTeam`, `TeamForRoster`. `TeamStore.Get` now resolves the active
+  roster, loads its players into `team.Players` (so the bot/`discordfmt` are
+  unchanged), and returns the roster list in `team.Rosters`.
+- **Routes** (`handlers/rosters.go`): `GET/POST /api/teams/{id}/rosters`
+  (create takes `{name, copy_from}`), `GET/PUT/DELETE /api/teams/{id}/rosters/{rid}`,
+  `POST /api/teams/{id}/rosters/{rid}/activate`. The **roster-scoped collection**
+  endpoints — `players/{slot}`, `encounters` (list/create), `groupings`
+  (list/create) — take an optional **`?roster_id=`** query and default to the
+  active roster via `resolveRoster`; resource endpoints addressed by id
+  (`encounters/{eid}`, `groupings/{gid}`, loadouts) resolve their roster from the
+  resource. `rosterAccess` verifies an `{rid}` belongs to the team.
+- **Bot**: always uses the active roster — `loadTeamData` calls
+  `encounters.ListForRoster(team.ActiveRosterID)` /
+  `groupings.ListForRoster(team.ActiveRosterID)` and `team.Players` is already the
+  active roster's lineup.
+- **Frontend** (`app.js`): a `currentRosterId` (defaults to the active roster on
+  open) threads into every roster-scoped API call. A **rosters bar**
+  (`renderRosterBar`, `#rosters-panel`) lists rosters as chips: click to switch
+  (`selectRoster` reloads that roster's lineup/encounters/groupings), ★ to
+  activate (`activateRosterFlow`), and ✎/✕ to rename/delete the selected one;
+  "+ New roster" (`createRosterFlow`) prompts a name and offers to copy the
+  current roster. Hidden for templates (pre-made runs are locked to the active
+  roster — see `applyPreMadeMode`).
+
 ## Encounters model (current)
 
-- **Tables** (`007_encounters.sql`): `encounters` (per-team named fights, with
+- **Tables** (`007_encounters.sql` + `048_rosters.sql`): `encounters` (per-**roster**
+  named fights keyed by `roster_id`, with
   `position` for ordering) and `encounter_loadouts` (one row per
   `(encounter_id, slot 1–12)` holding `gear TEXT[]` and `skills TEXT[]` —
   ordered, free-form lists of master-data keys). Both cascade on team/encounter
-  delete. Every team always has **at least one** encounter named `Default`:
-  `TeamStore.Create` creates it for new teams (`createDefaultEncounterTx`), and
-  the migration backfills existing teams.
+  delete. Every roster always has **at least one** encounter named `Default`:
+  it is created with each roster (`createDefaultEncounterTx`, by `RosterStore`/
+  `TeamStore.Create`), and the migration backfills existing teams.
 - **Names**: an encounter's name must be in `models.ValidEncounterNames` —
   `Default`, `Trash`, or any ESO trial boss, grouped by trial in
   `models.EncounterNameGroups`. The frontend mirrors this in
   `frontend/js/data.js` (`ENCOUNTER_NAME_GROUPS`). This is **seed** data meant to
   grow; keep the Go groups and the JS groups in sync.
 - **Selection rules** (`models.ValidateEncounterSelection`, enforced on
-  create/rename): names are **unique** per team, and all non-`General`
+  create/rename): names are **unique** per roster, and all non-`General`
   encounters must belong to a **single trial** (the `General` group — Default,
   Trash — is always allowed alongside one trial). A unique index on
-  `encounters(team_id, name)` (`008_…sql`) backstops uniqueness. The frontend
-  filters the add/rename dropdown to only valid choices via `validEncounterGroups`
-  / `encounterTrial` in `data.js` (used by `populateEncounterNameSelect`).
+  `encounters(roster_id, name)` (`048_rosters.sql`) backstops uniqueness. The
+  frontend filters the add/rename dropdown to only valid choices via
+  `validEncounterGroups` / `encounterTrial` in `data.js` (used by
+  `populateEncounterNameSelect`).
 - **Copy on create**: the create request accepts an optional `copy_from`
   encounter id; when set, `EncounterStore.Create` copies that encounter's
   per-player gear/skills slot-for-slot into the new one (the SQL join on
-  `encounters.team_id` guarantees same-team copies only; the handler also
-  validates the source belongs to the team). The add-encounter form has a
+  `encounters.roster_id` guarantees same-roster copies only; the handler resolves
+  the target roster via `?roster_id=`/active and validates the source). The
+  add-encounter form has a
   **"Copy gear & skills from"** picker whose first option, "None (empty
   encounter)", creates a blank encounter.
 - **Loadouts hold three lists**: each `(encounter, slot)` loadout has `gear`,
@@ -432,11 +485,11 @@ column; the `User` JSON model hides it (`json:"-"`).
   work; these use the same tooltip engine, so they also respect the Tooltips
   toggle.
 - **Access/permissions**: mirror the roster — any role can read; editors/owner
-  can add, rename, delete, and edit loadouts; viewers are read-only. A team
+  can add, rename, delete, and edit loadouts; viewers are read-only. A roster
   cannot delete its **last** encounter.
 - **Endpoints** (all JWT-protected, nested under a team):
-  `GET/POST /api/teams/{id}/encounters`,
-  `GET/PUT/DELETE /api/teams/{id}/encounters/{eid}`,
+  `GET/POST /api/teams/{id}/encounters` (take an optional `?roster_id=`, default
+  active), `GET/PUT/DELETE /api/teams/{id}/encounters/{eid}`,
   `PUT /api/teams/{id}/encounters/{eid}/loadouts`. Mutations return the refreshed
   encounter (with its 12 loadouts).
 - **UI**: encounters are integrated into the single team detail page (there is
@@ -470,17 +523,18 @@ column; the `User` JSON model hides it (`json:"-"`).
 
 ## Groupings model (current)
 
-- **What it is** (`020_groupings.sql`): a **grouping** splits a team's roster
+- **What it is** (`020_groupings.sql`): a **grouping** splits a roster's lineup
   into a set of numbered groups for trial mechanics (e.g. "ice cages", "slayer
-  stacks"). A team may have several groupings; each has a `name`, a `group_count`
+  stacks"). A roster may have several groupings; each has a `name`, a `group_count`
   (1–12), and a `position` for ordering. Each numbered group has an optional
   `name` (blank → UI shows "Group N") and any number of player slots. A player
   may belong to **at most one group per grouping** — enforced by the
   `grouping_members` primary key `(grouping_id, player_slot)`.
-- **Tables**: `groupings` (per-team, name/group_count/position),
+- **Tables**: `groupings` (per-**roster** since `048_rosters.sql`, keyed by
+  `roster_id`; name/group_count/position),
   `grouping_groups` (`(grouping_id, group_number)` PK → per-group name), and
   `grouping_members` (`(grouping_id, player_slot)` PK → which group a slot is in).
-  All cascade on team/grouping delete. `GroupingStore`
+  All cascade on roster/grouping delete. `GroupingStore`
   (`backend/internal/models/grouping.go`) always returns a full set of
   `group_count` groups (blanks filled in) so the client gets a complete shape.
 - **Limits**: `maxGroupingsPerTeam` (10, in `handlers.go`) caps groupings per
@@ -489,13 +543,14 @@ column; the `User` JSON model hides it (`json:"-"`).
   100, `maxGroupNameLen` 50). The update handler rejects a slot appearing in two
   groups (`400`).
 - **Copy on create**: `copyGroupingsTx` (in `grouping.go`) copies all groupings
-  (names, group names, member assignments) when a team is created with
-  `copy_from`, alongside the schedule/roster/encounters copy.
+  (names, group names, member assignments) when a **roster** is copied (which also
+  happens when a team is created with `copy_from`, alongside the players/encounters
+  copy).
 - **Access/permissions**: mirror the roster — any role reads; editors/owner add,
   rename, delete, and edit; viewers are read-only.
 - **Endpoints** (all JWT-protected, nested under a team):
-  `GET/POST /api/teams/{id}/groupings`,
-  `GET/PUT/DELETE /api/teams/{id}/groupings/{gid}`. The `PUT` body is
+  `GET/POST /api/teams/{id}/groupings` (take an optional `?roster_id=`, default
+  active), `GET/PUT/DELETE /api/teams/{id}/groupings/{gid}`. The `PUT` body is
   `{ name, group_count, groups: [{ group_number, name, slots: [...] }] }` and
   replaces the grouping's name, count, per-group names, and **all** member
   assignments in one transaction (`GroupingStore.Save`).
@@ -1012,11 +1067,13 @@ Multiple editors can work on the same team at once; everyone's view stays fresh
 and concurrent edits don't silently clobber each other. Three cooperating pieces:
 
 - **Live refresh (SSE + Postgres LISTEN/NOTIFY)**. Migration 044 adds a
-  `notify_team_change()` trigger on every collaborative table (teams, players,
-  encounters, encounter_loadouts, groupings + groups/members, team_members,
-  team_roster_members). Each write `pg_notify`s the `team_changed` channel with
-  `{team_id, kind}` where `kind` is the coarse area that changed
-  (`team`/`encounter`/`grouping`/`members`/`pool`). The payload is row-agnostic
+  `notify_team_change()` trigger on every collaborative table (teams, rosters,
+  players, encounters, encounter_loadouts, groupings + groups/members,
+  team_members, team_roster_members). Migration `048_rosters.sql` rewrote the
+  function so players/encounters/groupings resolve their team id via `rosters`
+  (and added the `rosters` trigger, kind `team`). Each write `pg_notify`s the
+  `team_changed` channel with `{team_id, kind}` where `kind` is the coarse area
+  that changed (`team`/`encounter`/`grouping`/`members`/`pool`). The payload is row-agnostic
   so Postgres collapses the many per-row notifications of a bulk save into one.
   Because the **trigger** does the publishing, writes from *any* process count —
   including the **Discord bot**, a separate process. `internal/realtime.Hub`

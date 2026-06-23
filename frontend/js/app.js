@@ -31,6 +31,10 @@
 
   let currentUser = null;
   let currentTeam = null;
+  // The roster currently being viewed/edited on the team page. Defaults to the
+  // team's active roster on open; the roster switcher changes it. All
+  // roster-scoped reads/writes (players, encounters, groupings) target it.
+  let currentRosterId = null;
   // The teams shown in the list; cached so the "copy from team" picker can list
   // them when creating a new team.
   let allTeams = [];
@@ -287,7 +291,9 @@
     clearMessage();
     try {
       currentTeam = await api.getTeam(id);
-      const { encounters } = await api.listEncounters(id);
+      // Open on the active roster; its lineup is what getTeam already returned.
+      currentRosterId = resolveActiveRosterId(currentTeam);
+      const { encounters } = await api.listEncounters(id, currentRosterId);
       currentEncounters = encounters || [];
       // Select the first encounter (e.g. Default) and load its loadouts so the
       // roster can show each player's gear/skills for it.
@@ -295,7 +301,7 @@
       if (currentEncounters.length) {
         currentEncounter = await api.getEncounter(id, currentEncounters[0].id);
       }
-      const { groupings } = await api.listGroupings(id);
+      const { groupings } = await api.listGroupings(id, currentRosterId);
       currentGroupings = groupings || [];
       // Load the member pool so the roster's Discord-handle combobox can suggest
       // known members. Best-effort: a failure here shouldn't block the team page.
@@ -497,12 +503,26 @@
       const team = await api.getTeam(teamId);
       if (!currentTeam || currentTeam.id !== teamId) return; // navigated away
       currentTeam = team;
-      const { encounters } = await api.listEncounters(teamId);
+      // Keep viewing the same roster across reloads. If it was deleted, fall back
+      // to the active roster. team.players reflects the active roster, so when a
+      // non-active roster is selected, refetch its lineup to keep editing it.
+      const rosterStillExists =
+        currentRosterId &&
+        (team.rosters || []).some((r) => r.id === currentRosterId);
+      if (!rosterStillExists) {
+        currentRosterId = resolveActiveRosterId(team);
+      }
+      if (currentRosterId && currentRosterId !== team.active_roster_id) {
+        const roster = await api.getRoster(teamId, currentRosterId);
+        if (!currentTeam || currentTeam.id !== teamId) return;
+        currentTeam.players = roster.players || [];
+      }
+      const { encounters } = await api.listEncounters(teamId, currentRosterId);
       currentEncounters = encounters || [];
       const enc =
         currentEncounters.find((x) => x.id === encId) || currentEncounters[0];
       currentEncounter = enc ? await api.getEncounter(teamId, enc.id) : null;
-      const { groupings } = await api.listGroupings(teamId);
+      const { groupings } = await api.listGroupings(teamId, currentRosterId);
       currentGroupings = groupings || [];
       try {
         const { members } = await api.listRosterMembers(teamId);
@@ -1144,6 +1164,7 @@
     applyAutoSharePoolMode();
     applyPreMadeMode();
     renderRolesEditor();
+    renderRosterBar();
     renderRoster();
     applySimpleSignupMode();
     renderGroupings();
@@ -1550,10 +1571,15 @@
           continue;
         }
         const base = (currentTeam.players || []).find((x) => x.slot === slot);
-        const saved = await api.savePlayer(currentTeam.id, slot, {
-          ...p,
-          expected_updated_at: base ? base.updated_at : null,
-        });
+        const saved = await api.savePlayer(
+          currentTeam.id,
+          slot,
+          {
+            ...p,
+            expected_updated_at: base ? base.updated_at : null,
+          },
+          currentRosterId
+        );
         dirtyPlayerSlots.delete(slot);
         mergeSavedPlayer(saved);
       }
@@ -2052,7 +2078,8 @@
       const grouping = await api.createGrouping(
         currentTeam.id,
         `Grouping ${currentGroupings.length + 1}`,
-        2
+        2,
+        currentRosterId
       );
       currentGroupings.push(grouping);
       expandAncestors(el("groupings-card"));
@@ -3039,6 +3066,10 @@
     if (premadeCard) premadeCard.classList.toggle("is-hidden", !on);
     const membersBtn = el("members-btn");
     if (membersBtn) membersBtn.classList.toggle("is-hidden", on);
+    // Templates (pre-made runs) are locked to their single active roster, so the
+    // roster switcher/management UI is hidden in pre-made mode.
+    const rostersPanel = el("rosters-panel");
+    if (rostersPanel) rostersPanel.classList.toggle("is-hidden", on);
     // Auto-share targets the member pool, which is hidden in pre-made mode, so
     // hide that toggle too (its value is preserved either way).
     const autoShareLabel = el("auto-share-pool-label");
@@ -3122,6 +3153,171 @@
       bar.appendChild(chip);
     });
     el("add-encounter-btn").classList.toggle("is-hidden", !canEdit());
+  }
+
+  // resolveActiveRosterId returns the team's active roster id, falling back to
+  // its first roster (defensive: data created before the rosters feature).
+  function resolveActiveRosterId(team) {
+    if (!team) return null;
+    if (team.active_roster_id) return team.active_roster_id;
+    return team.rosters && team.rosters.length ? team.rosters[0].id : null;
+  }
+
+  // The rosters bar lets you switch between a team's lineups, mark one active
+  // (used by the Discord bot), and create/rename/delete them. Hidden for
+  // templates (pre-made runs are locked to the single active roster).
+  function renderRosterBar() {
+    const bar = el("rosters-bar");
+    if (!bar) return;
+    const editable = canEdit();
+    const rosters = (currentTeam && currentTeam.rosters) || [];
+    const activeId = currentTeam && currentTeam.active_roster_id;
+    bar.innerHTML = "";
+    rosters.forEach((roster) => {
+      const chip = document.createElement("div");
+      chip.className = "roster-chip";
+      if (roster.id === currentRosterId) chip.classList.add("is-selected");
+
+      // Star marks/sets the active roster (the one the bot uses).
+      const star = document.createElement("button");
+      star.type = "button";
+      star.className = "roster-chip-star";
+      const isActive = roster.id === activeId;
+      star.classList.toggle("is-active", isActive);
+      star.textContent = isActive ? "★" : "☆";
+      star.title = isActive ? "Active roster (used by the bot)" : "Set as active roster";
+      star.disabled = !editable || isActive;
+      star.addEventListener("click", (e) => {
+        e.stopPropagation();
+        activateRosterFlow(roster.id);
+      });
+      chip.appendChild(star);
+
+      const label = document.createElement("button");
+      label.type = "button";
+      label.className = "roster-chip-label";
+      label.textContent = roster.name;
+      label.addEventListener("click", () => selectRoster(roster.id));
+      chip.appendChild(label);
+
+      if (editable && roster.id === currentRosterId) {
+        const rename = document.createElement("button");
+        rename.type = "button";
+        rename.className = "roster-chip-action";
+        rename.textContent = "✎";
+        rename.title = "Rename roster";
+        rename.addEventListener("click", (e) => {
+          e.stopPropagation();
+          renameRosterFlow(roster.id);
+        });
+        chip.appendChild(rename);
+
+        if (rosters.length > 1) {
+          const del = document.createElement("button");
+          del.type = "button";
+          del.className = "roster-chip-action roster-chip-delete";
+          del.textContent = "✕";
+          del.title = "Delete roster";
+          del.addEventListener("click", (e) => {
+            e.stopPropagation();
+            deleteRosterFlow(roster.id);
+          });
+          chip.appendChild(del);
+        }
+      }
+      bar.appendChild(chip);
+    });
+    const addBtn = el("add-roster-btn");
+    if (addBtn) addBtn.classList.toggle("is-hidden", !editable);
+  }
+
+  // Switch the viewed/edited roster: load its lineup, encounters, and groupings.
+  async function selectRoster(rosterId) {
+    if (!currentTeam || rosterId === currentRosterId) return;
+    try {
+      const roster = await api.getRoster(currentTeam.id, rosterId);
+      currentRosterId = rosterId;
+      currentTeam.players = roster.players || [];
+      const { encounters } = await api.listEncounters(currentTeam.id, rosterId);
+      currentEncounters = encounters || [];
+      currentEncounter = currentEncounters.length
+        ? await api.getEncounter(currentTeam.id, currentEncounters[0].id)
+        : null;
+      const { groupings } = await api.listGroupings(currentTeam.id, rosterId);
+      currentGroupings = groupings || [];
+      // Switching rosters discards any unsaved per-slot edits for the prior one.
+      dirtyPlayerSlots.clear();
+      dirtyLoadoutSlots.clear();
+      renderTeamDetail();
+    } catch (err) {
+      handleError(err);
+    }
+  }
+
+  async function createRosterFlow() {
+    if (!currentTeam || !canEdit()) return;
+    const name = (prompt("New roster name:", "") || "").trim();
+    if (!name) return;
+    let copyFrom = 0;
+    if (
+      confirm(
+        "Copy players, encounters, and groupings from the current roster?\n\nOK = copy, Cancel = start empty."
+      )
+    ) {
+      copyFrom = currentRosterId || 0;
+    }
+    try {
+      const roster = await api.createRoster(currentTeam.id, name, copyFrom);
+      currentTeam = await api.getTeam(currentTeam.id);
+      await selectRoster(roster.id);
+    } catch (err) {
+      handleError(err);
+    }
+  }
+
+  async function renameRosterFlow(rosterId) {
+    if (!currentTeam || !canEdit()) return;
+    const roster = (currentTeam.rosters || []).find((r) => r.id === rosterId);
+    const name = (prompt("Rename roster:", roster ? roster.name : "") || "").trim();
+    if (!name || (roster && name === roster.name)) return;
+    try {
+      await api.renameRoster(currentTeam.id, rosterId, name);
+      currentTeam = await api.getTeam(currentTeam.id);
+      renderRosterBar();
+    } catch (err) {
+      handleError(err);
+    }
+  }
+
+  async function activateRosterFlow(rosterId) {
+    if (!currentTeam || !canEdit()) return;
+    try {
+      currentTeam = await api.activateRoster(currentTeam.id, rosterId);
+      renderRosterBar();
+    } catch (err) {
+      handleError(err);
+    }
+  }
+
+  async function deleteRosterFlow(rosterId) {
+    if (!currentTeam || !canEdit()) return;
+    const roster = (currentTeam.rosters || []).find((r) => r.id === rosterId);
+    if (
+      !confirm(
+        `Delete roster “${roster ? roster.name : "roster"}”? Its players, encounters, and groupings will be permanently removed.`
+      )
+    ) {
+      return;
+    }
+    try {
+      await api.deleteRoster(currentTeam.id, rosterId);
+      currentTeam = await api.getTeam(currentTeam.id);
+      const fallback = resolveActiveRosterId(currentTeam);
+      currentRosterId = null; // force selectRoster to reload
+      await selectRoster(fallback);
+    } catch (err) {
+      handleError(err);
+    }
   }
 
   // Show the controls for the currently selected encounter (name, rename,
@@ -3221,6 +3417,9 @@
   el("add-encounter-cancel").addEventListener("click", () => {
     addEncounterForm.classList.add("is-hidden");
   });
+
+  const addRosterBtn = el("add-roster-btn");
+  if (addRosterBtn) addRosterBtn.addEventListener("click", createRosterFlow);
 
   // Toggle whether the team uses multiple encounters. Turning it off hides the
   // encounters section and snaps the roster back to the first encounter; turning
@@ -3328,9 +3527,9 @@
     const copyFromRaw = el("add-encounter-copy").value;
     const copyFrom = copyFromRaw ? Number(copyFromRaw) : 0;
     try {
-      const enc = await api.createEncounter(currentTeam.id, name, copyFrom);
+      const enc = await api.createEncounter(currentTeam.id, name, copyFrom, currentRosterId);
       addEncounterForm.classList.add("is-hidden");
-      const { encounters } = await api.listEncounters(currentTeam.id);
+      const { encounters } = await api.listEncounters(currentTeam.id, currentRosterId);
       currentEncounters = encounters || [];
       // Select the newly added encounter so its loadouts show in the roster.
       currentEncounter = await api.getEncounter(currentTeam.id, enc.id);
@@ -3550,7 +3749,7 @@
     const name = e.target.value;
     try {
       currentEncounter = await api.renameEncounter(currentTeam.id, currentEncounter.id, name);
-      const { encounters } = await api.listEncounters(currentTeam.id);
+      const { encounters } = await api.listEncounters(currentTeam.id, currentRosterId);
       currentEncounters = encounters || [];
       renderEncountersBar();
       renderEncounterControls();
@@ -3566,7 +3765,7 @@
     }
     try {
       await api.deleteEncounter(currentTeam.id, currentEncounter.id);
-      const { encounters } = await api.listEncounters(currentTeam.id);
+      const { encounters } = await api.listEncounters(currentTeam.id, currentRosterId);
       currentEncounters = encounters || [];
       // Fall back to the first remaining encounter.
       currentEncounter = currentEncounters.length
