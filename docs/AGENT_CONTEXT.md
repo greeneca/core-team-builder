@@ -598,10 +598,16 @@ column; the `User` JSON model hides it (`json:"-"`).
     slots (open slots, or slots whose assigned player marked themselves **not
     coming**). Built by `discordfmt.BuildPost`; the bot wraps the parts in the
     embed and attaches the controls via `postComponents(team, fills, marks)`.
-  - `recruit` — posts the team's **recruitment post** as an embed (the team's
+  - `recruit` — posts a team's **recruitment post** as an embed (the team's
     free-form `signup_post` body, or a default prompt) with a single **I'm
     Interested** button. Pressing it starts an interactive **DM intake flow**
     (see Member pool below). Built by `handleSignupPost` / `signupComponents`.
+    Does **not** require the channel to be bound: if this channel is bound to a
+    team it recruits for that team; otherwise it shows the runner an ephemeral
+    picker of their (non-premade) teams (`recruit_select` → `handleRecruitSelect`)
+    and posts for the chosen one. The team id is encoded on the button
+    (`signup_join:<teamID>`) so the intake works in unbound channels;
+    `signupJoinTeamID` falls back to the channel binding for older bare-id posts.
     (Formerly named `signup`; the command's internal `signup_*` component custom
     IDs and `signup_post` column are unchanged.)
   - `signup` — posts a one-off **pre-made trial run** (see "Pre-made trial runs"
@@ -704,6 +710,14 @@ column; the `User` JSON model hides it (`json:"-"`).
   unique per message via a partial index). Backs the post's signup dropdown
   (`DiscordStore.ClaimFill`/`LeaveFill`/`ListFills`); like RSVPs it's keyed by
   message ID so re-posting starts fresh.
+- **Posted overviews (pre-run ping)**: `discord_posts` (`049_discord_posts.sql`)
+  tracks each `/coreteam post` overview by `message_id` with its `channel_id`,
+  the discussion `thread_id` opened off it, the computed `run_at` (next-run time
+  from the team schedule; `NULL` when there's no concrete schedule, so no ping),
+  and `pinged_at`. The bot opens the thread on post and the scheduler pings
+  attendees in it ~15 min before `run_at`
+  (`DiscordStore.RecordPost`/`SetPostThread`/`DuePostPings`/`MarkPostPinged`).
+  Keyed by message ID so re-posting starts fresh.
 - **Label data (codegen)**: the bot formats posts using
   `backend/internal/discordfmt` (`BuildPost` for the overview embed + `PlayerDetail`
   for the build-details DM, plus the GROUP-source half of `computePenCoverage` /
@@ -857,7 +871,16 @@ the `pre_made` flag on (see "Pre-made trial run" under Teams). Tables in
   Both are tracked by timestamp columns on `premade_runs`, so each fires **exactly
   once** and **catches up** if the bot was offline at the trigger time (cleanups
   are processed before threads, so a long-offline finished run is removed rather
-  than getting a late thread). Thread deletion (both here and the manual **Delete
+  than getting a late thread).
+  - **Recurring posts** (`/coreteam post`): the same loop also handles a pre-run
+    ping for ordinary (non-premade) overviews. On post, `startPostThread` opens a
+    discussion thread off the message (no explicit auto-archive — Discord's
+    channel default applies) and records the post + its `run_at` via `RecordPost`
+    /`SetPostThread`. **15 min before** `run_at` (`DuePostPings`), the loop pings
+    everyone who RSVP'd `yes` or signed up to fill, in the thread, then
+    `MarkPostPinged` (fires once, catch-up safe; skipped once the run has
+    started). Posts with no concrete schedule have a NULL `run_at` and are never
+    pinged. Unlike premade runs, recurring posts/threads are **not** auto-deleted. Thread deletion (both here and the manual **Delete
   run** button) uses `threadCleanupID`: a thread is started *off the post*, so its
   channel id equals the post's message id — when `thread_id` wasn't recorded but a
   start was attempted (`thread_started_at` set), cleanup falls back to the message

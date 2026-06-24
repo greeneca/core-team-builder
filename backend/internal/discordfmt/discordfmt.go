@@ -857,6 +857,14 @@ var weekdayByDay = map[string]time.Weekday{
 	"thu": time.Thursday, "fri": time.Friday, "sat": time.Saturday,
 }
 
+// NextRunUnix returns the Unix time (seconds) of the next scheduled run for a
+// recurring schedule (days + UTC HH:MM), matching the dynamic timestamp shown on
+// the post. ok is false when the schedule is unset/invalid. Exported so the bot
+// can schedule the pre-run ping at the same instant the post advertises.
+func NextRunUnix(days []string, hhmm string) (int64, bool) {
+	return nextRunUnix(days, hhmm)
+}
+
 // nextRunUnix returns the Unix time (seconds) of the next occurrence of the
 // recurring weekly schedule (one of days, at the UTC HH:MM time), or ok=false
 // when either is unset/invalid. The schedule has no date, so the nearest future

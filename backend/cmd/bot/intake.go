@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"strconv"
@@ -51,7 +52,9 @@ var signupTimezones = []string{
 // onSignupComponent dispatches every signup_* component interaction.
 func (b *bot) onSignupComponent(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	id := i.MessageComponentData().CustomID
-	if id == signupJoinID {
+	// "I'm Interested": the bare form (older posts, team from the channel
+	// binding) or "signup_join:<teamID>" (team encoded on the button).
+	if id == signupJoinID || strings.HasPrefix(id, signupJoinID+":") {
 		b.handleSignupJoin(s, i)
 		return
 	}
@@ -114,9 +117,9 @@ func (b *bot) handleSignupJoin(s *discordgo.Session, i *discordgo.InteractionCre
 	ctx, cancel := handlerContext()
 	defer cancel()
 
-	teamID, err := b.discord.GetChannelTeam(ctx, i.ChannelID)
+	teamID, err := b.signupJoinTeamID(ctx, i)
 	if err != nil {
-		ephemeral(s, i, "This channel isn't bound to a team anymore.")
+		ephemeral(s, i, "This recruitment post isn't linked to a team anymore.")
 		return
 	}
 	member, err := b.members.UpsertDraft(ctx, teamID, user.ID, user.Username, displayName(user))
@@ -140,6 +143,19 @@ func (b *bot) handleSignupJoin(s *discordgo.Session, i *discordgo.InteractionCre
 		return
 	}
 	ephemeral(s, i, "Your interest is recorded! Check your DMs — I've sent you a few quick questions.")
+}
+
+// signupJoinTeamID resolves the team a recruitment post recruits for: the team
+// id encoded on the "I'm Interested" button ("signup_join:<teamID>") when
+// present, falling back to the channel binding for older bare-id posts.
+func (b *bot) signupJoinTeamID(ctx context.Context, i *discordgo.InteractionCreate) (int64, error) {
+	id := i.MessageComponentData().CustomID
+	if rest, ok := strings.CutPrefix(id, signupJoinID+":"); ok {
+		if teamID, err := strconv.ParseInt(rest, 10, 64); err == nil {
+			return teamID, nil
+		}
+	}
+	return b.discord.GetChannelTeam(ctx, i.ChannelID)
 }
 
 func (b *bot) signupSaveDays(s *discordgo.Session, i *discordgo.InteractionCreate, m *models.RosterMember, values []string) {

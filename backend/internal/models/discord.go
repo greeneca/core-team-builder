@@ -249,6 +249,76 @@ func (s *DiscordStore) ListRSVPs(ctx context.Context, messageID string) ([]RSVP,
 	return out, rows.Err()
 }
 
+// Post is a tracked /coreteam post overview message, used by the scheduler to
+// ping attendees in its discussion thread ~15 minutes before the run. RunAt is
+// the post's next-run time (nil when the team has no concrete schedule, so no
+// ping fires); PingedAt is set once the pre-run ping has been sent.
+type Post struct {
+	MessageID string
+	ChannelID string
+	ThreadID  string
+	RunAt     *time.Time
+	PingedAt  *time.Time
+}
+
+// RecordPost tracks a posted overview message so the scheduler can ping its
+// thread before the run. runAt is the next-run time (nil = no schedule, never
+// pinged). Upserts on message_id so a re-render of the same message is a no-op
+// on the bookkeeping.
+func (s *DiscordStore) RecordPost(ctx context.Context, messageID, channelID string, runAt *time.Time) error {
+	const q = `
+		INSERT INTO discord_posts (message_id, channel_id, run_at)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (message_id)
+		DO UPDATE SET channel_id = EXCLUDED.channel_id, run_at = EXCLUDED.run_at`
+	_, err := s.pool.Exec(ctx, q, messageID, channelID, runAt)
+	return err
+}
+
+// SetPostThread records the discussion thread opened off a tracked post.
+func (s *DiscordStore) SetPostThread(ctx context.Context, messageID, threadID string) error {
+	_, err := s.pool.Exec(ctx, `UPDATE discord_posts SET thread_id = $1 WHERE message_id = $2`, threadID, messageID)
+	return err
+}
+
+// DuePostPings returns tracked posts whose pre-run ping is due now (within 15
+// minutes before the run, up to the start time) but hasn't been sent, and that
+// have a discussion thread to ping. Catch-up safe: a post missed while the bot
+// was offline is returned as soon as it polls again, as long as the run hasn't
+// started yet.
+func (s *DiscordStore) DuePostPings(ctx context.Context, now time.Time) ([]Post, error) {
+	const q = `
+		SELECT message_id, channel_id, thread_id, run_at, pinged_at
+		FROM discord_posts
+		WHERE pinged_at IS NULL
+		  AND thread_id <> ''
+		  AND run_at IS NOT NULL
+		  AND $1 >= run_at - INTERVAL '15 minutes'
+		  AND $1 < run_at
+		ORDER BY run_at`
+	rows, err := s.pool.Query(ctx, q, now)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Post
+	for rows.Next() {
+		var p Post
+		if err := rows.Scan(&p.MessageID, &p.ChannelID, &p.ThreadID, &p.RunAt, &p.PingedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// MarkPostPinged records that a tracked post's pre-run ping has been sent, so it
+// fires only once.
+func (s *DiscordStore) MarkPostPinged(ctx context.Context, messageID string) error {
+	_, err := s.pool.Exec(ctx, `UPDATE discord_posts SET pinged_at = now() WHERE message_id = $1`, messageID)
+	return err
+}
+
 // PostFillList is the sentinel slot value meaning "the general fill list" (a
 // backup pool not tied to a specific roster slot). Any slot > 0 is a real open
 // roster slot a single user can fill.

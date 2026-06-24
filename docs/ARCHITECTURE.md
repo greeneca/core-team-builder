@@ -479,6 +479,19 @@ buttons on a posted overview — one row per `(message_id, discord_user_id)`:
 Managed via `DiscordStore`; the hourly sweep prunes expired/used link codes. See
 `docs/AGENT_CONTEXT.md` "Discord bot".
 
+`discord_posts` (`049_discord_posts.sql`) — one row per posted `/coreteam post`
+overview, so the scheduler can ping attendees in the post's discussion thread
+~15 min before the run. Keyed by `message_id` (re-posting starts fresh):
+
+| column     | type        | notes                                              |
+|------------|-------------|----------------------------------------------------|
+| message_id | text        | posted overview message (PK)                       |
+| channel_id | text        | channel the post is in                             |
+| thread_id  | text        | discussion thread opened off the post (`''` until set) |
+| run_at     | timestamptz | next-run time from the team schedule; NULL ⇒ no ping |
+| pinged_at  | timestamptz | set once the pre-run ping has fired (once-only)    |
+| created_at | timestamptz | default `now()`                                    |
+
 `premade_runs` (`036_premade_runs.sql`) — one row per posted **pre-made trial
 run**. The bookkeeping timestamps drive the bot's scheduler (thread 15 min
 before, cleanup 2 h after) and make those actions fire exactly once / catch up

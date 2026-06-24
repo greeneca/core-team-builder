@@ -65,6 +65,69 @@ func (b *bot) schedulerTick(ctx context.Context, session *discordgo.Session) {
 	for _, run := range tags {
 		b.tagRunSignups(ctx, session, run)
 	}
+
+	// Pre-run pings for recurring /coreteam post overviews (15 min before start).
+	pc, pcancel := context.WithTimeout(ctx, 10*time.Second)
+	posts, err := b.discord.DuePostPings(pc, now)
+	pcancel()
+	if err != nil {
+		log.Printf("scheduler: due post pings: %v", err)
+	}
+	for _, p := range posts {
+		b.pingPostAttendees(ctx, session, p)
+	}
+}
+
+// pingPostAttendees posts the pre-run heads-up in a /coreteam post's discussion
+// thread ~15 minutes before the run, mentioning everyone who RSVP'd "yes" or
+// signed up to fill, then records the ping so it fires once. Best effort: send
+// failures are logged but the ping is still marked done to avoid retry storms.
+func (b *bot) pingPostAttendees(ctx context.Context, session *discordgo.Session, p models.Post) {
+	c, cancel := context.WithTimeout(ctx, 10*time.Second)
+	rsvps, err := b.discord.ListRSVPs(c, p.MessageID)
+	cancel()
+	if err != nil {
+		log.Printf("scheduler: post ping list rsvps (%s): %v", p.MessageID, err)
+	}
+	c, cancel = context.WithTimeout(ctx, 10*time.Second)
+	fills, err := b.discord.ListFills(c, p.MessageID)
+	cancel()
+	if err != nil {
+		log.Printf("scheduler: post ping list fills (%s): %v", p.MessageID, err)
+	}
+
+	// Dedup attendee user ids: anyone coming (RSVP yes) or signed up to fill.
+	seen := map[string]bool{}
+	var mentions []string
+	add := func(id string) {
+		if id == "" || seen[id] {
+			return
+		}
+		seen[id] = true
+		mentions = append(mentions, "<@"+id+">")
+	}
+	for _, r := range rsvps {
+		if r.Status == models.RSVPYes {
+			add(r.DiscordUserID)
+		}
+	}
+	for _, f := range fills {
+		add(f.DiscordUserID)
+	}
+
+	content := "⏰ Starting in ~15 minutes!"
+	if len(mentions) > 0 {
+		content = "⏰ Starting in ~15 minutes — " + strings.Join(mentions, " ")
+	}
+	if _, err := session.ChannelMessageSend(p.ThreadID, content); err != nil {
+		log.Printf("scheduler: post ping send (%s): %v", p.MessageID, err)
+	}
+
+	c, cancel = context.WithTimeout(ctx, 10*time.Second)
+	if err := b.discord.MarkPostPinged(c, p.MessageID); err != nil {
+		log.Printf("scheduler: post ping mark (%s): %v", p.MessageID, err)
+	}
+	cancel()
 }
 
 // withTimeout runs a DB query with a bounded context derived from the loop ctx,

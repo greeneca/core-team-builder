@@ -323,6 +323,8 @@ func (b *bot) onComponent(s *discordgo.Session, i *discordgo.InteractionCreate) 
 		b.handleGetMyDetails(s, i)
 	case "setup_select":
 		b.handleSetupSelect(s, i)
+	case "recruit_select":
+		b.handleRecruitSelect(s, i)
 	case "publish_select":
 		b.handlePublishSelect(s, i)
 	case "timezone_select":
@@ -611,6 +613,62 @@ func (b *bot) handlePost(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	})
 	if err != nil {
 		log.Printf("post: respond: %v", err)
+		return
+	}
+	// Open a discussion thread off the post and track it so attendees get a
+	// pre-run ping. Best effort — the post is already up.
+	b.startPostThread(ctx, s, i, team)
+}
+
+// postThreadIntro is posted in a /coreteam post discussion thread to invite the
+// channel to chat about the upcoming run. The pre-run ping (see pingPost
+// attendees) is sent here ~15 minutes before the start.
+const postThreadIntro = "🗣️ Discuss this run here — strategy, builds, swaps, and questions. Anyone who RSVPs or signs up to fill will be pinged here about 15 minutes before it starts."
+
+// startPostThread tracks the just-posted overview, opens a discussion thread off
+// it, and seeds it with an intro. The post is recorded with its next-run time so
+// the scheduler can ping attendees ~15 minutes before the start. It's best
+// effort: failures are logged but don't fail the command, since the post itself
+// already succeeded. The thread is created without an explicit auto-archive
+// window (Discord applies the channel default); the pre-run ping keeps it active.
+func (b *bot) startPostThread(ctx context.Context, s *discordgo.Session, i *discordgo.InteractionCreate, team *models.Team) {
+	msg, err := s.InteractionResponse(i.Interaction)
+	if err != nil {
+		log.Printf("post: fetch response for thread: %v", err)
+		return
+	}
+
+	// Record the post with its next-run time (nil when there's no concrete
+	// schedule) so the scheduler can ping attendees before the run.
+	var runAt *time.Time
+	if unix, ok := discordfmt.NextRunUnix(team.ScheduleDays, team.ScheduleTime); ok {
+		t := time.Unix(unix, 0).UTC()
+		runAt = &t
+	}
+	c, cancel := context.WithTimeout(ctx, 10*time.Second)
+	if err := b.discord.RecordPost(c, msg.ID, i.ChannelID, runAt); err != nil {
+		log.Printf("post: record post: %v", err)
+	}
+	cancel()
+
+	name := strings.TrimSpace(team.Name)
+	if name == "" {
+		name = "Trial run"
+	}
+	thread, err := s.MessageThreadStartComplex(i.ChannelID, msg.ID, &discordgo.ThreadStart{
+		Name: truncate(name, 100),
+	})
+	if err != nil {
+		log.Printf("post: create thread: %v", err)
+		return
+	}
+	c, cancel = context.WithTimeout(ctx, 10*time.Second)
+	if err := b.discord.SetPostThread(c, msg.ID, thread.ID); err != nil {
+		log.Printf("post: set thread id: %v", err)
+	}
+	cancel()
+	if _, err := s.ChannelMessageSend(thread.ID, postThreadIntro); err != nil {
+		log.Printf("post: thread intro: %v", err)
 	}
 }
 
@@ -649,19 +707,22 @@ func buildPostEmbed(team *models.Team, primary *models.Encounter, gr []models.Gr
 
 // --- /coreteam recruit (recruitment post + DM intake) ---
 
-// handleSignupPost posts the team's recruitment signup: an embed with the team's
+// handleSignupPost posts a team's recruitment signup: an embed with the team's
 // signup body and an "I'm Interested" button that kicks off the DM intake flow.
+// When this channel is bound to a team it recruits for that team; otherwise it
+// asks the runner which of their teams to recruit for.
 func (b *bot) handleSignupPost(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	ctx, cancel := handlerContext()
 	defer cancel()
 
 	teamID, err := b.discord.GetChannelTeam(ctx, i.ChannelID)
 	if errors.Is(err, models.ErrChannelNotBound) {
-		ephemeral(s, i, "This channel isn't bound to a team yet. Run /coreteam setup first.")
+		// No team bound here — let the runner pick which team to recruit for.
+		b.promptRecruitTeam(ctx, s, i)
 		return
 	}
 	if err != nil {
-		log.Printf("signup: get binding: %v", err)
+		log.Printf("recruit: get binding: %v", err)
 		ephemeral(s, i, "Something went wrong. Please try again.")
 		return
 	}
@@ -671,36 +732,174 @@ func (b *bot) handleSignupPost(s *discordgo.Session, i *discordgo.InteractionCre
 		return
 	}
 
+	err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Embeds:     []*discordgo.MessageEmbed{recruitEmbed(team)},
+			Components: signupComponents(team.ID),
+		},
+	})
+	if err != nil {
+		log.Printf("recruit: respond: %v", err)
+	}
+}
+
+// promptRecruitTeam shows the runner an ephemeral picker of their (non-premade)
+// teams so they can post a recruitment message in a channel that isn't bound to
+// a team. The choice is handled by handleRecruitSelect.
+func (b *bot) promptRecruitTeam(ctx context.Context, s *discordgo.Session, i *discordgo.InteractionCreate) {
+	user := invokingUser(i)
+	if user == nil {
+		ephemeral(s, i, "Could not identify your Discord account.")
+		return
+	}
+	appUserID, err := b.discord.GetUserByDiscordID(ctx, user.ID)
+	if errors.Is(err, models.ErrUserNotFound) {
+		ephemeral(s, i, "This channel isn't bound to a team. Link your account first with /coreteam link, then run /coreteam recruit again to pick a team — or run /coreteam setup to bind this channel.")
+		return
+	}
+	if err != nil {
+		log.Printf("recruit: get user: %v", err)
+		ephemeral(s, i, "Something went wrong. Please try again.")
+		return
+	}
+
+	teams, err := b.teams.ListForUser(ctx, appUserID)
+	if err != nil {
+		log.Printf("recruit: list teams: %v", err)
+		ephemeral(s, i, "Something went wrong loading your teams. Please try again.")
+		return
+	}
+	options := make([]discordgo.SelectMenuOption, 0, len(teams))
+	for _, t := range teams {
+		// Signup templates aren't recruited for; skip them like /coreteam setup.
+		if t.PreMade {
+			continue
+		}
+		if len(options) >= 25 {
+			break
+		}
+		options = append(options, discordgo.SelectMenuOption{
+			Label: truncate(t.Name, 100),
+			Value: strconv.FormatInt(t.ID, 10),
+		})
+	}
+	if len(options) == 0 {
+		ephemeral(s, i, "You don't have any teams to recruit for. Create one in the web app, or run /coreteam setup to make one and bind it to this channel.")
+		return
+	}
+
+	err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Flags:   discordgo.MessageFlagsEphemeral,
+			Content: "This channel isn't bound to a team. Choose which team to post a recruitment message for:",
+			Components: []discordgo.MessageComponent{
+				discordgo.ActionsRow{Components: []discordgo.MessageComponent{
+					discordgo.SelectMenu{
+						CustomID:    "recruit_select",
+						Placeholder: "Select a team",
+						Options:     options,
+					},
+				}},
+			},
+		},
+	})
+	if err != nil {
+		log.Printf("recruit: prompt respond: %v", err)
+	}
+}
+
+// handleRecruitSelect posts the recruitment message for the team chosen in the
+// promptRecruitTeam picker, then confirms in the ephemeral picker. Used when the
+// channel isn't bound to a team.
+func (b *bot) handleRecruitSelect(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	values := i.MessageComponentData().Values
+	if len(values) == 0 {
+		return
+	}
+	teamID, err := strconv.ParseInt(values[0], 10, 64)
+	if err != nil {
+		ephemeral(s, i, "That selection was invalid.")
+		return
+	}
+	user := invokingUser(i)
+	if user == nil {
+		ephemeral(s, i, "Could not identify your Discord account.")
+		return
+	}
+
+	ctx, cancel := handlerContext()
+	defer cancel()
+
+	appUserID, err := b.discord.GetUserByDiscordID(ctx, user.ID)
+	if errors.Is(err, models.ErrUserNotFound) {
+		ephemeral(s, i, "Link your account first with /coreteam link.")
+		return
+	}
+	if err != nil {
+		log.Printf("recruit select: get user: %v", err)
+		ephemeral(s, i, "Something went wrong. Please try again.")
+		return
+	}
+
+	// Confirm the runner can access the chosen team (the values come from their
+	// own ephemeral picker, but re-check so a stale/forged choice can't post for
+	// a team they don't have).
+	teams, err := b.teams.ListForUser(ctx, appUserID)
+	if err != nil {
+		log.Printf("recruit select: list teams: %v", err)
+		ephemeral(s, i, "Something went wrong. Please try again.")
+		return
+	}
+	var chosen *models.Team
+	for idx := range teams {
+		if teams[idx].ID == teamID && !teams[idx].PreMade {
+			chosen = &teams[idx]
+			break
+		}
+	}
+	if chosen == nil {
+		ephemeral(s, i, "You can only recruit for your own teams.")
+		return
+	}
+
+	_, err = s.ChannelMessageSendComplex(i.ChannelID, &discordgo.MessageSend{
+		Embeds:     []*discordgo.MessageEmbed{recruitEmbed(chosen)},
+		Components: signupComponents(chosen.ID),
+	})
+	if err != nil {
+		log.Printf("recruit select: post: %v", err)
+		ephemeral(s, i, "Something went wrong posting the recruitment message. Please try again.")
+		return
+	}
+	updateEphemeral(s, i, "Posted a recruitment message for **"+chosen.Name+"**.")
+}
+
+// recruitEmbed builds a team's recruitment signup embed (title + signup body).
+func recruitEmbed(team *models.Team) *discordgo.MessageEmbed {
 	body := strings.TrimSpace(team.SignupPost)
 	if body == "" {
 		body = "Interested in joining? Press the button below and I'll DM you a few questions about your availability, roles, and classes."
 	}
-	embed := &discordgo.MessageEmbed{
+	return &discordgo.MessageEmbed{
 		Title:       truncate(team.Name+" — Signup", embedTitleLimit),
 		Description: truncate(body, embedDescriptionLimit),
 		Color:       embedColor,
 	}
-	err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{
-			Embeds:     []*discordgo.MessageEmbed{embed},
-			Components: signupComponents(),
-		},
-	})
-	if err != nil {
-		log.Printf("signup: respond: %v", err)
-	}
 }
 
-// signupComponents is the button row on a recruitment signup post.
-func signupComponents() []discordgo.MessageComponent {
+// signupComponents is the button row on a recruitment signup post. The team id
+// is encoded in the button's custom ID so the "I'm Interested" intake knows the
+// team even when the channel isn't bound to one.
+func signupComponents(teamID int64) []discordgo.MessageComponent {
 	return []discordgo.MessageComponent{
 		discordgo.ActionsRow{Components: []discordgo.MessageComponent{
 			discordgo.Button{
 				Label:    "I'm Interested",
 				Emoji:    &discordgo.ComponentEmoji{Name: "\U0001F64B"}, // 🙋
 				Style:    discordgo.SuccessButton,
-				CustomID: signupJoinID,
+				CustomID: fmt.Sprintf("%s:%d", signupJoinID, teamID),
 			},
 		}},
 	}
