@@ -74,6 +74,15 @@ body {
   background: var(--color-bg);
   background-image: radial-gradient(circle at 50% -10%, #20252e 0%, var(--color-bg) 55%);
   min-height: 100vh;
+  /* Flex column so the site footer is pushed to the bottom on short pages. */
+  display: flex;
+  flex-direction: column;
+}
+
+/* The page's main region grows to fill the viewport, keeping the footer at the
+   bottom even when content is short. */
+body > main {
+  flex: 1 0 auto;
 }
 
 a {
@@ -97,8 +106,27 @@ a:hover {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 100vh;
+  /* Fills the flex space left by the footer (see `body > main`), centering its
+     card vertically without forcing the footer below the fold. */
   padding: var(--space-4);
+}
+
+/* Site footer: a quiet, centered bar with a link to report bugs in the repo.
+   Shared across every page. */
+.site-footer {
+  flex: 0 0 auto;
+  padding: var(--space-5) var(--space-4);
+  text-align: center;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+  border-top: 1px solid var(--color-border);
+}
+.site-footer a {
+  color: var(--color-text-muted);
+  text-decoration: underline;
+}
+.site-footer a:hover {
+  color: var(--color-accent);
 }
 
 /* Brand */

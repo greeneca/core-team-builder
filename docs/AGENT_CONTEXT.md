@@ -623,6 +623,13 @@ column; the `User` JSON model hides it (`json:"-"`).
   - `login` — posts a public message linking to the web app (`APP_BASE_URL`).
     Replies ephemerally if `APP_BASE_URL` is unconfigured (`handleLogin`).
   - `status` / `unset` — show / remove the channel's team binding.
+  - `help` — DMs the runner a **command guide** (`backend/cmd/bot/help.go`): an
+    overview embed (intro, the web app link from `APP_BASE_URL`, plus
+    "report a bug"/"source code" links built from `REPO_URL`, default
+    `https://github.com/greeneca/core-team-builder`) and a one-line summary of
+    every command, followed by a select menu (`help_select` → `handleHelpSelect`)
+    that renders any command's full detail in place. Falls back to an ephemeral
+    reply with the same guide when the user's DMs are closed (`handleHelp`).
   - **Get My Build Details** button (`get_my_details`) → matches the presser to a
     roster slot (by Discord ID/mention in `players.discord_handle`, else
     case-insensitive username/global name); if no handle matches, it falls back to

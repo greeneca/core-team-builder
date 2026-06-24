@@ -36,6 +36,10 @@ type Config struct {
 	// outgoing emails (e.g. the password-reset link). Defaults to CORSOrigin.
 	AppBaseURL string
 
+	// RepoURL is the public source-repository URL, shown by the bot's
+	// /coreteam help so users can browse the code and report bugs.
+	RepoURL string
+
 	// PasswordResetTTL is how long an issued password-reset token remains valid.
 	PasswordResetTTL time.Duration
 
@@ -121,6 +125,10 @@ const defaultRefreshTTL = 30 * 24 * time.Hour
 // unset. Kept short so a leaked reset link has a small window of validity.
 const defaultPasswordResetTTL = time.Hour
 
+// defaultRepoURL is the public source repository, used by /coreteam help for the
+// "browse the code" and "report a bug" links when REPO_URL is unset.
+const defaultRepoURL = "https://github.com/greeneca/core-team-builder"
+
 // Load reads configuration from the environment, applying sane defaults for
 // local development. It returns an error when a required production value is
 // missing.
@@ -150,6 +158,9 @@ func Load() (*Config, error) {
 	// The reset link points at the frontend; fall back to the CORS origin when
 	// APP_BASE_URL is not set explicitly.
 	cfg.AppBaseURL = getEnv("APP_BASE_URL", cfg.CORSOrigin)
+
+	// Public source repo for /coreteam help links.
+	cfg.RepoURL = getEnv("REPO_URL", defaultRepoURL)
 
 	// Discord sign-in (OAuth2). The redirect URL defaults to the API callback
 	// under the public app base URL, but can be overridden when the API is hosted

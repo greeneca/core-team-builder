@@ -55,6 +55,7 @@ func run() error {
 		discord:    models.NewDiscordStore(pool),
 		premade:    models.NewPremadeStore(pool),
 		appBaseURL: cfg.AppBaseURL,
+		repoURL:    cfg.RepoURL,
 		nameCache:  newHandleNameCache(),
 	}
 

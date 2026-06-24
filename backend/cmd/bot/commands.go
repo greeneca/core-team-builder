@@ -26,6 +26,9 @@ type bot struct {
 	// appBaseURL is the public base URL of the web app (APP_BASE_URL), used to
 	// build sign-in links the bot sends to users. Empty when unconfigured.
 	appBaseURL string
+	// repoURL is the public source-repository URL (REPO_URL), shown by
+	// /coreteam help for browsing the code and reporting bugs.
+	repoURL string
 	// nameCache memoizes resolved Discord display names (by guild+user) so
 	// re-rendering a post on every RSVP/fill press doesn't re-hit the API.
 	nameCache *handleNameCache
@@ -229,6 +232,11 @@ var coreTeamCommand = &discordgo.ApplicationCommand{
 			Name:        "unset",
 			Description: "Unbind this channel from its team",
 		},
+		{
+			Type:        discordgo.ApplicationCommandOptionSubCommand,
+			Name:        "help",
+			Description: "DM you a command reference, web app link, and where to report bugs",
+		},
 	},
 }
 
@@ -299,6 +307,8 @@ func (b *bot) onCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		b.handleStatus(s, i)
 	case "unset":
 		b.handleUnset(s, i)
+	case "help":
+		b.handleHelp(s, i)
 	}
 }
 
@@ -325,6 +335,8 @@ func (b *bot) onComponent(s *discordgo.Session, i *discordgo.InteractionCreate) 
 		b.handleSetupSelect(s, i)
 	case "recruit_select":
 		b.handleRecruitSelect(s, i)
+	case helpSelectID:
+		b.handleHelpSelect(s, i)
 	case "publish_select":
 		b.handlePublishSelect(s, i)
 	case "timezone_select":
