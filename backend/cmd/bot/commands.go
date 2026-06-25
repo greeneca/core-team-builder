@@ -937,7 +937,7 @@ func (b *bot) handleRSVP(s *discordgo.Session, i *discordgo.InteractionCreate, s
 	ctx, cancel := handlerContext()
 	defer cancel()
 
-	if err := b.discord.SetRSVP(ctx, i.Message.ID, i.ChannelID, user.ID, displayName(user), status); err != nil {
+	if err := b.discord.SetRSVP(ctx, i.Message.ID, i.ChannelID, user.ID, user.Username, user.GlobalName, status); err != nil {
 		log.Printf("rsvp: set: %v", err)
 		ephemeral(s, i, "Something went wrong saving your RSVP. Please try again.")
 		return
@@ -1240,7 +1240,7 @@ func rsvpMarks(team *models.Team, rsvps []models.RSVP) map[int]string {
 		if r.Status != models.RSVPYes && r.Status != models.RSVPNo {
 			continue
 		}
-		u := &discordgo.User{ID: r.DiscordUserID, Username: r.DiscordUsername, GlobalName: r.DiscordUsername}
+		u := &discordgo.User{ID: r.DiscordUserID, Username: r.DiscordUsername, GlobalName: r.DiscordGlobalName}
 		if p, ok := matchPlayer(team, u); ok {
 			marks[p.Slot] = r.Status
 		}

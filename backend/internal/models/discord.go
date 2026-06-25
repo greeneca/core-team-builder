@@ -204,24 +204,31 @@ const (
 
 // RSVP is one Discord user's attendance response to a posted trial overview.
 type RSVP struct {
-	DiscordUserID   string
-	DiscordUsername string
-	Status          string
+	DiscordUserID string
+	// DiscordUsername is the responder's Discord username (the unique @handle),
+	// and DiscordGlobalName their display/global name. Both are captured so the
+	// post's status marks can match an RSVP to a roster slot whose discord_handle
+	// is set to either form (mirroring the live user the buttons see).
+	DiscordUsername   string
+	DiscordGlobalName string
+	Status            string
 }
 
 // SetRSVP records (or updates) a user's attendance response for a posted message.
 // A user has at most one RSVP per message; pressing the other button overwrites
-// the prior choice.
-func (s *DiscordStore) SetRSVP(ctx context.Context, messageID, channelID, discordUserID, discordUsername, status string) error {
+// the prior choice. Both the username and the global (display) name are stored so
+// slot matching works regardless of which the roster's discord_handle uses.
+func (s *DiscordStore) SetRSVP(ctx context.Context, messageID, channelID, discordUserID, discordUsername, discordGlobalName, status string) error {
 	const q = `
-		INSERT INTO discord_rsvps (message_id, channel_id, discord_user_id, discord_username, status, updated_at)
-		VALUES ($1, $2, $3, $4, $5, now())
+		INSERT INTO discord_rsvps (message_id, channel_id, discord_user_id, discord_username, discord_global_name, status, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, now())
 		ON CONFLICT (message_id, discord_user_id)
 		DO UPDATE SET status = EXCLUDED.status,
 		              discord_username = EXCLUDED.discord_username,
+		              discord_global_name = EXCLUDED.discord_global_name,
 		              channel_id = EXCLUDED.channel_id,
 		              updated_at = now()`
-	_, err := s.pool.Exec(ctx, q, messageID, channelID, discordUserID, discordUsername, status)
+	_, err := s.pool.Exec(ctx, q, messageID, channelID, discordUserID, discordUsername, discordGlobalName, status)
 	return err
 }
 
@@ -229,7 +236,7 @@ func (s *DiscordStore) SetRSVP(ctx context.Context, messageID, channelID, discor
 // when each was last set (so the displayed lists are stable).
 func (s *DiscordStore) ListRSVPs(ctx context.Context, messageID string) ([]RSVP, error) {
 	const q = `
-		SELECT discord_user_id, discord_username, status
+		SELECT discord_user_id, discord_username, discord_global_name, status
 		FROM discord_rsvps
 		WHERE message_id = $1
 		ORDER BY updated_at`
@@ -241,7 +248,7 @@ func (s *DiscordStore) ListRSVPs(ctx context.Context, messageID string) ([]RSVP,
 	var out []RSVP
 	for rows.Next() {
 		var r RSVP
-		if err := rows.Scan(&r.DiscordUserID, &r.DiscordUsername, &r.Status); err != nil {
+		if err := rows.Scan(&r.DiscordUserID, &r.DiscordUsername, &r.DiscordGlobalName, &r.Status); err != nil {
 			return nil, err
 		}
 		out = append(out, r)

@@ -466,15 +466,20 @@ which roster to render):
 `discord_rsvps` (`028_discord_rsvps.sql`) records attendance from the ✅/❌
 buttons on a posted overview — one row per `(message_id, discord_user_id)`:
 
-| column           | type        | notes                                    |
-|------------------|-------------|------------------------------------------|
-| message_id       | text        | posted overview message (PK part)        |
-| channel_id       | text        | channel the post is in                   |
-| discord_user_id  | text        | the responder (PK part)                  |
-| discord_username | text        | display-name fallback                    |
-| status           | text        | `'yes'` (coming) or `'no'` (not coming)  |
-| created_at       | timestamptz | default `now()`                          |
-| updated_at       | timestamptz | bump on re-RSVP                          |
+| column              | type        | notes                                       |
+|---------------------|-------------|---------------------------------------------|
+| message_id          | text        | posted overview message (PK part)           |
+| channel_id          | text        | channel the post is in                      |
+| discord_user_id     | text        | the responder (PK part)                     |
+| discord_username    | text        | responder's username (for slot matching)    |
+| discord_global_name | text        | responder's display name (`050_…`)          |
+| status              | text        | `'yes'` (coming) or `'no'` (not coming)     |
+| created_at          | timestamptz | default `now()`                             |
+| updated_at          | timestamptz | bump on re-RSVP                             |
+
+Both names are stored so the post's inline ✅/❌ marks can match a responder to a
+roster slot whose `discord_handle` is set to either their username or their
+display name (mirroring the live user the "Get My Build Details" button uses).
 
 Managed via `DiscordStore`; the hourly sweep prunes expired/used link codes. See
 `docs/AGENT_CONTEXT.md` "Discord bot".

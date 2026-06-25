@@ -710,7 +710,12 @@ column; the `User` JSON model hides it (`json:"-"`).
   `DiscordStore.BindChannel`/`GetChannelTeam`/`UnbindChannel`).
 - **RSVPs**: `discord_rsvps` (`028_discord_rsvps.sql`) stores one row per
   `(message_id, discord_user_id)` with a `'yes'`/`'no'` status
-  (`DiscordStore.SetRSVP`/`ListRSVPs`).
+  (`DiscordStore.SetRSVP`/`ListRSVPs`). Both the responder's **username** and
+  **global name** are captured (`discord_global_name` added in
+  `050_discord_rsvp_global_name.sql`) so `rsvpMarks` can match an RSVP back to a
+  roster slot whose `discord_handle` is set to either form — mirroring the live
+  user the "Get My Build Details" button sees. (Storing only the display name
+  meant a handle set to the username never got a ✅.)
 - **Post fill signups**: `discord_post_fills` (`046_discord_post_fills.sql`)
   stores one row per `(message_id, discord_user_id)` with a `slot` (`0` =
   `models.PostFillList` general fill list; `> 0` = a specific open roster slot,
