@@ -16,7 +16,18 @@ CREATE TABLE IF NOT EXISTS encounters (
     updated_at TIMESTAMPTZ  NOT NULL DEFAULT now()
 );
 
-CREATE INDEX IF NOT EXISTS idx_encounters_team ON encounters(team_id);
+-- Guarded: migration 048 re-keys encounters to roster_id and drops team_id (and
+-- this index). On a re-run over an already-migrated DB the column is gone, so
+-- only (re)create the team-keyed index while team_id still exists.
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'encounters' AND column_name = 'team_id'
+    ) THEN
+        CREATE INDEX IF NOT EXISTS idx_encounters_team ON encounters(team_id);
+    END IF;
+END $$;
 
 DROP TRIGGER IF EXISTS encounters_set_updated_at ON encounters;
 CREATE TRIGGER encounters_set_updated_at
@@ -35,12 +46,25 @@ CREATE TABLE IF NOT EXISTS encounter_loadouts (
 );
 
 -- Backfill: ensure every existing team has a Default encounter with 12 slots.
+--
+-- Guarded on encounters.team_id still existing: migration 048 re-keys encounters
+-- from team_id to roster_id (dropping team_id), so on an already-migrated DB this
+-- team-keyed backfill must be skipped. Migrations are re-run from the start on
+-- every seed and must stay idempotent, so without this guard 007 would fail with
+-- "column team_id does not exist" on any DB that has reached 048+.
 DO $$
 DECLARE
     t   RECORD;
     eid BIGINT;
     s   INT;
 BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'encounters' AND column_name = 'team_id'
+    ) THEN
+        RETURN;
+    END IF;
+
     FOR t IN SELECT id FROM teams LOOP
         IF NOT EXISTS (SELECT 1 FROM encounters WHERE team_id = t.id) THEN
             INSERT INTO encounters (team_id, name, position)

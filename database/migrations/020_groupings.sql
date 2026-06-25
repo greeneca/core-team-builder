@@ -17,7 +17,18 @@ CREATE TABLE IF NOT EXISTS groupings (
     updated_at  TIMESTAMPTZ  NOT NULL DEFAULT now()
 );
 
-CREATE INDEX IF NOT EXISTS idx_groupings_team ON groupings(team_id);
+-- Guarded: migration 048 re-keys groupings to roster_id and drops team_id (and
+-- this index). On a re-run over an already-migrated DB the column is gone, so
+-- only (re)create the team-keyed index while team_id still exists.
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'groupings' AND column_name = 'team_id'
+    ) THEN
+        CREATE INDEX IF NOT EXISTS idx_groupings_team ON groupings(team_id);
+    END IF;
+END $$;
 
 DROP TRIGGER IF EXISTS groupings_set_updated_at ON groupings;
 CREATE TRIGGER groupings_set_updated_at
