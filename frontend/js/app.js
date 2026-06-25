@@ -194,7 +194,7 @@
       card.querySelector(".team-card-schedule").textContent = team.pre_made
         ? team.simple_signup
           ? "Signup template · simple (roles only)"
-          : "Signup template · specific (per slot)"
+          : "Signup template · advanced (per slot)"
         : formatSchedule(team.schedule_days, team.schedule_time);
       card.querySelector(".team-card-open").addEventListener("click", () => openTeam(team.id));
       card.querySelector(".team-card-share").addEventListener("click", () => openShare(team.id));
@@ -249,8 +249,9 @@
     try {
       let team = await api.createTeam(name, copyFrom);
       // Templates aren't a create-time option in the API, so promote the new
-      // team to a signup template: flag it pre-made with simple signup on by
-      // default. Players are omitted so any copied roster is left untouched.
+      // team to a signup template: flag it pre-made with advanced signup off by
+      // default (simple_signup true). Players are omitted so any copied roster
+      // is left untouched.
       if (asTemplate) {
         team = await api.saveTeam(team.id, templatePromotionPayload(team));
       }
@@ -267,8 +268,8 @@
   });
 
   // Build a saveTeam payload that promotes a freshly-created team into a signup
-  // template, preserving its existing meta and turning on simple signup by
-  // default. Players are intentionally omitted (unchanged).
+  // template, preserving its existing meta with advanced signup disabled by
+  // default (simple_signup true). Players are intentionally omitted (unchanged).
   function templatePromotionPayload(team) {
     return {
       name: team.name,
@@ -3076,14 +3077,15 @@
     // hide that toggle too (its value is preserved either way).
     const autoShareLabel = el("auto-share-pool-label");
     if (autoShareLabel) autoShareLabel.classList.toggle("is-hidden", on);
-    // Simple-vs-specific signup only applies to pre-made runs, so only surface
-    // its toggle in pre-made mode.
-    const simpleLabel = el("simple-signup-label");
-    if (simpleLabel) simpleLabel.classList.toggle("is-hidden", !on);
-    const simpleToggle = el("simple-signup-toggle");
-    if (simpleToggle) {
-      simpleToggle.checked = simpleSignup();
-      simpleToggle.disabled = !canEdit();
+    // Advanced-vs-simple signup only applies to pre-made runs, so only surface
+    // its toggle in pre-made mode. The checkbox is the inverse of the stored
+    // simple_signup flag: checked = advanced (per-slot), unchecked = simple.
+    const advancedLabel = el("advanced-signup-label");
+    if (advancedLabel) advancedLabel.classList.toggle("is-hidden", !on);
+    const advancedToggle = el("advanced-signup-toggle");
+    if (advancedToggle) {
+      advancedToggle.checked = !simpleSignup();
+      advancedToggle.disabled = !canEdit();
     }
     // The per-role waitlist also only applies to pre-made runs.
     const waitlistLabel = el("waitlist-label");
@@ -3562,8 +3564,8 @@
   // Convert the open team between a regular team and a signup template. This
   // only flips the pre_made flag (and persists it) — the roster, encounters,
   // groupings, and all other data are preserved; converting back restores the
-  // team view. simple_signup is left as-is so a converted team keeps its per-slot
-  // builds (specific signup) unless the editor turns simple signup on.
+  // team view. simple_signup is left as-is so a converted team keeps its stored
+  // signup style; new teams default to simple_signup true (advanced signup off).
   el("convert-template-btn").addEventListener("click", async () => {
     if (!canEdit() || !currentTeam) return;
     const toTemplate = !preMade();
@@ -3604,14 +3606,15 @@
     }
   });
 
-  // Toggle simple (role-based) vs specific (per-slot) signup for templates. The
-  // encounters toggle is hidden for simple signups, so re-apply that too.
-  el("simple-signup-toggle").addEventListener("change", (e) => {
+  // Toggle advanced (per-slot) vs simple (role-based) signup for templates. The
+  // checkbox is the inverse of the stored simple_signup flag, and the encounters
+  // toggle is hidden for simple signups, so re-apply that too.
+  el("advanced-signup-toggle").addEventListener("change", (e) => {
     if (!canEdit()) {
-      e.target.checked = simpleSignup();
+      e.target.checked = !simpleSignup();
       return;
     }
-    currentTeam.simple_signup = e.target.checked;
+    currentTeam.simple_signup = !e.target.checked;
     applySimpleSignupMode();
     applyEncountersMode();
   });

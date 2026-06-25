@@ -255,10 +255,15 @@ Discord-side setup (one-time):
 - [ ] Invite the bot to your server with the **`bot`** and
       **`applications.commands`** OAuth2 scopes (the developer portal's URL
       generator builds the invite link). Beyond sending messages and using slash
-      commands, the **pre-made trial run** feature (`/coreteam signup`) needs the
-      **Create Public Threads**, **Manage Threads**, and **Manage Messages**
-      permissions in the channels where runs are posted (to open the run thread
-      15 min before and delete the post + thread 2 h after).
+      commands, the **pre-made trial run** feature (`/coreteam signup`) and
+      `/coreteam post` discussion threads need the **Create Public Threads**,
+      **Manage Threads**, and **Manage Messages** permissions in the channels
+      where runs/posts are made: the discussion thread is opened when the run is
+      posted, and on delete (or the 2 h auto-cleanup) the post **and** thread are
+      removed. Note **Manage Threads** is required to delete a thread — deleting
+      the post does **not** remove its thread, so without it a deleted run leaves
+      an orphaned, still-visible thread (the bot will warn the deleter when this
+      happens).
 - [ ] Enable the **MESSAGE CONTENT** privileged intent for the application
       (developer portal → Bot → Privileged Gateway Intents). `/coreteam signup`
       is a free-text DM conversation, so the bot must be able to read the

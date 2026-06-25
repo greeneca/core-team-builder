@@ -302,13 +302,17 @@ column; the `User` JSON model hides it (`json:"-"`).
   Discord Bot Texts, per-player Discord handles, the Members Pool button, and the
   auto-share toggle — none of that applies. The bot side (signups, scheduling) is
   documented under "Discord bot" → "Pre-made trial runs" below.
-- **Simple signup** (`037_team_simple_signup.sql`): `teams.simple_signup BOOLEAN`
-  (default **false**, but **on** by default for new templates) — a "Team
-  Features" checkbox shown only when the team is a template. Off = "specific"
-  signup (the post shows each slot's class/gear, a "get build details" dropdown is
-  offered, and players claim an exact slot). On = "simple" signup: the post hides
-  class/gear and the details dropdown, the claim select lists **roles** (with open
-  counts), and claiming takes the first open slot matching the chosen role
+- **Simple signup** (`037_team_simple_signup.sql`, default flipped to **true** in
+  `051_team_advanced_signup_default.sql`): `teams.simple_signup BOOLEAN`
+  (default **true** — simple signup is the default for new teams/templates). The
+  web UI surfaces this **inverted**, as an "**Advanced signup** (per slot)"
+  checkbox in "Team Features" (shown only when the team is a template); the box is
+  **unchecked by default** (`advancedToggle.checked = !simple_signup`). Advanced
+  on (`simple_signup=false`) = "specific" signup (the post shows each slot's
+  class/gear, a "get build details" dropdown is offered, and players claim an
+  exact slot). Advanced off (`simple_signup=true`) = "simple" signup: the post
+  hides class/gear and the details dropdown, the claim select lists **roles** (with
+  open counts), and claiming takes the first open slot matching the chosen role
   (`handlePremadeClaim` → `claimSimple`, retrying on slot races). When simple
   signup is on, the **Encounters Enabled** toggle is hidden (encounters don't
   apply to a name/role-only template). On a leave / role switch / un-sign the
@@ -892,14 +896,18 @@ the `pre_made` flag on (see "Pre-made trial run" under Teams). Tables in
     everyone who RSVP'd `yes` or signed up to fill, in the thread, then
     `MarkPostPinged` (fires once, catch-up safe; skipped once the run has
     started). Posts with no concrete schedule have a NULL `run_at` and are never
-    pinged. Unlike premade runs, recurring posts/threads are **not** auto-deleted. Thread deletion (both here and the manual **Delete
-  run** button) uses `threadCleanupID`: a thread is started *off the post*, so its
-  channel id equals the post's message id — when `thread_id` wasn't recorded but a
-  start was attempted (`thread_started_at` set), cleanup falls back to the message
-  id so an out-of-band thread (bot restarted mid-start, or a channel that
-  auto-creates threads) is still removed rather than orphaned. The bot needs
-  **Create Public Threads / Manage Threads / Manage Messages** permissions for
-  these (see `docs/DEPLOYMENT.md`).
+    pinged. Unlike premade runs, recurring posts/threads are **not** auto-deleted. Thread deletion (both the 2 h
+  auto-cleanup and the manual **Delete run** flow) uses `threadCleanupID`: a
+  thread is started *off the post*, so its channel id equals the post's message
+  id — when `thread_id` wasn't recorded, cleanup falls back to the message id
+  (every run gets its thread created up front, so a missing id means it failed to
+  persist, e.g. a restart mid-start). Deleting an id that turns out not to be a
+  thread is a tolerated 404. **Deleting the post does NOT delete its thread** —
+  `cleanupRun` must delete the thread explicitly, which requires **Manage
+  Threads**; it returns an error on any non-404 failure (typically a 403 missing
+  that permission) so the user-initiated delete paths warn that the thread is now
+  orphaned. The bot needs **Create Public Threads / Manage Threads / Manage
+  Messages** permissions for these (see `docs/DEPLOYMENT.md`).
 
 ## Member pool / recruitment (current)
 

@@ -225,7 +225,7 @@ rows. Managed via `PasswordResetStore`.
 | auto_share_pool_viewers | boolean  | auto-grant viewer access to member-pool app accounts; default `false`; `034_team_auto_share_pool.sql` |
 | pre_made       | boolean           | one-off pre-made trial run mode; default `false`; `035_team_premade.sql` |
 | premade_post   | text              | body the bot prepends to a `/coreteam signup` post (default `''`); `035_team_premade.sql` |
-| simple_signup  | boolean           | pre-made role-based "simple" signup (hides class/gear + details, claims first matching slot); default `false`; `037_team_simple_signup.sql` |
+| simple_signup  | boolean           | pre-made role-based "simple" signup (hides class/gear + details, claims first matching slot); default `true` (`051_…`, was `false` in `037_team_simple_signup.sql`); web UI shows it inverted as an "Advanced signup" toggle, off by default |
 | waitlist_enabled | boolean         | pre-made per-role waitlist (auto-promote on freed slot); default `false`; `038_premade_waitlist.sql` |
 | roles          | jsonb             | customizable roster roles `[{key,label}]`; default Tank/Healer/DPS/Support DPS; `042_team_roles.sql` |
 | active_roster_id | bigint          | FK → `rosters(id)`, set null; the roster the bot uses + the app shows by default; `048_rosters.sql` |

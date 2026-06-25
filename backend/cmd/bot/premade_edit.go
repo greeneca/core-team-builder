@@ -149,9 +149,28 @@ func (b *bot) handlePremadeDelete(s *discordgo.Session, i *discordgo.Interaction
 	}
 
 	// Acknowledge privately first (the message this interaction came from is
-	// about to be deleted), then tear down the post/thread and mark it done.
+	// about to be deleted), then tear down the post/thread and mark it done. If
+	// the thread couldn't be removed (usually a missing Manage Threads
+	// permission), follow up so the user knows it's now orphaned.
 	ephemeral(s, i, "Deleted this run.")
-	b.cleanupRun(ctx, s, *run)
+	if err := b.cleanupRun(ctx, s, *run); err != nil {
+		warnThreadCleanupFailed(s, i)
+	}
+}
+
+// warnThreadCleanupFailed sends an ephemeral follow-up after a run was deleted
+// but its discussion thread couldn't be removed — almost always because the bot
+// lacks the Manage Threads permission in that channel (deleting the post does
+// not delete the thread). It points the user at the fix so the orphaned thread
+// doesn't linger silently.
+func warnThreadCleanupFailed(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	_, err := s.FollowupMessageCreate(i.Interaction, true, &discordgo.WebhookParams{
+		Flags:   discordgo.MessageFlagsEphemeral,
+		Content: "Heads up: I removed the run's post but couldn't delete its discussion thread. I likely need the **Manage Threads** permission in that channel — grant it (then delete the thread), or remove the thread manually.",
+	})
+	if err != nil {
+		log.Printf("premade delete: thread cleanup warning: %v", err)
+	}
 }
 
 // canEditRun reports whether the app user may edit the run: the original creator,
@@ -246,9 +265,13 @@ func (b *bot) handlePremadeEditFieldSelect(s *discordgo.Session, i *discordgo.In
 			updateEphemeral(s, i, "That run is no longer active.")
 			return
 		}
-		b.cleanupRun(ctx, s, *run)
+		threadErr := b.cleanupRun(ctx, s, *run)
 		_ = b.premade.DeleteSession(ctx, sess.DiscordUserID)
-		updateEphemeral(s, i, "Deleted this run and its post.")
+		msg := "Deleted this run and its post."
+		if threadErr != nil {
+			msg = "Deleted this run and its post, but I couldn't delete its discussion thread — I likely need the **Manage Threads** permission in that channel. Please remove the thread manually."
+		}
+		updateEphemeral(s, i, msg)
 		return
 	default:
 		updateEphemeral(s, i, "That selection was invalid.")

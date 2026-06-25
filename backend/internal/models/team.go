@@ -345,11 +345,12 @@ type Team struct {
 	// announcement. Only meaningful when PreMade is true.
 	PremadePost string `json:"premade_post"`
 	// SimpleSignup controls how players claim slots on a pre-made run (only
-	// meaningful when PreMade is true). When false (default), signup is
-	// "specific": players claim an exact slot and the post shows class/gear plus a
-	// build-details dropdown. When true, signup is "simple": the post hides
-	// class/gear and the details dropdown, players pick a role, and claiming takes
-	// the first empty slot matching that role.
+	// meaningful when PreMade is true). When true (the default for new teams),
+	// signup is "simple": the post hides class/gear and the details dropdown,
+	// players pick a role, and claiming takes the first empty slot matching that
+	// role. When false, signup is "advanced"/"specific": players claim an exact
+	// slot and the post shows class/gear plus a build-details dropdown. The web UI
+	// presents this inverted, as an "Advanced signup" toggle (checked == false).
 	SimpleSignup bool `json:"simple_signup"`
 	// WaitlistEnabled, when true, lets players join a per-role waitlist on a
 	// pre-made run; when a slot of that role frees up, the head of that role's

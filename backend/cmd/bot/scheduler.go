@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log"
+	"net/http"
 	"strings"
 	"time"
 
@@ -53,7 +55,9 @@ func (b *bot) schedulerTick(ctx context.Context, session *discordgo.Session) {
 		log.Printf("scheduler: due cleanups: %v", err)
 	}
 	for _, run := range cleanups {
-		b.cleanupRun(ctx, session, run)
+		// Auto-cleanup is best effort; any thread-deletion failure is already
+		// logged inside cleanupRun (no user to notify here).
+		_ = b.cleanupRun(ctx, session, run)
 	}
 
 	tags, err := b.withTimeout(ctx, func(c context.Context) ([]models.PremadeRun, error) {
@@ -219,30 +223,47 @@ func (b *bot) tagRunSignups(ctx context.Context, session *discordgo.Session, run
 }
 
 // threadCleanupID returns the channel id of the post's thread to delete during
-// cleanup, or "" when no thread should exist. A thread started from a message
-// shares that message's id, so when thread_id wasn't recorded we fall back to
-// the message id. This covers threads that exist out-of-band from our stored
-// id — e.g. the bot restarted between creating the thread and persisting its id
-// (the retry then fails and blanks thread_id), or the channel auto-creates
-// threads so our explicit start failed. The fallback is gated on a thread start
-// having been attempted (thread_started_at set) so runs that never had a thread
-// don't get a spurious delete.
+// cleanup, or "" when the run never had a post to anchor a thread on. A thread
+// started from a message shares that message's id, and every run gets its
+// discussion thread created up front when it's posted (createRunThread), so we
+// fall back to the message id whenever thread_id wasn't recorded — e.g. the bot
+// restarted between creating the thread and persisting its id. Deleting an id
+// that turns out not to be a thread is a tolerated 404 (see cleanupRun), so the
+// fallback is safe even for the rare run whose thread creation failed outright.
 func threadCleanupID(run *models.PremadeRun) string {
 	if run.ThreadID != "" {
 		return run.ThreadID
 	}
-	if run.ThreadStartedAt != nil {
-		return run.MessageID
+	return run.MessageID
+}
+
+// discordStatus returns the HTTP status code carried by a discordgo REST error,
+// or 0 when err is nil or isn't a REST error.
+func discordStatus(err error) int {
+	var rerr *discordgo.RESTError
+	if errors.As(err, &rerr) && rerr.Response != nil {
+		return rerr.Response.StatusCode
 	}
-	return ""
+	return 0
 }
 
 // cleanupRun deletes the run's thread and post, then records that cleanup ran.
-// Missing-message/thread errors are tolerated (manual deletion) so the run is
-// still marked done.
-func (b *bot) cleanupRun(ctx context.Context, session *discordgo.Session, run models.PremadeRun) {
+// It returns a non-nil error only when a thread that should exist could not be
+// deleted for a reason other than "already gone" — almost always a 403 because
+// the bot lacks the Manage Threads permission (deleting a thread requires it;
+// deleting the parent message does NOT remove the thread). Callers acting on a
+// user request use this to warn that the thread is now orphaned. A missing
+// thread/message (404) is tolerated so the run is still marked done.
+func (b *bot) cleanupRun(ctx context.Context, session *discordgo.Session, run models.PremadeRun) error {
+	var threadErr error
 	if threadID := threadCleanupID(&run); threadID != "" {
 		if _, err := session.ChannelDelete(threadID); err != nil {
+			// A 404 just means there's no such thread (already deleted, or the id
+			// we fell back to was a plain message with no thread) — success for
+			// our purposes. Anything else is a real failure worth surfacing.
+			if discordStatus(err) != http.StatusNotFound {
+				threadErr = err
+			}
 			log.Printf("scheduler: delete thread (run %d): %v", run.ID, err)
 		}
 	}
@@ -256,4 +277,5 @@ func (b *bot) cleanupRun(ctx context.Context, session *discordgo.Session, run mo
 		log.Printf("scheduler: mark cleaned up (run %d): %v", run.ID, err)
 	}
 	cancel()
+	return threadErr
 }
