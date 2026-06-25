@@ -404,8 +404,11 @@ const premadeSessionCols = `discord_user_id, app_user_id, team_id, guild_id, cha
 
 func scanSession(row pgx.Row) (*PremadeSession, error) {
 	sess := &PremadeSession{}
+	// app_user_id is nullable: a role-holding editor may not have a linked web
+	// account. NULL maps to AppUserID == 0 ("unlinked").
+	var appUserID *int64
 	err := row.Scan(
-		&sess.DiscordUserID, &sess.AppUserID, &sess.TeamID, &sess.GuildID,
+		&sess.DiscordUserID, &appUserID, &sess.TeamID, &sess.GuildID,
 		&sess.ChannelID, &sess.DMChannelID, &sess.Step, &sess.Title,
 		&sess.ScheduledAt, &sess.PostOverride, &sess.Mode, &sess.RunID,
 		&sess.SignupUserID, &sess.SignupUserName,
@@ -413,6 +416,9 @@ func scanSession(row pgx.Row) (*PremadeSession, error) {
 	)
 	if err != nil {
 		return nil, err
+	}
+	if appUserID != nil {
+		sess.AppUserID = *appUserID
 	}
 	return sess, nil
 }
@@ -450,8 +456,14 @@ func (s *PremadeStore) UpsertSession(ctx context.Context, sess *PremadeSession) 
 			signup_user_id = EXCLUDED.signup_user_id,
 			signup_user_name = EXCLUDED.signup_user_name,
 			updated_at = now()`
+	// Store AppUserID == 0 ("unlinked" editor) as SQL NULL so the nullable
+	// app_user_id column's foreign key isn't violated.
+	var appUserID *int64
+	if sess.AppUserID != 0 {
+		appUserID = &sess.AppUserID
+	}
 	_, err := s.pool.Exec(ctx, q,
-		sess.DiscordUserID, sess.AppUserID, sess.TeamID, sess.GuildID,
+		sess.DiscordUserID, appUserID, sess.TeamID, sess.GuildID,
 		sess.ChannelID, sess.DMChannelID, sess.Step, sess.Title,
 		sess.ScheduledAt, sess.PostOverride, sess.Mode, sess.RunID,
 		sess.SignupUserID, sess.SignupUserName,

@@ -19,3 +19,7 @@ Ground rules:
 - Never hardcode secrets; configuration is environment-based.
 - Never store or log plaintext passwords.
 - Keep the docs above up to date when you change architecture or conventions.
+- When you add, rename, or remove a Discord bot command, update the in-Discord
+  help guide (`helpCommands` in `backend/cmd/bot/help.go`) in the same change.
+  `TestHelpCoversEverySubcommand` (cmd/bot) enforces that every `/coreteam`
+  subcommand has a help entry and vice versa.

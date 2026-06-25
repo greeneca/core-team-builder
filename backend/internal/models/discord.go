@@ -196,6 +196,45 @@ func (s *DiscordStore) UnbindChannel(ctx context.Context, channelID string) erro
 	return err
 }
 
+// AddEditRole designates a Discord role (in a guild) as allowed to use the
+// restricted run buttons. Idempotent: re-adding the same role is a no-op.
+func (s *DiscordStore) AddEditRole(ctx context.Context, guildID, roleID string) error {
+	const q = `
+		INSERT INTO discord_edit_roles (guild_id, role_id)
+		VALUES ($1, $2)
+		ON CONFLICT (guild_id, role_id) DO NOTHING`
+	_, err := s.pool.Exec(ctx, q, guildID, roleID)
+	return err
+}
+
+// RemoveEditRole revokes a role's permission to use the restricted run buttons.
+// It is idempotent (removing a role that isn't designated is a no-op).
+func (s *DiscordStore) RemoveEditRole(ctx context.Context, guildID, roleID string) error {
+	const q = `DELETE FROM discord_edit_roles WHERE guild_id = $1 AND role_id = $2`
+	_, err := s.pool.Exec(ctx, q, guildID, roleID)
+	return err
+}
+
+// ListEditRoles returns the Discord role IDs designated as run editors for a
+// guild, newest first. Empty when none are set.
+func (s *DiscordStore) ListEditRoles(ctx context.Context, guildID string) ([]string, error) {
+	const q = `SELECT role_id FROM discord_edit_roles WHERE guild_id = $1 ORDER BY created_at DESC`
+	rows, err := s.pool.Query(ctx, q, guildID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var roles []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		roles = append(roles, id)
+	}
+	return roles, rows.Err()
+}
+
 // RSVP attendance statuses for a posted trial.
 const (
 	RSVPYes = "yes"

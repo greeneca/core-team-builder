@@ -87,6 +87,11 @@ var helpCommands = []helpCommand{
 		Summary: "Unbind this channel from its team.",
 		Detail:  "Removes the binding between the current channel and its team. The team itself is not deleted; you can re-bind any time with `/coreteam setup`.",
 	},
+	{
+		Name:    "permissions",
+		Summary: "Choose which roles can edit/delete signup runs.",
+		Detail:  "Manages which Discord roles may use the Edit run and Delete run buttons on signup runs in this server. Use `/coreteam permissions add role:<role>`, `remove role:<role>`, or `list`. Regardless of this list, each run's original poster and server admins (Manage Server / Administrator) can always edit or delete it. Changing the list requires the Manage Server permission.",
+	},
 }
 
 // findHelpCommand returns the documented command with the given name, or nil.

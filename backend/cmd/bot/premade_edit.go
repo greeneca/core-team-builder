@@ -14,10 +14,11 @@ import (
 )
 
 // The "Edit run" button on a posted signup starts a DM conversation that lets
-// the run's creator (or the team's owner/editor) change the run's title, time,
-// or description. It reuses the per-user premade_signup_sessions row in "edit"
-// mode (run_id set); applying a field updates premade_runs and re-renders the
-// posted announcement in place. See premade_dm.go for the create flow.
+// anyone allowed by canPressRestricted (the original poster, a guild-designated
+// role, or a server admin) change the run's title, time, or description. It
+// reuses the per-user premade_signup_sessions row in "edit" mode (run_id set);
+// applying a field updates premade_runs and re-renders the posted announcement
+// in place. See premade_dm.go for the create flow.
 const (
 	premadeModeEdit = "edit"
 
@@ -53,27 +54,20 @@ func (b *bot) handlePremadeEdit(s *discordgo.Session, i *discordgo.InteractionCr
 		return
 	}
 
-	appUserID, err := b.discord.GetUserByDiscordID(ctx, user.ID)
-	if errors.Is(err, models.ErrUserNotFound) {
-		ephemeral(s, i, "Link your account first with /coreteam link to edit a run.")
-		return
-	}
-	if err != nil {
-		log.Printf("premade edit: get user: %v", err)
-		ephemeral(s, i, "Something went wrong. Please try again.")
-		return
-	}
-
-	allowed, err := b.canEditRun(ctx, run, appUserID)
+	allowed, err := b.canPressRestricted(ctx, i, run)
 	if err != nil {
 		log.Printf("premade edit: permission: %v", err)
 		ephemeral(s, i, "Something went wrong. Please try again.")
 		return
 	}
 	if !allowed {
-		ephemeral(s, i, "Only the person who created this run (or a team owner/editor) can edit it.")
+		ephemeral(s, i, restrictedDenyMsg)
 		return
 	}
+
+	// The editor may not have a linked web account (a role-holder editing
+	// someone else's run); 0 means "unlinked" and the edit flow tolerates it.
+	appUserID := b.appUserIDFor(ctx, user.ID)
 
 	dm, err := s.UserChannelCreate(user.ID)
 	if err != nil {
@@ -110,10 +104,10 @@ func (b *bot) handlePremadeEdit(s *discordgo.Session, i *discordgo.InteractionCr
 // handlePremadeDelete deletes a posted run. New posts no longer carry a Delete
 // button (deleting now lives behind the "Edit run" DM menu, see
 // handlePremadeEditFieldSelect), but this remains so the button on posts made
-// before that change keeps working. Like the edit button it's gated to the run's
-// creator or a team owner/editor (Discord can't hide the button per-user, so
-// non-editors get an ephemeral rejection). It tears down the post (and thread,
-// if any) and marks the run cleaned up so it's no longer active.
+// before that change keeps working. Like the edit button it's gated by
+// canPressRestricted (Discord can't hide the button per-user, so unauthorized
+// pressers get an ephemeral rejection). It tears down the post (and thread, if
+// any) and marks the run cleaned up so it's no longer active.
 func (b *bot) handlePremadeDelete(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	user := invokingUser(i)
 	if user == nil || i.Message == nil {
@@ -129,25 +123,14 @@ func (b *bot) handlePremadeDelete(s *discordgo.Session, i *discordgo.Interaction
 		return
 	}
 
-	appUserID, err := b.discord.GetUserByDiscordID(ctx, user.ID)
-	if errors.Is(err, models.ErrUserNotFound) {
-		ephemeral(s, i, "Link your account first with /coreteam link to delete a run.")
-		return
-	}
-	if err != nil {
-		log.Printf("premade delete: get user: %v", err)
-		ephemeral(s, i, "Something went wrong. Please try again.")
-		return
-	}
-
-	allowed, err := b.canEditRun(ctx, run, appUserID)
+	allowed, err := b.canPressRestricted(ctx, i, run)
 	if err != nil {
 		log.Printf("premade delete: permission: %v", err)
 		ephemeral(s, i, "Something went wrong. Please try again.")
 		return
 	}
 	if !allowed {
-		ephemeral(s, i, "Only the person who created this run (or a team owner/editor) can delete it.")
+		ephemeral(s, i, restrictedDenyMsg)
 		return
 	}
 
@@ -176,17 +159,61 @@ func warnThreadCleanupFailed(s *discordgo.Session, i *discordgo.InteractionCreat
 	}
 }
 
-// canEditRun reports whether the app user may edit the run: the original creator,
-// or an owner/editor of the run's team.
-func (b *bot) canEditRun(ctx context.Context, run *models.PremadeRun, appUserID int64) (bool, error) {
-	if run.CreatedBy != nil && *run.CreatedBy == appUserID {
+// restrictedDenyMsg is the ephemeral shown when someone without permission
+// presses a restricted run button (Edit run / Delete run).
+const restrictedDenyMsg = "Only the person who posted this run, a designated role, or a server admin can edit or delete it. A server admin can grant a role access with `/coreteam permissions add`."
+
+// canPressRestricted reports whether the interaction's invoker may use a run's
+// restricted buttons (Edit run / Delete run and the actions in the Edit DM).
+// Access is Discord-native: the run's original poster (matched by Discord ID, no
+// linked web account required), a member holding a role designated for the
+// guild via /coreteam permissions, or a Discord server admin (Administrator or
+// Manage Server).
+func (b *bot) canPressRestricted(ctx context.Context, i *discordgo.InteractionCreate, run *models.PremadeRun) (bool, error) {
+	// Server admins / Manage Server always.
+	if hasManageGuild(i) {
 		return true, nil
 	}
-	_, role, err := b.teams.Access(ctx, run.TeamID, appUserID)
-	if err != nil {
-		return false, err
+	user := invokingUser(i)
+	if user == nil {
+		return false, nil
 	}
-	return role == models.RoleOwner || role == models.RoleEditor, nil
+	// The original poster, compared by Discord ID. The creator linked their
+	// account to start the run, so resolve their Discord ID from that link.
+	if run.CreatedBy != nil {
+		link, err := b.discord.GetLink(ctx, *run.CreatedBy)
+		if err == nil && link.Linked && link.DiscordUserID == user.ID {
+			return true, nil
+		}
+	}
+	// A member holding a role designated for this guild.
+	if i.Member != nil && i.GuildID != "" && len(i.Member.Roles) > 0 {
+		editRoles, err := b.discord.ListEditRoles(ctx, i.GuildID)
+		if err != nil {
+			return false, err
+		}
+		designated := make(map[string]bool, len(editRoles))
+		for _, r := range editRoles {
+			designated[r] = true
+		}
+		for _, r := range i.Member.Roles {
+			if designated[r] {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
+// appUserIDFor resolves a Discord user ID to a linked app user ID, returning 0
+// when the user has no linked web account (so the edit DM flow can proceed for a
+// role-holding editor without one).
+func (b *bot) appUserIDFor(ctx context.Context, discordUserID string) int64 {
+	id, err := b.discord.GetUserByDiscordID(ctx, discordUserID)
+	if err != nil {
+		return 0
+	}
+	return id
 }
 
 // sendEditFieldMenu sends the "what to edit" select menu, prefixed with a status

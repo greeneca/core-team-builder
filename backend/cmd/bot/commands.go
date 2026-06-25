@@ -233,6 +233,44 @@ var coreTeamCommand = &discordgo.ApplicationCommand{
 			Description: "Unbind this channel from its team",
 		},
 		{
+			Type:        discordgo.ApplicationCommandOptionSubCommandGroup,
+			Name:        "permissions",
+			Description: "Manage which roles can use the Edit/Delete buttons on signup runs",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionSubCommand,
+					Name:        "add",
+					Description: "Allow a role to use the Edit/Delete buttons on signup runs",
+					Options: []*discordgo.ApplicationCommandOption{
+						{
+							Type:        discordgo.ApplicationCommandOptionRole,
+							Name:        "role",
+							Description: "The role to allow",
+							Required:    true,
+						},
+					},
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionSubCommand,
+					Name:        "remove",
+					Description: "Stop a role from using the Edit/Delete buttons on signup runs",
+					Options: []*discordgo.ApplicationCommandOption{
+						{
+							Type:        discordgo.ApplicationCommandOptionRole,
+							Name:        "role",
+							Description: "The role to remove",
+							Required:    true,
+						},
+					},
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionSubCommand,
+					Name:        "list",
+					Description: "List the roles that can use the Edit/Delete buttons on signup runs",
+				},
+			},
+		},
+		{
 			Type:        discordgo.ApplicationCommandOptionSubCommand,
 			Name:        "help",
 			Description: "DM you a command reference, web app link, and where to report bugs",
@@ -307,6 +345,8 @@ func (b *bot) onCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		b.handleStatus(s, i)
 	case "unset":
 		b.handleUnset(s, i)
+	case "permissions":
+		b.handlePermissions(s, i, sub)
 	case "help":
 		b.handleHelp(s, i)
 	}
@@ -1414,6 +1454,120 @@ func (b *bot) handleUnset(s *discordgo.Session, i *discordgo.InteractionCreate) 
 	ephemeral(s, i, "Unbound this channel.")
 }
 
+// --- /coreteam permissions (manage run-edit roles) ---
+
+// handlePermissions routes the /coreteam permissions subcommand group (add /
+// remove / list). It manages the per-guild set of Discord roles whose holders
+// may use a signup run's restricted buttons (Edit run / Delete run). Changing
+// the list is gated to server admins (Manage Server or Administrator).
+func (b *bot) handlePermissions(s *discordgo.Session, i *discordgo.InteractionCreate, group *discordgo.ApplicationCommandInteractionDataOption) {
+	if i.GuildID == "" {
+		ephemeral(s, i, "Run this in a server — edit permissions are managed per server.")
+		return
+	}
+	if !hasManageGuild(i) {
+		ephemeral(s, i, "You need the Manage Server (or Administrator) permission to change run-edit permissions.")
+		return
+	}
+	if len(group.Options) == 0 {
+		return
+	}
+	sub := group.Options[0]
+
+	ctx, cancel := handlerContext()
+	defer cancel()
+
+	switch sub.Name {
+	case "add":
+		b.handlePermissionsAdd(ctx, s, i, sub)
+	case "remove":
+		b.handlePermissionsRemove(ctx, s, i, sub)
+	case "list":
+		b.handlePermissionsList(ctx, s, i)
+	}
+}
+
+func (b *bot) handlePermissionsAdd(ctx context.Context, s *discordgo.Session, i *discordgo.InteractionCreate, sub *discordgo.ApplicationCommandInteractionDataOption) {
+	roleID := roleOptionID(sub, "role")
+	if roleID == "" {
+		ephemeral(s, i, "Please pick a role.")
+		return
+	}
+	if err := b.discord.AddEditRole(ctx, i.GuildID, roleID); err != nil {
+		log.Printf("permissions add: %v", err)
+		ephemeral(s, i, "Something went wrong. Please try again.")
+		return
+	}
+	ephemeralNoMentions(s, i, fmt.Sprintf("%s can now use the **Edit run** and **Delete run** buttons on signup runs.", roleMention(roleID)))
+}
+
+func (b *bot) handlePermissionsRemove(ctx context.Context, s *discordgo.Session, i *discordgo.InteractionCreate, sub *discordgo.ApplicationCommandInteractionDataOption) {
+	roleID := roleOptionID(sub, "role")
+	if roleID == "" {
+		ephemeral(s, i, "Please pick a role.")
+		return
+	}
+	if err := b.discord.RemoveEditRole(ctx, i.GuildID, roleID); err != nil {
+		log.Printf("permissions remove: %v", err)
+		ephemeral(s, i, "Something went wrong. Please try again.")
+		return
+	}
+	ephemeralNoMentions(s, i, fmt.Sprintf("%s can no longer use the **Edit run** and **Delete run** buttons on signup runs.", roleMention(roleID)))
+}
+
+func (b *bot) handlePermissionsList(ctx context.Context, s *discordgo.Session, i *discordgo.InteractionCreate) {
+	roles, err := b.discord.ListEditRoles(ctx, i.GuildID)
+	if err != nil {
+		log.Printf("permissions list: %v", err)
+		ephemeral(s, i, "Something went wrong. Please try again.")
+		return
+	}
+	if len(roles) == 0 {
+		ephemeral(s, i, "No roles are designated yet. Only the run's poster and server admins can use the **Edit run** and **Delete run** buttons. Add one with `/coreteam permissions add`.")
+		return
+	}
+	mentions := make([]string, 0, len(roles))
+	for _, r := range roles {
+		mentions = append(mentions, roleMention(r))
+	}
+	ephemeralNoMentions(s, i, "Roles that can use the **Edit run** and **Delete run** buttons on signup runs (alongside each run's poster and server admins):\n• "+strings.Join(mentions, "\n• "))
+}
+
+// roleOptionID returns the role ID picked for a named role option on a
+// subcommand, or "" when absent.
+func roleOptionID(sub *discordgo.ApplicationCommandInteractionDataOption, name string) string {
+	for _, o := range sub.Options {
+		if o.Name == name {
+			if id, ok := o.Value.(string); ok {
+				return id
+			}
+		}
+	}
+	return ""
+}
+
+// roleMention renders a Discord role mention for a role ID.
+func roleMention(roleID string) string {
+	return "<@&" + roleID + ">"
+}
+
+// ephemeralNoMentions sends a private reply that renders role/user mentions as
+// text without pinging anyone (used so listing/changing edit roles doesn't ping
+// the role).
+func ephemeralNoMentions(s *discordgo.Session, i *discordgo.InteractionCreate, msg string) {
+	err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Flags:           discordgo.MessageFlagsEphemeral,
+			Content:         msg,
+			AllowedMentions: &discordgo.MessageAllowedMentions{},
+		},
+	})
+	if err != nil {
+		log.Printf("respond ephemeral (no mentions): %v", err)
+	}
+}
+
 // --- shared helpers ---
 
 // loadTeamData fetches the team, its encounters (with loadouts), the primary
@@ -1562,6 +1716,18 @@ func hasManageChannels(i *discordgo.InteractionCreate) bool {
 	}
 	perms := i.Member.Permissions
 	return perms&discordgo.PermissionManageChannels != 0 || perms&discordgo.PermissionAdministrator != 0
+}
+
+// hasManageGuild reports whether the invoking member is a server admin: they
+// hold the Manage Server (Manage Guild) or Administrator permission. This is the
+// bar for managing run-edit roles and the always-allowed admin override on the
+// restricted run buttons.
+func hasManageGuild(i *discordgo.InteractionCreate) bool {
+	if i.Member == nil {
+		return false
+	}
+	perms := i.Member.Permissions
+	return perms&discordgo.PermissionManageGuild != 0 || perms&discordgo.PermissionAdministrator != 0
 }
 
 // modalValue extracts a text-input value from a submitted modal by custom ID.

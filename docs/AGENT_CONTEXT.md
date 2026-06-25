@@ -627,6 +627,12 @@ column; the `User` JSON model hides it (`json:"-"`).
   - `login` — posts a public message linking to the web app (`APP_BASE_URL`).
     Replies ephemerally if `APP_BASE_URL` is unconfigured (`handleLogin`).
   - `status` / `unset` — show / remove the channel's team binding.
+  - `permissions add|remove|list` — (Manage Server) manages the per-guild set of
+    Discord roles allowed to use a signup run's restricted buttons (**Edit run** /
+    **Delete run**). Stored in `discord_edit_roles` (keyed by `guild_id`,
+    `role_id`); read by `canPressRestricted`. A subcommand **group** dispatched in
+    `onCommand` to `handlePermissions`. Regardless of the list, each run's
+    original poster and server admins can always edit/delete.
   - `help` — DMs the runner a **command guide** (`backend/cmd/bot/help.go`): an
     overview embed (intro, the web app link from `APP_BASE_URL`, plus
     "report a bug"/"source code" links built from `REPO_URL`, default
@@ -804,8 +810,14 @@ the `pre_made` flag on (see "Pre-made trial run" under Teams). Tables in
   standalone **Delete run** button (`premade_delete`); its handler
   (`handlePremadeDelete`) remains so those posts keep working.
 - **Edit** (`premade_edit` → `handlePremadeEdit`, `cmd/bot/premade_edit.go`):
-  visible to everyone but gated to the run's creator or the team's owner/editor
-  (`canEditRun`). It opens a DM and reuses the `premade_signup_sessions` row in
+  visible to everyone but gated by `canPressRestricted` — the run's **original
+  poster** (matched by Discord ID; no linked web account needed), a member
+  holding a **role designated for the guild** (`discord_edit_roles`, managed via
+  `/coreteam permissions`), or a **server admin** (Manage Server / Administrator).
+  The editor needn't be linked: `handlePremadeEdit` resolves their app user via
+  `appUserIDFor` (0 when unlinked), and the session's `app_user_id` is nullable
+  (`052_discord_edit_roles.sql`). It opens a DM and reuses the
+  `premade_signup_sessions` row in
   **edit mode** (`mode='edit'`, `run_id` set; `041_premade_run_edit.sql`) to walk
   a field menu (`premade_edit_field`): **Title** / **Date & time** / **Description**
   / **Sign up a player** / **Remove a signup** / **Delete run** / **Done**. Each title/when/body change
@@ -846,9 +858,9 @@ the `pre_made` flag on (see "Pre-made trial run" under Teams). Tables in
   it says so and re-shows the menu.
 - **Delete** (`premade_delete` → `handlePremadeDelete`, `cmd/bot/premade_edit.go`):
   kept for backward compatibility with posts made before the "Delete run" option
-  moved into the Edit DM menu. Gated to the run's creator or the team's
-  owner/editor (`canEditRun`; non-editors get an ephemeral rejection). Calls
-  `cleanupRun` (deletes the post and thread, marks the run cleaned up via
+  moved into the Edit DM menu. Gated by `canPressRestricted` (poster / designated
+  guild role / server admin; unauthorized pressers get an ephemeral rejection).
+  Calls `cleanupRun` (deletes the post and thread, marks the run cleaned up via
   `MarkCleanedUp`) so it's no longer active.
 - **Cancel** (`isCancel` in `cmd/bot/premade_dm.go`): typing a cancel word
   (cancel / stop / quit / abort / exit / nevermind) in the DM aborts whatever
