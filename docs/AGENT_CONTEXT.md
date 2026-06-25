@@ -808,7 +808,7 @@ the `pre_made` flag on (see "Pre-made trial run" under Teams). Tables in
   (`canEditRun`). It opens a DM and reuses the `premade_signup_sessions` row in
   **edit mode** (`mode='edit'`, `run_id` set; `041_premade_run_edit.sql`) to walk
   a field menu (`premade_edit_field`): **Title** / **Date & time** / **Description**
-  / **Sign up a player** / **Delete run** / **Done**. Each title/when/body change
+  / **Sign up a player** / **Remove a signup** / **Delete run** / **Done**. Each title/when/body change
   calls `PremadeStore.UpdateRun` and re-renders the posted announcement in place
   via `refreshPremadePostMessage` (`ChannelMessageEditComplex`), then re-shows
   the menu so several fields can be edited in one sitting. **Delete run** calls
@@ -836,6 +836,14 @@ the `pre_made` flag on (see "Pre-made trial run" under Teams). Tables in
   `ClaimSlot` using the target's Discord user ID or a synthetic `"n:<name>"` ID
   for free-typed names (keeping it distinct from real Discord IDs), compacts
   simple signups if needed, refreshes the post, and loops back to the field menu.
+  **Remove a signup** (`promptRemoveSignup` → `premade_edit_remove` →
+  `handlePremadeEditRemoveSignup`) lists the run's current claimants (by name +
+  slot/role); picking one releases that slot via `LeaveSlot` (keyed by the
+  signup's `discord_user_id`, including the synthetic `"n:<name>"`), clears any
+  waitlist entry, promotes a waitlister into the freed slot when enabled
+  (`promoteFreedSlot`), compacts simple signups, refreshes the post, and loops
+  back to the field menu — mirroring a player's own **Un-Sign**. With no signups
+  it says so and re-shows the menu.
 - **Delete** (`premade_delete` → `handlePremadeDelete`, `cmd/bot/premade_edit.go`):
   kept for backward compatibility with posts made before the "Delete run" option
   moved into the Edit DM menu. Gated to the run's creator or the team's

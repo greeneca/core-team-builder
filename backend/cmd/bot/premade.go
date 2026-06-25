@@ -28,9 +28,10 @@ import (
 //	premade_wait                       (on the post; value = role to waitlist for)
 //	premade_leave                      (on the post; release the presser's slot/waitlist)
 //	premade_edit                       (on the post; start a DM to edit title/time/body)
-//	premade_edit_field                 (DM select; value = title | when | body | signup | delete | done)
+//	premade_edit_field                 (DM select; value = title | when | body | signup | remove | delete | done)
 //	premade_edit_signup_pick           (DM select; value = a guild member id, or "raw")
 //	premade_edit_signup_slot           (DM select; value = a slot number, or a role in simple mode)
+//	premade_edit_remove                (DM select; value = a signed-up discord_user_id)
 const (
 	premadePrefix       = "premade_"
 	premadeDMTimezoneID = "premade_dm_tz"
@@ -44,6 +45,8 @@ const (
 	// Edit-flow "sign up a player" sub-conversation (DM components).
 	premadeEditSignupPickID = "premade_edit_signup_pick"
 	premadeEditSignupSlotID = "premade_edit_signup_slot"
+	// Edit-flow "remove a signup" picker (DM component; value = discord_user_id).
+	premadeEditRemoveID = "premade_edit_remove"
 )
 
 // onPremadeComponent dispatches every premade_* component interaction.
@@ -70,6 +73,8 @@ func (b *bot) onPremadeComponent(s *discordgo.Session, i *discordgo.InteractionC
 		b.handlePremadeEditSignupPick(s, i)
 	case id == premadeEditSignupSlotID:
 		b.handlePremadeEditSignupSlot(s, i)
+	case id == premadeEditRemoveID:
+		b.handlePremadeEditRemoveSignup(s, i)
 	}
 }
 

@@ -31,6 +31,9 @@ const (
 	premadeStepEditSignupName = "edit_signup_name"
 	premadeStepEditSignupPick = "edit_signup_pick"
 	premadeStepEditSignupSlot = "edit_signup_slot"
+
+	// "Remove a signup" sub-conversation: pick which current claimant to release.
+	premadeStepEditRemovePick = "edit_remove_pick"
 )
 
 // handlePremadeEdit starts the edit DM. It resolves the run from the pressed
@@ -200,6 +203,7 @@ func (b *bot) sendEditFieldMenu(s *discordgo.Session, dmChannelID string, run *m
 		{Label: "Date & time", Value: "when", Description: "Reschedule the run"},
 		{Label: "Description", Value: "body", Description: "Change or clear the post body"},
 		{Label: "Sign up a player", Value: "signup", Description: "Add someone else to a slot"},
+		{Label: "Remove a signup", Value: "remove", Description: "Release a claimed slot"},
 		{Label: "Delete run", Value: "delete", Description: "Delete this run and its post"},
 		{Label: "Done", Value: "done", Description: "Finish editing"},
 	}
@@ -259,6 +263,9 @@ func (b *bot) handlePremadeEditFieldSelect(s *discordgo.Session, i *discordgo.In
 		sess.SignupUserID = ""
 		sess.SignupUserName = ""
 		b.persistAndPrompt(ctx, s, i, sess, "Who would you like to sign up? Type a Discord name to search for them, or just type any name to add as-is.")
+	case "remove":
+		b.promptRemoveSignup(ctx, s, i, sess)
+		return
 	case "delete":
 		run, ok := b.editTargetRun(ctx, s, sess)
 		if !ok {
@@ -680,4 +687,198 @@ func signupSlotOptions(team *models.Team, signups []models.PremadeSignup) []disc
 		})
 	}
 	return opts
+}
+
+// promptRemoveSignup lists the run's current claimants so the editor can release
+// one. When there are no signups it says so and returns to the field menu.
+func (b *bot) promptRemoveSignup(ctx context.Context, s *discordgo.Session, i *discordgo.InteractionCreate, sess *models.PremadeSession) {
+	run, ok := b.editTargetRun(ctx, s, sess)
+	if !ok {
+		updateEphemeral(s, i, "That run is no longer active.")
+		return
+	}
+	team, _, _, _, err := b.loadTeamData(ctx, run.TeamID)
+	if err != nil {
+		log.Printf("premade edit: remove load team: %v", err)
+		updateEphemeral(s, i, "Something went wrong. Please try again.")
+		return
+	}
+	signups, err := b.premade.ListSignups(ctx, run.ID)
+	if err != nil {
+		log.Printf("premade edit: remove list signups: %v", err)
+		updateEphemeral(s, i, "Something went wrong. Please try again.")
+		return
+	}
+
+	opts := removeSignupOptions(team, signups)
+	if len(opts) == 0 {
+		// Nothing to remove — update the menu message and re-show the field menu
+		// so the conversation keeps going.
+		updateEphemeral(s, i, "No one has signed up for this run yet, so there's nothing to remove.")
+		sess.Step = premadeStepEditField
+		if uerr := b.premade.UpsertSession(ctx, sess); uerr != nil {
+			log.Printf("premade edit: remove reset step: %v", uerr)
+		}
+		if merr := b.sendEditFieldMenu(s, sess.DMChannelID, run, "Nothing to remove. Edit something else, or choose **Done**."); merr != nil {
+			log.Printf("premade edit: remove re-send menu: %v", merr)
+		}
+		return
+	}
+
+	sess.Step = premadeStepEditRemovePick
+	if err := b.premade.UpsertSession(ctx, sess); err != nil {
+		log.Printf("premade edit: remove persist step: %v", err)
+		updateEphemeral(s, i, "Something went wrong. Please try again.")
+		return
+	}
+	err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseUpdateMessage,
+		Data: &discordgo.InteractionResponseData{
+			Content:    "Which signup would you like to remove?",
+			Components: selectRow(premadeEditRemoveID, "Choose a signup to remove", 1, 1, opts),
+		},
+	})
+	if err != nil {
+		log.Printf("premade edit: remove respond: %v", err)
+	}
+}
+
+// handlePremadeEditRemoveSignup releases the chosen claimant's slot, promotes a
+// waitlister into it when enabled, compacts simple-signup claimants, refreshes
+// the post, and returns to the field menu — mirroring a player's own "Leave".
+func (b *bot) handlePremadeEditRemoveSignup(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	user := invokingUser(i)
+	if user == nil {
+		return
+	}
+	values := i.MessageComponentData().Values
+	if len(values) == 0 {
+		return
+	}
+
+	ctx, cancel := handlerContext()
+	defer cancel()
+
+	sess, err := b.premade.GetSession(ctx, user.ID)
+	if errors.Is(err, models.ErrPremadeSessionNotFound) {
+		updateEphemeral(s, i, "This edit expired. Press **Edit run** on the post to start again.")
+		return
+	}
+	if err != nil {
+		log.Printf("premade edit: remove get session: %v", err)
+		updateEphemeral(s, i, "Something went wrong. Please try again.")
+		return
+	}
+	if sess.Mode != premadeModeEdit || sess.RunID == nil {
+		updateEphemeral(s, i, "This edit expired. Press **Edit run** on the post to start again.")
+		return
+	}
+
+	run, ok := b.editTargetRun(ctx, s, sess)
+	if !ok {
+		updateEphemeral(s, i, "That run is no longer active.")
+		return
+	}
+	team, _, _, _, err := b.loadTeamData(ctx, run.TeamID)
+	if err != nil {
+		log.Printf("premade edit: remove slot load team: %v", err)
+		updateEphemeral(s, i, "Something went wrong. Please try again.")
+		return
+	}
+
+	targetID := values[0]
+
+	// Find the slot/role being freed (for waitlist promotion) and a display name
+	// for the confirmation, before releasing the claim.
+	freedSlot, freedRole, removedName, held := 0, "", "", false
+	signups, err := b.premade.ListSignups(ctx, run.ID)
+	if err != nil {
+		log.Printf("premade edit: remove slot list signups: %v", err)
+		updateEphemeral(s, i, "Something went wrong. Please try again.")
+		return
+	}
+	for _, sg := range signups {
+		if sg.DiscordUserID == targetID {
+			freedSlot, freedRole, held = sg.Slot, roleForSlot(team, sg.Slot), true
+			removedName = removeSignupName(sg)
+			break
+		}
+	}
+	if !held {
+		updateEphemeral(s, i, "That signup was already removed. Go back and pick another.")
+		return
+	}
+
+	if err := b.premade.LeaveSlot(ctx, run.ID, targetID); err != nil {
+		log.Printf("premade edit: remove slot leave: %v", err)
+		updateEphemeral(s, i, "Something went wrong removing that signup. Please try again.")
+		return
+	}
+	// Clear any waitlist entry the same person held (harmless no-op otherwise).
+	if err := b.premade.LeaveWaitlist(ctx, run.ID, targetID); err != nil {
+		log.Printf("premade edit: remove slot leave waitlist: %v", err)
+	}
+
+	b.promoteFreedSlot(ctx, s, run, team, freedSlot, freedRole)
+	b.compactSimpleSignups(ctx, run, team)
+
+	if rerr := b.refreshPremadePostMessage(ctx, s, run); rerr != nil {
+		log.Printf("premade edit: remove slot refresh post: %v", rerr)
+	}
+
+	confirm := fmt.Sprintf("Removed **%s** from this run.", removedName)
+
+	sess.Step = premadeStepEditField
+	if err := b.premade.UpsertSession(ctx, sess); err != nil {
+		log.Printf("premade edit: remove slot persist: %v", err)
+	}
+
+	// Acknowledge the picker interaction (clears the select UI).
+	if aerr := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseUpdateMessage,
+		Data: &discordgo.InteractionResponseData{
+			Content:    confirm,
+			Components: []discordgo.MessageComponent{},
+		},
+	}); aerr != nil {
+		log.Printf("premade edit: remove slot ack: %v", aerr)
+	}
+
+	// Fetch the latest run state for the refreshed field menu.
+	run2, rerr := b.premade.GetRun(ctx, run.ID)
+	if rerr != nil {
+		run2 = run
+	}
+	if err := b.sendEditFieldMenu(s, sess.DMChannelID, run2, confirm+" Edit something else, or choose **Done**."); err != nil {
+		log.Printf("premade edit: remove slot send menu: %v", err)
+	}
+}
+
+// removeSignupOptions builds the picker of current claimants for removal: one
+// option per signed-up slot, labeled with the claimant and their slot/role.
+func removeSignupOptions(team *models.Team, signups []models.PremadeSignup) []discordgo.SelectMenuOption {
+	opts := make([]discordgo.SelectMenuOption, 0, len(signups))
+	for _, sg := range signups {
+		roleKey := roleForSlot(team, sg.Slot)
+		role := team.RoleLabel(roleKey)
+		if role == "" {
+			role = "—"
+		}
+		label := fmt.Sprintf("%s · Slot %d · %s", removeSignupName(sg), sg.Slot, role)
+		opts = append(opts, discordgo.SelectMenuOption{
+			Label: truncate(label, 100),
+			Value: sg.DiscordUserID,
+			Emoji: &discordgo.ComponentEmoji{Name: team.RoleEmoji(roleKey)},
+		})
+	}
+	return opts
+}
+
+// removeSignupName is the display name for a claimant in the removal picker and
+// its confirmation: the stored username, or the raw id when it's blank.
+func removeSignupName(sg models.PremadeSignup) string {
+	if n := strings.TrimSpace(sg.DiscordUsername); n != "" {
+		return n
+	}
+	return sg.DiscordUserID
 }
