@@ -800,7 +800,11 @@ the `pre_made` flag on (see "Pre-made trial run" under Teams). Tables in
   else the team's `premade_post`) + a per-slot roster showing
   each slot's name/role/class and either the claimant's mention or "open". Each
   role header shows a `(claimed/total)` signup count so it's easy to see how many
-  slots are still open.
+  slots are still open. The claimant name stored at signup (`discord_username`,
+  rendered by `claimantDisplay`) is captured via `interactionDisplayName(i)`, so
+  it prefers the presser's **server nickname** (`i.Member.Nick`), then global
+  name, then username. The same applies to post fills (`ClaimFill`) and waitlist
+  joins.
   Controls (`premadeComponents`): a **claim** select listing only open slots
   (`premade_claim`; disabled "all taken" placeholder when full), a **details**
   select listing all slots (`premade_details`), and a final button row

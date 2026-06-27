@@ -426,7 +426,7 @@ func (b *bot) handlePremadeClaim(s *discordgo.Session, i *discordgo.InteractionC
 	if err != nil {
 		return
 	}
-	err = b.premade.ClaimSlot(ctx, run.ID, slot, user.ID, displayName(user))
+	err = b.premade.ClaimSlot(ctx, run.ID, slot, user.ID, interactionDisplayName(i))
 	if errors.Is(err, models.ErrSlotTaken) {
 		ephemeral(s, i, "That slot was just taken by someone else. Pick another open slot.")
 		return
@@ -473,7 +473,7 @@ func (b *bot) claimSimple(ctx context.Context, s *discordgo.Session, i *discordg
 			ephemeral(s, i, "No open slots for that role right now. Pick another role.")
 			return
 		}
-		err = b.premade.ClaimSlot(ctx, run.ID, slot, user.ID, displayName(user))
+		err = b.premade.ClaimSlot(ctx, run.ID, slot, user.ID, interactionDisplayName(i))
 		if errors.Is(err, models.ErrSlotTaken) {
 			continue
 		}
@@ -689,7 +689,7 @@ func (b *bot) handlePremadeWaitlist(s *discordgo.Session, i *discordgo.Interacti
 			}
 		}
 	}
-	if err := b.premade.JoinWaitlist(ctx, run.ID, role, user.ID, displayName(user)); err != nil {
+	if err := b.premade.JoinWaitlist(ctx, run.ID, role, user.ID, interactionDisplayName(i)); err != nil {
 		log.Printf("premade: join waitlist: %v", err)
 		ephemeral(s, i, "Something went wrong joining the waitlist. Please try again.")
 		return

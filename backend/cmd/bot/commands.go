@@ -1159,7 +1159,7 @@ func (b *bot) handlePostFill(s *discordgo.Session, i *discordgo.InteractionCreat
 		}
 
 		if choice == postFillListValue {
-			if err := b.discord.ClaimFill(ctx, i.Message.ID, i.ChannelID, models.PostFillList, user.ID, displayName(user)); err != nil {
+			if err := b.discord.ClaimFill(ctx, i.Message.ID, i.ChannelID, models.PostFillList, user.ID, interactionDisplayName(i)); err != nil {
 				log.Printf("post fill: join list: %v", err)
 				ephemeral(s, i, "Something went wrong. Please try again.")
 				return
@@ -1184,7 +1184,7 @@ func (b *bot) handlePostFill(s *discordgo.Session, i *discordgo.InteractionCreat
 			ephemeral(s, i, "That slot isn't open to fill anymore. Pick another slot or the fill list.")
 			return
 		}
-		err = b.discord.ClaimFill(ctx, i.Message.ID, i.ChannelID, slot, user.ID, displayName(user))
+		err = b.discord.ClaimFill(ctx, i.Message.ID, i.ChannelID, slot, user.ID, interactionDisplayName(i))
 		if errors.Is(err, models.ErrSlotTaken) {
 			ephemeral(s, i, "Someone just signed up to fill that slot. Pick another slot or the fill list.")
 			return

@@ -149,3 +149,21 @@ func memberDisplayName(m *discordgo.Member) string {
 	}
 	return ""
 }
+
+// interactionDisplayName returns the best display name for an interaction's
+// invoker: their server nickname when present (guild interactions carry it on
+// i.Member.Nick), else their global (display) name, else username. This is the
+// name captured when a user signs up for a run or fills a post, so it reflects
+// how they appear in the server. Falls back to the DM user when there's no
+// member (e.g. a DM interaction).
+func interactionDisplayName(i *discordgo.InteractionCreate) string {
+	if i != nil && i.Member != nil {
+		if n := memberDisplayName(i.Member); n != "" {
+			return n
+		}
+	}
+	if u := invokingUser(i); u != nil {
+		return displayName(u)
+	}
+	return ""
+}
