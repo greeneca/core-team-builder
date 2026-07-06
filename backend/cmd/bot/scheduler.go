@@ -55,9 +55,15 @@ func (b *bot) schedulerTick(ctx context.Context, session *discordgo.Session) {
 		log.Printf("scheduler: due cleanups: %v", err)
 	}
 	for _, run := range cleanups {
-		// Auto-cleanup is best effort; any thread-deletion failure is already
-		// logged inside cleanupRun (no user to notify here).
-		_ = b.cleanupRun(ctx, session, run)
+		// Delete the post + thread, then mark the run done. If the thread could
+		// not be removed (almost always a missing Manage Threads permission), we
+		// deliberately leave cleaned_up_at NULL so this run stays "due" and a
+		// later tick retries — that way cleanup self-heals the moment an admin
+		// grants the permission, instead of orphaning the thread forever.
+		if err := b.cleanupRun(ctx, session, run); err != nil {
+			continue
+		}
+		b.markRunCleanedUp(ctx, run.ID)
 	}
 
 	tags, err := b.withTimeout(ctx, func(c context.Context) ([]models.PremadeRun, error) {
@@ -247,13 +253,18 @@ func discordStatus(err error) int {
 	return 0
 }
 
-// cleanupRun deletes the run's thread and post, then records that cleanup ran.
-// It returns a non-nil error only when a thread that should exist could not be
-// deleted for a reason other than "already gone" — almost always a 403 because
-// the bot lacks the Manage Threads permission (deleting a thread requires it;
-// deleting the parent message does NOT remove the thread). Callers acting on a
-// user request use this to warn that the thread is now orphaned. A missing
-// thread/message (404) is tolerated so the run is still marked done.
+// cleanupRun deletes the run's thread and post. It returns a non-nil error only
+// when a thread that should exist could not be deleted for a reason other than
+// "already gone" — almost always a 403 because the bot lacks the Manage Threads
+// permission (deleting a thread requires it; deleting the parent message does
+// NOT remove the thread, and the thread shares the starter message's id). A
+// missing thread/message (404) is tolerated and reported as success.
+//
+// cleanupRun does NOT record the run as cleaned up — the caller decides whether
+// to mark it via markRunCleanedUp. The scheduler only marks runs whose thread
+// was actually removed, so an un-deletable thread keeps the run "due" and is
+// retried (self-healing once Manage Threads is granted). User-initiated deletes
+// mark the run regardless and warn that the thread is now orphaned.
 func (b *bot) cleanupRun(ctx context.Context, session *discordgo.Session, run models.PremadeRun) error {
 	var threadErr error
 	if threadID := threadCleanupID(&run); threadID != "" {
@@ -272,10 +283,16 @@ func (b *bot) cleanupRun(ctx context.Context, session *discordgo.Session, run mo
 			log.Printf("scheduler: delete post (run %d): %v", run.ID, err)
 		}
 	}
+	return threadErr
+}
+
+// markRunCleanedUp records that a run's post and thread have been cleaned up so
+// the scheduler stops revisiting it. Best effort: a failure is logged, leaving
+// the run "due" for a later retry.
+func (b *bot) markRunCleanedUp(ctx context.Context, runID int64) {
 	c, cancel := context.WithTimeout(ctx, 10*time.Second)
-	if err := b.premade.MarkCleanedUp(c, run.ID); err != nil {
-		log.Printf("scheduler: mark cleaned up (run %d): %v", run.ID, err)
+	if err := b.premade.MarkCleanedUp(c, runID); err != nil {
+		log.Printf("scheduler: mark cleaned up (run %d): %v", runID, err)
 	}
 	cancel()
-	return threadErr
 }

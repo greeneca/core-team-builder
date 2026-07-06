@@ -139,7 +139,12 @@ func (b *bot) handlePremadeDelete(s *discordgo.Session, i *discordgo.Interaction
 	// the thread couldn't be removed (usually a missing Manage Threads
 	// permission), follow up so the user knows it's now orphaned.
 	ephemeral(s, i, "Deleted this run.")
-	if err := b.cleanupRun(ctx, s, *run); err != nil {
+	threadErr := b.cleanupRun(ctx, s, *run)
+	// The user asked to delete this run, so mark it done regardless — we don't
+	// want it resurfacing. If the thread was orphaned, the warning below tells
+	// them how to finish the job.
+	b.markRunCleanedUp(ctx, run.ID)
+	if threadErr != nil {
 		warnThreadCleanupFailed(s, i)
 	}
 }
@@ -300,6 +305,7 @@ func (b *bot) handlePremadeEditFieldSelect(s *discordgo.Session, i *discordgo.In
 			return
 		}
 		threadErr := b.cleanupRun(ctx, s, *run)
+		b.markRunCleanedUp(ctx, run.ID)
 		_ = b.premade.DeleteSession(ctx, sess.DiscordUserID)
 		msg := "Deleted this run and its post."
 		if threadErr != nil {

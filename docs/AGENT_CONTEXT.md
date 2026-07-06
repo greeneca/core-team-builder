@@ -907,7 +907,12 @@ the `pre_made` flag on (see "Pre-made trial run" under Teams). Tables in
     every signup; `MarkThreadStarted` (records the ping ran). If the thread is
     somehow missing (older run, or post-time creation failed) it's created here as
     a fallback.
-  - **2 h after** (`DueCleanupRuns`): deletes the thread + post; `MarkCleanedUp`.
+  - **2 h after** (`DueCleanupRuns`): deletes the thread + post. The run is
+    marked done (`markRunCleanedUp`) **only when the thread was actually
+    removed** — if `cleanupRun` reports a non-404 failure (typically a 403
+    missing Manage Threads), `cleaned_up_at` stays NULL so the run remains due
+    and a later tick retries. Cleanup therefore **self-heals** once an admin
+    grants Manage Threads, instead of orphaning the thread permanently.
   Both are tracked by timestamp columns on `premade_runs`, so each fires **exactly
   once** and **catches up** if the bot was offline at the trigger time (cleanups
   are processed before threads, so a long-offline finished run is removed rather
@@ -929,9 +934,11 @@ the `pre_made` flag on (see "Pre-made trial run" under Teams). Tables in
   thread is a tolerated 404. **Deleting the post does NOT delete its thread** —
   `cleanupRun` must delete the thread explicitly, which requires **Manage
   Threads**; it returns an error on any non-404 failure (typically a 403 missing
-  that permission) so the user-initiated delete paths warn that the thread is now
-  orphaned. The bot needs **Create Public Threads / Manage Threads / Manage
-  Messages** permissions for these (see `docs/DEPLOYMENT.md`).
+  that permission) and does **not** itself mark the run done. The scheduler uses
+  that error to keep retrying (above); the user-initiated **Delete run** paths
+  instead always `markRunCleanedUp` (the user asked to delete) and warn that the
+  thread is now orphaned. The bot needs **Create Public Threads / Manage Threads
+  / Manage Messages** permissions for these (see `docs/DEPLOYMENT.md`).
 
 ## Member pool / recruitment (current)
 
