@@ -659,7 +659,7 @@ column; the `User` JSON model hides it (`json:"-"`).
     that specific post (`discord_rsvps`, keyed by message ID), then edit the post
     in place (`InteractionResponseUpdateMessage`). The post is fully re-rendered
     so each responder's status shows as a **✅/❌ icon beside their name** in the
-    roster (matched to a slot by Discord ID/handle; no-response shows ▫️). The
+    roster (matched to a slot by Discord ID/handle; no-response shows 🟡). The
     roster is plain Markdown (not a code block) so the icons render; there is no
     separate Attendance list, and responders who don't match a roster slot are
     omitted. A user has one RSVP per post; pressing the other button switches it.

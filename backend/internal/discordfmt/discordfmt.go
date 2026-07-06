@@ -28,7 +28,8 @@ import (
 //
 // marks carries each responding player's RSVP status keyed by slot
 // (models.RSVPYes / models.RSVPNo); a ✅ or ❌ icon is rendered beside that
-// player's name in the roster. Players without an entry show a neutral ▫️.
+// player's name in the roster. Players without an entry show a 🟡 (hasn't
+// responded yet).
 //
 // fillBySlot maps an open roster slot (one with no Discord handle) to the
 // display name of the user who signed up to fill it via the post's signup
@@ -57,7 +58,7 @@ func BuildPost(team *models.Team, primary *models.Encounter, groupings []models.
 	}
 
 	// Roster grouped by role. Rendered as Markdown (not a code block) so each
-	// player's RSVP status shows as a ✅/❌/▫️ icon beside their name.
+	// player's RSVP status shows as a ✅/❌/🟡 icon beside their name.
 	if rl := rosterLines(team, primary, marks, fillBySlot, names); len(rl) > 0 {
 		if len(L) > 0 {
 			L = append(L, "")
@@ -339,8 +340,8 @@ func roleCountSuffix(filled, total int) string {
 
 // rosterLines renders the roster grouped by role (the team's own roles in their
 // defined order, then any "Other" for unset roles) as Markdown lines. Each
-// player is one line prefixed by an RSVP icon (✅ coming / ❌ not coming / ▫️ no
-// response) followed by slot, name, class, and abbreviated gear from the primary
+// player is one line prefixed by an RSVP icon (✅ coming / ❌ not coming / 🟡 no
+// response yet) followed by slot, name, class, and abbreviated gear from the primary
 // encounter. Returns nil when there are no players.
 //
 // A slot is fillable in two cases: it has no Discord handle (an "open" slot), or
@@ -476,7 +477,8 @@ func fillListLines(names []string) []string {
 }
 
 // rsvpIcon maps an RSVP status to the emoji shown beside a player's name.
-// Unknown/no response renders as a neutral marker.
+// Unknown/no response renders as a highly visible yellow circle so it's obvious
+// at a glance who still needs to respond.
 func rsvpIcon(status string) string {
 	switch status {
 	case models.RSVPYes:
@@ -484,7 +486,7 @@ func rsvpIcon(status string) string {
 	case models.RSVPNo:
 		return "\u274C" // ❌
 	default:
-		return "\u25AB\uFE0F" // ▫️
+		return "\U0001F7E1" // 🟡 — hasn't responded yet.
 	}
 }
 
