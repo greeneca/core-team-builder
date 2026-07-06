@@ -1311,7 +1311,7 @@ func (b *bot) handleGetMyDetails(s *discordgo.Session, i *discordgo.InteractionC
 		return
 	}
 
-	team, encs, _, _, err := b.loadTeamData(ctx, teamID)
+	team, encs, _, gr, err := b.loadTeamData(ctx, teamID)
 	if err != nil {
 		log.Printf("details: load team: %v", err)
 		ephemeral(s, i, "Could not load the team. Please try again.")
@@ -1337,7 +1337,7 @@ func (b *bot) handleGetMyDetails(s *discordgo.Session, i *discordgo.InteractionC
 		return
 	}
 
-	title, desc := discordfmt.PlayerDetail(team, player, encs)
+	title, desc := discordfmt.PlayerDetail(team, player, encs, gr)
 	embed := &discordgo.MessageEmbed{
 		Title:       truncate(title, embedTitleLimit),
 		Description: truncate(desc, embedDescriptionLimit),

@@ -781,7 +781,7 @@ func (b *bot) handlePremadeDetails(s *discordgo.Session, i *discordgo.Interactio
 	if !ok {
 		return
 	}
-	team, encs, _, _, err := b.loadTeamData(ctx, run.TeamID)
+	team, encs, _, gr, err := b.loadTeamData(ctx, run.TeamID)
 	if err != nil {
 		log.Printf("premade: details load: %v", err)
 		ephemeral(s, i, "Could not load the team. Please try again.")
@@ -799,7 +799,7 @@ func (b *bot) handlePremadeDetails(s *discordgo.Session, i *discordgo.Interactio
 		return
 	}
 
-	title, desc := discordfmt.PlayerDetail(team, *player, encs)
+	title, desc := discordfmt.PlayerDetail(team, *player, encs, gr)
 	embed := &discordgo.MessageEmbed{
 		Title:       truncate(title, embedTitleLimit),
 		Description: truncate(desc, embedDescriptionLimit),

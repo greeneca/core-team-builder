@@ -492,12 +492,13 @@ func rsvpIcon(status string) string {
 
 // PlayerDetail builds the detailed DM for a single player, split into embed-ready
 // parts (title + description) so the bot can wrap it in a boxed embed. The
-// description reads top-to-bottom: Player, Class & Race, Build, one section per
-// encounter, then a Requirements section (self-required pen/crit and any self
-// buffs). Every data type sits on its own line under an underlined header
-// (Discord `__header__`). When there is only one encounter its name header is
-// omitted, since it is redundant.
-func PlayerDetail(team *models.Team, p models.Player, encounters []models.Encounter) (title, description string) {
+// description reads top-to-bottom: Player, Class & Race, Build, the groups the
+// player belongs to (from groupings), one section per encounter, then a
+// Requirements section (self-required pen/crit and any self buffs). Every data
+// type sits on its own line under an underlined header (Discord `__header__`).
+// When there is only one encounter its name header is omitted, since it is
+// redundant.
+func PlayerDetail(team *models.Team, p models.Player, encounters []models.Encounter, groupings []models.Grouping) (title, description string) {
 	name := p.Name
 	if name == "" {
 		name = fmt.Sprintf("Slot %d", p.Slot)
@@ -518,6 +519,12 @@ func PlayerDetail(team *models.Team, p models.Player, encounters []models.Encoun
 
 	// Build (subclass lines or masteries).
 	L = append(L, "", "__Build__", buildText(p))
+
+	// Groups the player belongs to (one line per grouping they're assigned in).
+	if gl := playerGroupLines(groupings, p.Slot); len(gl) > 0 {
+		L = append(L, "", "__Groups__")
+		L = append(L, gl...)
+	}
 
 	// One section per encounter, each data type on its own underlined line. A
 	// single encounter needs no name header.
@@ -826,6 +833,41 @@ func formatGroupings(team *models.Team, groupings []models.Grouping, fillBySlot,
 	}
 	if !emitted {
 		return nil
+	}
+	return L
+}
+
+// playerGroupLines lists the groups a player's slot belongs to, one line per
+// grouping the slot is assigned in: "• <grouping name>: <group name>". A
+// grouping the player isn't part of is skipped. Returns nil when the player is
+// in no group, so the caller can omit the section entirely.
+func playerGroupLines(groupings []models.Grouping, slot int) []string {
+	var L []string
+	for _, g := range groupings {
+		for _, grp := range g.Groups {
+			inGroup := false
+			for _, s := range grp.Slots {
+				if s == slot {
+					inGroup = true
+					break
+				}
+			}
+			if !inGroup {
+				continue
+			}
+			gName := strings.TrimSpace(g.Name)
+			if gName == "" {
+				gName = "Grouping"
+			}
+			label := strings.TrimSpace(grp.Name)
+			if label == "" {
+				label = fmt.Sprintf("Group %d", grp.GroupNumber)
+			}
+			L = append(L, fmt.Sprintf("• %s: %s", gName, label))
+			// A slot belongs to at most one group per grouping, so stop scanning
+			// this grouping's groups once matched.
+			break
+		}
 	}
 	return L
 }
