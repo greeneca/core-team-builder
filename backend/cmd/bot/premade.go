@@ -584,10 +584,11 @@ func (b *bot) signupWaitlist(ctx context.Context, s *discordgo.Session, i *disco
 		fmt.Sprintf("**%s** is full, so I've added you to its waitlist. You'll be moved in and DM'd if a slot opens up.", team.RoleLabel(role)))
 }
 
-// signupTentative marks the user as tentative ("maybe") for a role and notifies
-// them. Tentative players don't hold a slot, so any slot/waitlist they held is
-// released (and a freed slot backfilled). They're still pinged ~15 min before
-// the run.
+// signupTentative marks the user as tentative ("maybe") for a role. Tentative
+// players don't hold a slot, so any slot/waitlist they held is released (and a
+// freed slot backfilled). No ephemeral confirmation is sent — the refreshed post
+// shows them in the tentative list — but they're still pinged ~15 min before the
+// run.
 func (b *bot) signupTentative(ctx context.Context, s *discordgo.Session, i *discordgo.InteractionCreate, run *models.PremadeRun, team *models.Team, user *discordgo.User, role string) {
 	freedSlot, freedRole, held := b.currentSlot(ctx, run, team, user.ID)
 
@@ -607,8 +608,7 @@ func (b *bot) signupTentative(ctx context.Context, s *discordgo.Session, i *disc
 		b.promoteFreedSlot(ctx, s, run, team, freedSlot, freedRole)
 		b.compactSimpleSignups(ctx, run, team)
 	}
-	b.renderPremadeUpdateWithNotice(ctx, s, i, run,
-		fmt.Sprintf("You're marked **tentative (maybe)** for %s. You don't hold a slot, but you'll be pinged about 15 minutes before the run.", team.RoleLabel(role)))
+	b.renderPremadeUpdate(ctx, s, i, run)
 }
 
 // handlePremadeClaim locks a slot to the presser (releasing any prior claim). In
@@ -1316,16 +1316,11 @@ func premadeSignupOptions(team *models.Team, taken map[int]bool) []discordgo.Sel
 		}
 	}
 
-	// Tentative ("maybe") for every role on the roster, in both modes.
-	seenT := map[string]bool{}
-	for _, r := range orderedRoles {
-		if r == "" || seenT[r] || total[r] == 0 {
-			continue
-		}
-		seenT[r] = true
+	// A single "Maybe" (tentative) option, in both modes — not tied to a role.
+	if len(total) > 0 {
 		opts = append(opts, discordgo.SelectMenuOption{
-			Label: truncate(fmt.Sprintf("Maybe (tentative) — %s", team.RoleLabel(r)), 100),
-			Value: premadeSignupTentPrefix + r,
+			Label: "Maybe (tentative)",
+			Value: premadeSignupTentPrefix,
 			Emoji: &discordgo.ComponentEmoji{Name: "\U0001F914"}, // 🤔
 		})
 	}

@@ -138,7 +138,7 @@ func BuildPremadePost(team *models.Team, title, postOverride string, scheduledUn
 		L = append(L, "")
 		L = append(L, wl...)
 	}
-	if tl := premadeTentativeLines(team, tentative); len(tl) > 0 {
+	if tl := premadeTentativeLines(tentative); len(tl) > 0 {
 		L = append(L, "")
 		L = append(L, tl...)
 	}
@@ -149,36 +149,17 @@ func BuildPremadePost(team *models.Team, title, postOverride string, scheduledUn
 	return title, strings.TrimSpace(strings.Join(L, "\n"))
 }
 
-// premadeTentativeLines renders the per-role "tentative" (maybe) block, ordered
-// by the team's own role set. Returns nil when nobody is tentative.
-func premadeTentativeLines(team *models.Team, tentative []models.PremadeTentativeEntry) []string {
+// premadeTentativeLines renders the "tentative" (maybe) block as a flat list of
+// display names. Returns nil when nobody is tentative.
+func premadeTentativeLines(tentative []models.PremadeTentativeEntry) []string {
 	if len(tentative) == 0 {
 		return nil
 	}
-	byRole := map[string][]string{}
-	roles := make([]string, 0, len(tentative))
+	names := make([]string, 0, len(tentative))
 	for _, t := range tentative {
-		byRole[t.Role] = append(byRole[t.Role], claimantDisplay(t.DiscordUsername, t.DiscordUserID))
-		roles = append(roles, t.Role)
+		names = append(names, claimantDisplay(t.DiscordUsername, t.DiscordUserID))
 	}
-	L := []string{"__Tentative (maybe)__"}
-	seen := map[string]bool{}
-	emit := func(role string) {
-		if seen[role] {
-			return
-		}
-		seen[role] = true
-		if names := byRole[role]; len(names) > 0 {
-			L = append(L, team.RoleEmoji(role)+" "+team.RoleLabel(role)+": "+strings.Join(names, ", "))
-		}
-	}
-	for _, r := range team.OrderedRoleKeys(roles...) {
-		emit(r)
-	}
-	for _, t := range tentative {
-		emit(t.Role)
-	}
-	return L
+	return []string{"__Tentative (maybe)__", strings.Join(names, ", ")}
 }
 
 // premadeWaitlistLines renders the per-role waitlist block (FIFO, by display
