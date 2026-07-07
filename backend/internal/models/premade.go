@@ -57,6 +57,18 @@ type PremadeWaitlistEntry struct {
 	CreatedAt       time.Time
 }
 
+// PremadeTentativeEntry is one user who marked themselves "tentative"/maybe for
+// a given role on a run. They hold no slot and aren't in the waitlist queue, but
+// are listed on the post and pinged ~15 min before the run. CreatedAt orders the
+// list.
+type PremadeTentativeEntry struct {
+	ID              int64
+	Role            string
+	DiscordUserID   string
+	DiscordUsername string
+	CreatedAt       time.Time
+}
+
 // PremadeStore provides data access for pre-made runs and their slot signups.
 type PremadeStore struct {
 	pool *pgxpool.Pool
@@ -302,6 +314,45 @@ func (s *PremadeStore) PromoteToSlot(ctx context.Context, runID int64, slot int,
 		return nil, false, err
 	}
 	return &e, true, nil
+}
+
+// JoinTentative marks a user as tentative ("maybe") for a role on the run. One
+// entry per user per run: switching roles replaces the entry.
+func (s *PremadeStore) JoinTentative(ctx context.Context, runID int64, role, discordUserID, discordUsername string) error {
+	const q = `
+		INSERT INTO premade_tentative (run_id, role, discord_user_id, discord_username)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (run_id, discord_user_id)
+		DO UPDATE SET role = EXCLUDED.role, discord_username = EXCLUDED.discord_username, created_at = now()`
+	_, err := s.pool.Exec(ctx, q, runID, role, discordUserID, discordUsername)
+	return err
+}
+
+// LeaveTentative removes the user's tentative entry on this run (if any).
+func (s *PremadeStore) LeaveTentative(ctx context.Context, runID int64, discordUserID string) error {
+	_, err := s.pool.Exec(ctx, `DELETE FROM premade_tentative WHERE run_id = $1 AND discord_user_id = $2`, runID, discordUserID)
+	return err
+}
+
+// ListTentative returns the run's tentative entries, ordered by role then time.
+func (s *PremadeStore) ListTentative(ctx context.Context, runID int64) ([]PremadeTentativeEntry, error) {
+	const q = `
+		SELECT id, role, discord_user_id, discord_username, created_at
+		FROM premade_tentative WHERE run_id = $1 ORDER BY role, created_at, id`
+	rows, err := s.pool.Query(ctx, q, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []PremadeTentativeEntry
+	for rows.Next() {
+		var e PremadeTentativeEntry
+		if err := rows.Scan(&e.ID, &e.Role, &e.DiscordUserID, &e.DiscordUsername, &e.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
 }
 
 // DueThreadRuns returns posted runs whose signups should be pinged now (within

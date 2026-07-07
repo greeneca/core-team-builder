@@ -315,6 +315,13 @@ func (b *bot) tagRunSignups(ctx context.Context, session *discordgo.Session, run
 		log.Printf("scheduler: list signups (run %d): %v", run.ID, err)
 	}
 
+	c, cancel = context.WithTimeout(ctx, 10*time.Second)
+	tentative, err := b.premade.ListTentative(c, run.ID)
+	cancel()
+	if err != nil {
+		log.Printf("scheduler: list tentative (run %d): %v", run.ID, err)
+	}
+
 	content := "Starting soon — no one has signed up yet."
 	if len(signups) > 0 {
 		mentions := make([]string, 0, len(signups))
@@ -322,6 +329,14 @@ func (b *bot) tagRunSignups(ctx context.Context, session *discordgo.Session, run
 			mentions = append(mentions, "<@"+sg.DiscordUserID+">")
 		}
 		content = "Starting soon — " + strings.Join(mentions, " ")
+	}
+	// Tentative ("maybe") players are pinged too, flagged as such.
+	if len(tentative) > 0 {
+		maybes := make([]string, 0, len(tentative))
+		for _, t := range tentative {
+			maybes = append(maybes, "<@"+t.DiscordUserID+">")
+		}
+		content += "\nTentative (maybe): " + strings.Join(maybes, " ")
 	}
 	if _, err := session.ChannelMessageSend(threadID, content); err != nil {
 		log.Printf("scheduler: thread tag (run %d): %v", run.ID, err)

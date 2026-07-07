@@ -101,7 +101,7 @@ func BuildPost(team *models.Team, primary *models.Encounter, groupings []models.
 // (specific) signup runs — simple (role-only) runs hide per-slot detail, so they
 // omit groupings. Each grouping member shows the claimant who holds that slot,
 // falling back to the roster slot name when it's still open.
-func BuildPremadePost(team *models.Team, title, postOverride string, scheduledUnix int64, primary *models.Encounter, groupings []models.Grouping, claimants map[int]models.PremadeSignup, waitlist []models.PremadeWaitlistEntry) (string, string) {
+func BuildPremadePost(team *models.Team, title, postOverride string, scheduledUnix int64, primary *models.Encounter, groupings []models.Grouping, claimants map[int]models.PremadeSignup, waitlist []models.PremadeWaitlistEntry, tentative []models.PremadeTentativeEntry) (string, string) {
 	if strings.TrimSpace(title) == "" {
 		title = team.Name
 	}
@@ -138,18 +138,47 @@ func BuildPremadePost(team *models.Team, title, postOverride string, scheduledUn
 		L = append(L, "")
 		L = append(L, wl...)
 	}
+	if tl := premadeTentativeLines(team, tentative); len(tl) > 0 {
+		L = append(L, "")
+		L = append(L, tl...)
+	}
 	// Simple-signup runs hide each slot's class/gear and the build-details menu,
 	// so the footer doesn't mention build details for them.
-	claimText := "claim a slot or get a slot's build details"
-	if team.SimpleSignup {
-		claimText = "claim a slot"
-	}
-	footer := fmt.Sprintf("_Use the menus below to %s. Claiming a new slot releases your previous one._", claimText)
-	if team.WaitlistEnabled {
-		footer = fmt.Sprintf("_Use the menus below to %s. Claiming a new slot releases your previous one. If a role is full you can join its waitlist — you'll be moved in automatically when a slot opens._", claimText)
-	}
+	footer := "_Use the menu below to sign up. Signing up for a new slot releases your previous one. If a role is full you'll join its waitlist. Pick **Tentative** for a role to mark yourself as a maybe._"
 	L = append(L, "", footer)
 	return title, strings.TrimSpace(strings.Join(L, "\n"))
+}
+
+// premadeTentativeLines renders the per-role "tentative" (maybe) block, ordered
+// by the team's own role set. Returns nil when nobody is tentative.
+func premadeTentativeLines(team *models.Team, tentative []models.PremadeTentativeEntry) []string {
+	if len(tentative) == 0 {
+		return nil
+	}
+	byRole := map[string][]string{}
+	roles := make([]string, 0, len(tentative))
+	for _, t := range tentative {
+		byRole[t.Role] = append(byRole[t.Role], claimantDisplay(t.DiscordUsername, t.DiscordUserID))
+		roles = append(roles, t.Role)
+	}
+	L := []string{"__Tentative (maybe)__"}
+	seen := map[string]bool{}
+	emit := func(role string) {
+		if seen[role] {
+			return
+		}
+		seen[role] = true
+		if names := byRole[role]; len(names) > 0 {
+			L = append(L, team.RoleEmoji(role)+" "+team.RoleLabel(role)+": "+strings.Join(names, ", "))
+		}
+	}
+	for _, r := range team.OrderedRoleKeys(roles...) {
+		emit(r)
+	}
+	for _, t := range tentative {
+		emit(t.Role)
+	}
+	return L
 }
 
 // premadeWaitlistLines renders the per-role waitlist block (FIFO, by display

@@ -23,10 +23,14 @@ import (
 // Custom ID grammar:
 //
 //	premade_dm_tz                      (one-time DM timezone picker; value = IANA tz)
-//	premade_claim                      (on the post; value = slot to claim, or role in simple mode)
+//	premade_signup                     (on the post; one consolidated dropdown — value is prefixed:
+//	                                    "slot:<n>" claim a specific slot, "role:<key>" sign up by
+//	                                    role (auto-waitlists when the role is full), "wait:<key>"
+//	                                    join a full role's waitlist, "tent:<key>" mark tentative)
+//	premade_claim                      (legacy, older posts; value = slot to claim, or role in simple mode)
 //	premade_details                    (on the post; value = slot to DM details for)
-//	premade_wait                       (on the post; value = role to waitlist for)
-//	premade_leave                      (on the post; release the presser's slot/waitlist)
+//	premade_wait                       (legacy, older posts; value = role to waitlist for)
+//	premade_leave                      (on the post; release the presser's slot/waitlist/tentative)
 //	premade_edit                       (on the post; start a DM to edit title/time/body)
 //	premade_edit_field                 (DM select; value = title | when | body | signup | remove | delete | done)
 //	premade_edit_signup_pick           (DM select; value = a guild member id, or "raw")
@@ -35,6 +39,7 @@ import (
 const (
 	premadePrefix       = "premade_"
 	premadeDMTimezoneID = "premade_dm_tz"
+	premadeSignupID     = "premade_signup"
 	premadeClaimID      = "premade_claim"
 	premadeDetailsID    = "premade_details"
 	premadeWaitID       = "premade_wait"
@@ -49,12 +54,23 @@ const (
 	premadeEditRemoveID = "premade_edit_remove"
 )
 
+// Consolidated signup dropdown (premade_signup) option-value prefixes. The one
+// menu carries a mix of options; the prefix tells handlePremadeSignup how to act.
+const (
+	premadeSignupSlotPrefix = "slot:" // claim a specific slot (advanced mode)
+	premadeSignupRolePrefix = "role:" // sign up by role; auto-waitlists when full
+	premadeSignupWaitPrefix = "wait:" // join a full role's waitlist
+	premadeSignupTentPrefix = "tent:" // mark tentative ("maybe") for a role
+)
+
 // onPremadeComponent dispatches every premade_* component interaction.
 func (b *bot) onPremadeComponent(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	id := i.MessageComponentData().CustomID
 	switch {
 	case id == premadeDMTimezoneID:
 		b.handlePremadeDMTimezone(s, i)
+	case id == premadeSignupID:
+		b.handlePremadeSignup(s, i)
 	case id == premadeClaimID:
 		b.handlePremadeClaim(s, i)
 	case id == premadeDetailsID:
@@ -380,9 +396,227 @@ func (b *bot) buildPublishOptions(ctx context.Context, teams []models.Team, guil
 	return options, nil
 }
 
+// handlePremadeSignup handles the consolidated signup dropdown (premade_signup).
+// The picked value is prefixed so one menu can do everything: claim a specific
+// slot ("slot:<n>"), sign up by role ("role:<key>", auto-waitlisting when the
+// role is full), join a full role's waitlist ("wait:<key>"), or mark tentative
+// ("tent:<key>"). A user is only ever in one of signup / waitlist / tentative at
+// a time; each path clears the others.
+func (b *bot) handlePremadeSignup(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	user := invokingUser(i)
+	if user == nil || i.Message == nil {
+		ephemeral(s, i, "Could not identify your Discord account.")
+		return
+	}
+	values := i.MessageComponentData().Values
+	if len(values) == 0 {
+		return
+	}
+	choice := values[0]
+
+	ctx, cancel := handlerContext()
+	defer cancel()
+
+	run, ok := b.premadeRunForMessage(ctx, s, i)
+	if !ok {
+		return
+	}
+	team, _, _, _, err := b.loadTeamData(ctx, run.TeamID)
+	if err != nil {
+		log.Printf("premade: signup load team: %v", err)
+		ephemeral(s, i, "Something went wrong. Please try again.")
+		return
+	}
+
+	switch {
+	case strings.HasPrefix(choice, premadeSignupSlotPrefix):
+		slot, err := strconv.Atoi(strings.TrimPrefix(choice, premadeSignupSlotPrefix))
+		if err != nil {
+			return
+		}
+		b.signupClaimSlot(ctx, s, i, run, team, user, slot)
+	case strings.HasPrefix(choice, premadeSignupRolePrefix):
+		b.signupByRole(ctx, s, i, run, team, user, strings.TrimPrefix(choice, premadeSignupRolePrefix))
+	case strings.HasPrefix(choice, premadeSignupWaitPrefix):
+		b.signupWaitlist(ctx, s, i, run, team, user, strings.TrimPrefix(choice, premadeSignupWaitPrefix))
+	case strings.HasPrefix(choice, premadeSignupTentPrefix):
+		b.signupTentative(ctx, s, i, run, team, user, strings.TrimPrefix(choice, premadeSignupTentPrefix))
+	}
+}
+
+// currentSlot returns the slot/role the user currently holds on the run (if
+// any). Errors are logged and treated as "no slot held".
+func (b *bot) currentSlot(ctx context.Context, run *models.PremadeRun, team *models.Team, discordUserID string) (slot int, role string, held bool) {
+	signups, err := b.premade.ListSignups(ctx, run.ID)
+	if err != nil {
+		log.Printf("premade: signup current slot (run %d): %v", run.ID, err)
+		return 0, "", false
+	}
+	if sl, ok := userSlot(signups, discordUserID); ok {
+		return sl, roleForSlot(team, sl), true
+	}
+	return 0, "", false
+}
+
+// renderPremadeUpdateWithNotice re-renders the post in place, then sends the
+// presser an ephemeral follow-up (e.g. "you were waitlisted"). The update
+// consumes the interaction response, so the notice must be a follow-up.
+func (b *bot) renderPremadeUpdateWithNotice(ctx context.Context, s *discordgo.Session, i *discordgo.InteractionCreate, run *models.PremadeRun, notice string) {
+	b.renderPremadeUpdate(ctx, s, i, run)
+	if notice == "" {
+		return
+	}
+	if _, err := s.FollowupMessageCreate(i.Interaction, true, &discordgo.WebhookParams{
+		Flags:   discordgo.MessageFlagsEphemeral,
+		Content: notice,
+	}); err != nil {
+		log.Printf("premade: signup notice (run %d): %v", run.ID, err)
+	}
+}
+
+// signupClaimSlot claims a specific open slot (advanced mode), releasing any
+// slot/waitlist/tentative the user already held and backfilling a switched-away
+// slot from its role's waitlist.
+func (b *bot) signupClaimSlot(ctx context.Context, s *discordgo.Session, i *discordgo.InteractionCreate, run *models.PremadeRun, team *models.Team, user *discordgo.User, slot int) {
+	priorSlot, priorRole, hadPrior := b.currentSlot(ctx, run, team, user.ID)
+
+	err := b.premade.ClaimSlot(ctx, run.ID, slot, user.ID, interactionDisplayName(i))
+	if errors.Is(err, models.ErrSlotTaken) {
+		ephemeral(s, i, "That slot was just taken by someone else. Pick another open slot.")
+		return
+	}
+	if err != nil {
+		log.Printf("premade: signup claim slot: %v", err)
+		ephemeral(s, i, "Something went wrong claiming that slot. Please try again.")
+		return
+	}
+	// Holding a slot supersedes waiting for one or being tentative.
+	if err := b.premade.LeaveWaitlist(ctx, run.ID, user.ID); err != nil {
+		log.Printf("premade: signup claim clear waitlist: %v", err)
+	}
+	if err := b.premade.LeaveTentative(ctx, run.ID, user.ID); err != nil {
+		log.Printf("premade: signup claim clear tentative: %v", err)
+	}
+	if hadPrior && priorSlot != slot {
+		b.promoteFreedSlot(ctx, s, run, team, priorSlot, priorRole)
+	}
+	b.renderPremadeUpdate(ctx, s, i, run)
+}
+
+// signupByRole signs the user up for a role: it claims the first open slot for
+// that role, or — when the role is full — adds them to its waitlist (if the
+// team's waitlist is on) and tells them so. Used by the simple-mode role option.
+func (b *bot) signupByRole(ctx context.Context, s *discordgo.Session, i *discordgo.InteractionCreate, run *models.PremadeRun, team *models.Team, user *discordgo.User, role string) {
+	priorSlot, priorRole, hadPrior := b.currentSlot(ctx, run, team, user.ID)
+
+	for attempt := 0; attempt < 16; attempt++ {
+		signups, err := b.premade.ListSignups(ctx, run.ID)
+		if err != nil {
+			log.Printf("premade: signup role list: %v", err)
+			ephemeral(s, i, "Something went wrong signing you up. Please try again.")
+			return
+		}
+		taken := map[int]bool{}
+		for _, sg := range signups {
+			// ClaimSlot releases the presser's prior claim, so their own current
+			// slot shouldn't block the search for a matching role.
+			if sg.DiscordUserID == user.ID {
+				continue
+			}
+			taken[sg.Slot] = true
+		}
+		slot, ok := firstOpenSlotForRole(team, taken, role)
+		if !ok {
+			// Role is full — waitlist instead of signing up directly.
+			if team.WaitlistEnabled {
+				b.signupWaitlist(ctx, s, i, run, team, user, role)
+			} else {
+				ephemeral(s, i, fmt.Sprintf("**%s** is full and the waitlist isn't enabled for this run. Pick another role.", team.RoleLabel(role)))
+			}
+			return
+		}
+		err = b.premade.ClaimSlot(ctx, run.ID, slot, user.ID, interactionDisplayName(i))
+		if errors.Is(err, models.ErrSlotTaken) {
+			continue
+		}
+		if err != nil {
+			log.Printf("premade: signup role claim: %v", err)
+			ephemeral(s, i, "Something went wrong signing you up. Please try again.")
+			return
+		}
+		if err := b.premade.LeaveWaitlist(ctx, run.ID, user.ID); err != nil {
+			log.Printf("premade: signup role clear waitlist: %v", err)
+		}
+		if err := b.premade.LeaveTentative(ctx, run.ID, user.ID); err != nil {
+			log.Printf("premade: signup role clear tentative: %v", err)
+		}
+		if hadPrior && priorSlot != slot {
+			b.promoteFreedSlot(ctx, s, run, team, priorSlot, priorRole)
+		}
+		b.compactSimpleSignups(ctx, run, team)
+		b.renderPremadeUpdate(ctx, s, i, run)
+		return
+	}
+	ephemeral(s, i, "Couldn't grab a slot for that role — it just filled up. Try another role.")
+}
+
+// signupWaitlist adds the user to a full role's waitlist and notifies them.
+// A user who already holds a slot is told to un-sign first (holding a slot and
+// waiting are mutually exclusive). Being waitlisted supersedes tentative.
+func (b *bot) signupWaitlist(ctx context.Context, s *discordgo.Session, i *discordgo.InteractionCreate, run *models.PremadeRun, team *models.Team, user *discordgo.User, role string) {
+	if !team.WaitlistEnabled {
+		ephemeral(s, i, "The waitlist isn't enabled for this run.")
+		return
+	}
+	if _, _, held := b.currentSlot(ctx, run, team, user.ID); held {
+		ephemeral(s, i, "You already have a slot. Press **Un-Sign** first if you'd rather wait for another role.")
+		return
+	}
+	if err := b.premade.JoinWaitlist(ctx, run.ID, role, user.ID, interactionDisplayName(i)); err != nil {
+		log.Printf("premade: signup join waitlist: %v", err)
+		ephemeral(s, i, "Something went wrong joining the waitlist. Please try again.")
+		return
+	}
+	if err := b.premade.LeaveTentative(ctx, run.ID, user.ID); err != nil {
+		log.Printf("premade: signup waitlist clear tentative: %v", err)
+	}
+	b.renderPremadeUpdateWithNotice(ctx, s, i, run,
+		fmt.Sprintf("**%s** is full, so I've added you to its waitlist. You'll be moved in and DM'd if a slot opens up.", team.RoleLabel(role)))
+}
+
+// signupTentative marks the user as tentative ("maybe") for a role and notifies
+// them. Tentative players don't hold a slot, so any slot/waitlist they held is
+// released (and a freed slot backfilled). They're still pinged ~15 min before
+// the run.
+func (b *bot) signupTentative(ctx context.Context, s *discordgo.Session, i *discordgo.InteractionCreate, run *models.PremadeRun, team *models.Team, user *discordgo.User, role string) {
+	freedSlot, freedRole, held := b.currentSlot(ctx, run, team, user.ID)
+
+	if err := b.premade.JoinTentative(ctx, run.ID, role, user.ID, interactionDisplayName(i)); err != nil {
+		log.Printf("premade: signup join tentative: %v", err)
+		ephemeral(s, i, "Something went wrong. Please try again.")
+		return
+	}
+	// Tentative is separate from holding a slot or waiting — release both.
+	if err := b.premade.LeaveSlot(ctx, run.ID, user.ID); err != nil {
+		log.Printf("premade: signup tentative clear slot: %v", err)
+	}
+	if err := b.premade.LeaveWaitlist(ctx, run.ID, user.ID); err != nil {
+		log.Printf("premade: signup tentative clear waitlist: %v", err)
+	}
+	if held {
+		b.promoteFreedSlot(ctx, s, run, team, freedSlot, freedRole)
+		b.compactSimpleSignups(ctx, run, team)
+	}
+	b.renderPremadeUpdateWithNotice(ctx, s, i, run,
+		fmt.Sprintf("You're marked **tentative (maybe)** for %s. You don't hold a slot, but you'll be pinged about 15 minutes before the run.", team.RoleLabel(role)))
+}
+
 // handlePremadeClaim locks a slot to the presser (releasing any prior claim). In
 // specific mode the selected value is a slot number; in simple mode it's a role
 // and we claim the first open slot matching it.
+//
+// Legacy: newer posts use the consolidated premade_signup dropdown
+// (handlePremadeSignup). This remains so the claim select on older posts works.
 func (b *bot) handlePremadeClaim(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	user := invokingUser(i)
 	if user == nil || i.Message == nil {
@@ -638,6 +872,11 @@ func (b *bot) handlePremadeLeave(s *discordgo.Session, i *discordgo.InteractionC
 	if err := b.premade.LeaveWaitlist(ctx, run.ID, user.ID); err != nil {
 		log.Printf("premade: leave waitlist: %v", err)
 	}
+	// Un-Sign also clears a tentative ("maybe") entry so it fully removes the
+	// presser from the run.
+	if err := b.premade.LeaveTentative(ctx, run.ID, user.ID); err != nil {
+		log.Printf("premade: leave tentative: %v", err)
+	}
 
 	if held {
 		b.promoteFreedSlot(ctx, s, run, team, freedSlot, freedRole)
@@ -860,7 +1099,13 @@ func (b *bot) renderPremadeUpdate(ctx context.Context, s *discordgo.Session, i *
 		ephemeral(s, i, "Saved, but couldn't refresh the post.")
 		return
 	}
-	embed := b.premadeEmbed(ctx, team, run, primary, gr, signups, waitlist)
+	tentative, err := b.premade.ListTentative(ctx, run.ID)
+	if err != nil {
+		log.Printf("premade: render list tentative: %v", err)
+		ephemeral(s, i, "Saved, but couldn't refresh the post.")
+		return
+	}
+	embed := b.premadeEmbed(ctx, team, run, primary, gr, signups, waitlist, tentative)
 	err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseUpdateMessage,
 		Data: &discordgo.InteractionResponseData{
@@ -892,7 +1137,11 @@ func (b *bot) refreshPremadePostMessage(ctx context.Context, s *discordgo.Sessio
 	if err != nil {
 		return err
 	}
-	embed := b.premadeEmbed(ctx, team, run, primary, gr, signups, waitlist)
+	tentative, err := b.premade.ListTentative(ctx, run.ID)
+	if err != nil {
+		return err
+	}
+	embed := b.premadeEmbed(ctx, team, run, primary, gr, signups, waitlist, tentative)
 	components := premadeComponents(team, signups)
 	_, err = s.ChannelMessageEditComplex(&discordgo.MessageEdit{
 		Channel:    run.ChannelID,
@@ -906,12 +1155,12 @@ func (b *bot) refreshPremadePostMessage(ctx context.Context, s *discordgo.Sessio
 // premadeEmbed builds the run announcement embed from team data, the current
 // signups, and the current per-role waitlist. A "Posted by …" footer notes the
 // run's creator when their linked name can be resolved.
-func (b *bot) premadeEmbed(ctx context.Context, team *models.Team, run *models.PremadeRun, primary *models.Encounter, gr []models.Grouping, signups []models.PremadeSignup, waitlist []models.PremadeWaitlistEntry) *discordgo.MessageEmbed {
+func (b *bot) premadeEmbed(ctx context.Context, team *models.Team, run *models.PremadeRun, primary *models.Encounter, gr []models.Grouping, signups []models.PremadeSignup, waitlist []models.PremadeWaitlistEntry, tentative []models.PremadeTentativeEntry) *discordgo.MessageEmbed {
 	claimants := map[int]models.PremadeSignup{}
 	for _, sg := range signups {
 		claimants[sg.Slot] = sg
 	}
-	title, desc := discordfmt.BuildPremadePost(team, run.Title, run.PostOverride, run.ScheduledAt.Unix(), primary, gr, claimants, waitlist)
+	title, desc := discordfmt.BuildPremadePost(team, run.Title, run.PostOverride, run.ScheduledAt.Unix(), primary, gr, claimants, waitlist, tentative)
 	embed := &discordgo.MessageEmbed{
 		Title:       truncate(title, embedTitleLimit),
 		Description: truncate(desc, embedDescriptionLimit),
@@ -937,72 +1186,177 @@ func (b *bot) premadePoster(ctx context.Context, run *models.PremadeRun) string 
 	return link.DiscordUsername
 }
 
-// premadeComponents builds the post's control rows. In specific signup mode:
-// a "claim an open slot" select, a "get a slot's details" select, and a "leave
-// my slot" button. In simple signup mode: a role select (claiming takes the
-// first open slot matching that role) and a "leave my slot" button — no
-// per-slot details select.
+// premadeComponents builds the post's control rows. Signing up is now a single
+// consolidated dropdown (`premade_signup`) that carries every action: claiming a
+// specific open slot (advanced mode) or a role (simple mode, which auto-waitlists
+// when the role is full), joining a full role's waitlist, and marking tentative
+// ("maybe"). Advanced mode additionally keeps the per-slot build-details select.
+// Both layouts end with the "Un-Sign" / "Edit run" button row.
 func premadeComponents(team *models.Team, signups []models.PremadeSignup) []discordgo.MessageComponent {
 	taken := map[int]bool{}
 	for _, sg := range signups {
 		taken[sg.Slot] = true
 	}
 
-	if team.SimpleSignup {
-		return premadeSimpleComponents(team, taken)
-	}
-
-	players := append([]models.Player{}, team.Players...)
-	// team.Players is already slot-ordered from the store, but be defensive.
-	allOpts := make([]discordgo.SelectMenuOption, 0, len(players))
-	openOpts := make([]discordgo.SelectMenuOption, 0, len(players))
-	for _, p := range players {
-		label := slotOptionLabel(team, p)
-		opt := discordgo.SelectMenuOption{
-			Label: truncate(label, 100),
-			Value: strconv.Itoa(p.Slot),
-			Emoji: &discordgo.ComponentEmoji{Name: team.RoleEmoji(p.Role)},
+	rows := []discordgo.MessageComponent{premadeSignupRow(team, taken)}
+	// Advanced (specific) signup keeps a per-slot build-details select. Simple
+	// signup hides per-slot detail, so it has none.
+	if !team.SimpleSignup {
+		if detailsRow, ok := premadeDetailsRow(team); ok {
+			rows = append(rows, detailsRow)
 		}
-		allOpts = append(allOpts, opt)
-		if !taken[p.Slot] {
-			openOpts = append(openOpts, opt)
-		}
-	}
-
-	claimRow := discordgo.ActionsRow{Components: []discordgo.MessageComponent{
-		discordgo.SelectMenu{
-			CustomID:    premadeClaimID,
-			Placeholder: "Sign up for a slot",
-			Options:     openOpts,
-		},
-	}}
-	if len(openOpts) == 0 {
-		// A select must carry at least one option; show a disabled "full" menu.
-		claimRow = discordgo.ActionsRow{Components: []discordgo.MessageComponent{
-			discordgo.SelectMenu{
-				CustomID:    premadeClaimID,
-				Placeholder: "All slots are taken",
-				Disabled:    true,
-				Options:     []discordgo.SelectMenuOption{{Label: "All slots taken", Value: "none"}},
-			},
-		}}
-	}
-
-	rows := []discordgo.MessageComponent{claimRow}
-	if len(allOpts) > 0 {
-		rows = append(rows, discordgo.ActionsRow{Components: []discordgo.MessageComponent{
-			discordgo.SelectMenu{
-				CustomID:    premadeDetailsID,
-				Placeholder: "Get build details for a slot",
-				Options:     allOpts,
-			},
-		}})
-	}
-	if waitRow, ok := premadeWaitlistRow(team, taken); ok {
-		rows = append(rows, waitRow)
 	}
 	rows = append(rows, premadeActionRow())
 	return rows
+}
+
+// premadeSignupRow builds the single consolidated signup dropdown. When there's
+// nothing to pick (every role full with no waitlist, and no tentative options)
+// it renders a disabled placeholder so the select still displays.
+func premadeSignupRow(team *models.Team, taken map[int]bool) discordgo.MessageComponent {
+	opts := premadeSignupOptions(team, taken)
+	if len(opts) == 0 {
+		return discordgo.ActionsRow{Components: []discordgo.MessageComponent{
+			discordgo.SelectMenu{
+				CustomID:    premadeSignupID,
+				Placeholder: "Signups are closed",
+				Disabled:    true,
+				Options:     []discordgo.SelectMenuOption{{Label: "Nothing to sign up for", Value: "none"}},
+			},
+		}}
+	}
+	// A select carries at most 25 options.
+	if len(opts) > 25 {
+		opts = opts[:25]
+	}
+	return discordgo.ActionsRow{Components: []discordgo.MessageComponent{
+		discordgo.SelectMenu{
+			CustomID:    premadeSignupID,
+			Placeholder: "Sign up, join a waitlist, or mark tentative",
+			Options:     opts,
+		},
+	}}
+}
+
+// premadeSignupOptions builds the consolidated dropdown's options: the sign-up
+// choices (per-slot in advanced mode, per-role in simple mode), a waitlist
+// option for each full role when the team's waitlist is on, and a "maybe"
+// (tentative) option for every role. Values are prefixed so handlePremadeSignup
+// knows how to act (see the premadeSignup*Prefix constants).
+func premadeSignupOptions(team *models.Team, taken map[int]bool) []discordgo.SelectMenuOption {
+	total := map[string]int{}
+	open := map[string]int{}
+	for _, p := range team.Players {
+		if p.Role == "" {
+			continue
+		}
+		total[p.Role]++
+		if !taken[p.Slot] {
+			open[p.Role]++
+		}
+	}
+	playerRoles := make([]string, 0, len(team.Players))
+	for _, p := range team.Players {
+		playerRoles = append(playerRoles, p.Role)
+	}
+	orderedRoles := team.OrderedRoleKeys(playerRoles...)
+
+	opts := make([]discordgo.SelectMenuOption, 0, 16)
+
+	if team.SimpleSignup {
+		// One sign-up option per role: claim when open, else join the waitlist
+		// (only when enabled). Both use the "role:" value so the handler decides.
+		seen := map[string]bool{}
+		for _, r := range orderedRoles {
+			if r == "" || seen[r] || total[r] == 0 {
+				continue
+			}
+			seen[r] = true
+			switch {
+			case open[r] > 0:
+				opts = append(opts, discordgo.SelectMenuOption{
+					Label: truncate(fmt.Sprintf("Sign up — %s (%d open)", team.RoleLabel(r), open[r]), 100),
+					Value: premadeSignupRolePrefix + r,
+					Emoji: &discordgo.ComponentEmoji{Name: team.RoleEmoji(r)},
+				})
+			case team.WaitlistEnabled:
+				opts = append(opts, discordgo.SelectMenuOption{
+					Label: truncate(fmt.Sprintf("%s — full, join waitlist", team.RoleLabel(r)), 100),
+					Value: premadeSignupRolePrefix + r,
+					Emoji: &discordgo.ComponentEmoji{Name: team.RoleEmoji(r)},
+				})
+			}
+		}
+	} else {
+		// Advanced: one option per open slot.
+		for _, p := range team.Players {
+			if taken[p.Slot] {
+				continue
+			}
+			opts = append(opts, discordgo.SelectMenuOption{
+				Label: truncate(slotOptionLabel(team, p), 100),
+				Value: premadeSignupSlotPrefix + strconv.Itoa(p.Slot),
+				Emoji: &discordgo.ComponentEmoji{Name: team.RoleEmoji(p.Role)},
+			})
+		}
+		// Full roles offer a waitlist option (when the waitlist is on).
+		if team.WaitlistEnabled {
+			seen := map[string]bool{}
+			for _, r := range orderedRoles {
+				if r == "" || seen[r] || total[r] == 0 || open[r] > 0 {
+					continue
+				}
+				seen[r] = true
+				opts = append(opts, discordgo.SelectMenuOption{
+					Label: truncate(fmt.Sprintf("%s — full, join waitlist", team.RoleLabel(r)), 100),
+					Value: premadeSignupWaitPrefix + r,
+					Emoji: &discordgo.ComponentEmoji{Name: team.RoleEmoji(r)},
+				})
+			}
+		}
+	}
+
+	// Tentative ("maybe") for every role on the roster, in both modes.
+	seenT := map[string]bool{}
+	for _, r := range orderedRoles {
+		if r == "" || seenT[r] || total[r] == 0 {
+			continue
+		}
+		seenT[r] = true
+		opts = append(opts, discordgo.SelectMenuOption{
+			Label: truncate(fmt.Sprintf("Maybe (tentative) — %s", team.RoleLabel(r)), 100),
+			Value: premadeSignupTentPrefix + r,
+			Emoji: &discordgo.ComponentEmoji{Name: "\U0001F914"}, // 🤔
+		})
+	}
+
+	return opts
+}
+
+// premadeDetailsRow builds the advanced-mode "get build details for a slot"
+// select listing every slot. Returns ok=false when the roster has no players.
+func premadeDetailsRow(team *models.Team) (discordgo.MessageComponent, bool) {
+	opts := make([]discordgo.SelectMenuOption, 0, len(team.Players))
+	for _, p := range team.Players {
+		opts = append(opts, discordgo.SelectMenuOption{
+			Label: truncate(slotOptionLabel(team, p), 100),
+			Value: strconv.Itoa(p.Slot),
+			Emoji: &discordgo.ComponentEmoji{Name: team.RoleEmoji(p.Role)},
+		})
+	}
+	if len(opts) == 0 {
+		return nil, false
+	}
+	if len(opts) > 25 {
+		opts = opts[:25]
+	}
+	return discordgo.ActionsRow{Components: []discordgo.MessageComponent{
+		discordgo.SelectMenu{
+			CustomID:    premadeDetailsID,
+			Placeholder: "Get build details for a slot",
+			Options:     opts,
+		},
+	}}, true
 }
 
 // premadeActionRow is the post's final button row: "Un-Sign" (any claimant
@@ -1024,126 +1378,6 @@ func premadeActionRow() discordgo.MessageComponent {
 			CustomID: premadeEditID,
 		},
 	}}
-}
-
-// premadeSimpleComponents builds the simple-signup controls: a role select
-// (whose open count is shown per role) and a "leave my slot" button. Claiming a
-// role takes the first open slot matching it, handled in handlePremadeClaim.
-func premadeSimpleComponents(team *models.Team, taken map[int]bool) []discordgo.MessageComponent {
-	openByRole := map[string]int{}
-	for _, p := range team.Players {
-		if p.Role == "" {
-			continue
-		}
-		if !taken[p.Slot] {
-			openByRole[p.Role]++
-		}
-	}
-
-	seen := map[string]bool{}
-	opts := make([]discordgo.SelectMenuOption, 0, 8)
-	addRole := func(value string) {
-		if value == "" || seen[value] {
-			return
-		}
-		seen[value] = true
-		if openByRole[value] <= 0 {
-			return
-		}
-		opts = append(opts, discordgo.SelectMenuOption{
-			Label: truncate(fmt.Sprintf("%s (%d open)", team.RoleLabel(value), openByRole[value]), 100),
-			Value: value,
-			Emoji: &discordgo.ComponentEmoji{Name: team.RoleEmoji(value)},
-		})
-	}
-	// The team's own roles first, in their defined order, then any other roles
-	// present on the roster (e.g. a player on a since-removed role).
-	playerRoles := make([]string, 0, len(team.Players))
-	for _, p := range team.Players {
-		playerRoles = append(playerRoles, p.Role)
-	}
-	for _, r := range team.OrderedRoleKeys(playerRoles...) {
-		addRole(r)
-	}
-
-	claimRow := discordgo.ActionsRow{Components: []discordgo.MessageComponent{
-		discordgo.SelectMenu{
-			CustomID:    premadeClaimID,
-			Placeholder: "Sign up for a role",
-			Options:     opts,
-		},
-	}}
-	if len(opts) == 0 {
-		claimRow = discordgo.ActionsRow{Components: []discordgo.MessageComponent{
-			discordgo.SelectMenu{
-				CustomID:    premadeClaimID,
-				Placeholder: "All slots are taken",
-				Disabled:    true,
-				Options:     []discordgo.SelectMenuOption{{Label: "All slots taken", Value: "none"}},
-			},
-		}}
-	}
-
-	rows := []discordgo.MessageComponent{claimRow}
-	if waitRow, ok := premadeWaitlistRow(team, taken); ok {
-		rows = append(rows, waitRow)
-	}
-	rows = append(rows, premadeActionRow())
-	return rows
-}
-
-// premadeWaitlistRow builds a "join a waitlist" select listing roles that are
-// currently full (no open slots). Returns ok=false when the team's waitlist is
-// off or no role is full.
-func premadeWaitlistRow(team *models.Team, taken map[int]bool) (discordgo.MessageComponent, bool) {
-	if !team.WaitlistEnabled {
-		return nil, false
-	}
-	total := map[string]int{}
-	open := map[string]int{}
-	for _, p := range team.Players {
-		if p.Role == "" {
-			continue
-		}
-		total[p.Role]++
-		if !taken[p.Slot] {
-			open[p.Role]++
-		}
-	}
-
-	seen := map[string]bool{}
-	opts := make([]discordgo.SelectMenuOption, 0, 4)
-	add := func(role string) {
-		if role == "" || seen[role] {
-			return
-		}
-		seen[role] = true
-		if total[role] == 0 || open[role] > 0 {
-			return // only offer waitlist for full roles
-		}
-		opts = append(opts, discordgo.SelectMenuOption{
-			Label: truncate(fmt.Sprintf("%s waitlist", team.RoleLabel(role)), 100),
-			Value: role,
-			Emoji: &discordgo.ComponentEmoji{Name: team.RoleEmoji(role)},
-		})
-	}
-	playerRoles := make([]string, 0, len(team.Players))
-	for _, p := range team.Players {
-		playerRoles = append(playerRoles, p.Role)
-	}
-	for _, r := range team.OrderedRoleKeys(playerRoles...) {
-		add(r)
-	}
-	if len(opts) == 0 {
-		return nil, false
-	}
-	return discordgo.ActionsRow{Components: []discordgo.MessageComponent{
-		discordgo.SelectMenu{
-			CustomID:    premadeWaitID,
-			Placeholder: "Join a waitlist (role is full)",
-			Options:     opts,
-		},
-	}}, true
 }
 
 // slotOptionLabel renders a slot's picker label, e.g. "Slot 3 · Tank · Dragonknight".

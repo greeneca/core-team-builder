@@ -55,7 +55,7 @@ var helpCommands = []helpCommand{
 	{
 		Name:    "signup",
 		Summary: "Post a scheduled run from a pre-made team.",
-		Detail:  "Posts a one-off scheduled run from one of your pre-made signup-template teams. Players claim individual slots on the post (or pick a role, in simple-signup mode), with an optional waitlist.",
+		Detail:  "Posts a one-off scheduled run from one of your pre-made signup-template teams. Players sign up from a single dropdown on the post: claim an individual slot (advanced mode) or pick a role (simple mode). If the role is full they're placed on its waitlist instead, and there's a \"tentative (maybe)\" option that adds them to a separate list. Tentative and confirmed players are pinged about 15 minutes before the run.",
 	},
 	{
 		Name:    "publish",

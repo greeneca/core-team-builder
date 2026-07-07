@@ -819,14 +819,27 @@ the `pre_made` flag on (see "Pre-made trial run" under Teams). Tables in
   it prefers the presser's **server nickname** (`i.Member.Nick`), then global
   name, then username. The same applies to post fills (`ClaimFill`) and waitlist
   joins.
-  Controls (`premadeComponents`): a **claim** select listing only open slots
-  (`premade_claim`; disabled "all taken" placeholder when full), a **details**
-  select listing all slots (`premade_details`), and a final button row
-  (`premadeActionRow`) with **Un-Sign** (`premade_leave`) and **Edit run**
-  (`premade_edit`). Deleting a run and signing up another player both live
-  behind the "Edit run" DM menu (see below). Older posts may still carry a
-  standalone **Delete run** button (`premade_delete`); its handler
-  (`handlePremadeDelete`) remains so those posts keep working.
+  Controls (`premadeComponents`): a single **consolidated signup dropdown**
+  (`premade_signup` → `handlePremadeSignup`, options built by
+  `premadeSignupOptions`) whose values are prefixed so one menu does everything —
+  `slot:<n>` claim a specific open slot (advanced mode), `role:<key>` sign up by
+  role (simple mode: claims the first open matching slot, or **auto-waitlists**
+  when the role is full and the waitlist is on, notifying the presser),
+  `wait:<key>` join a full role's waitlist, and `tent:<key>` mark **tentative
+  ("maybe")**. Advanced mode also keeps a **details** select listing all slots
+  (`premade_details`). A final button row (`premadeActionRow`) has **Un-Sign**
+  (`premade_leave`, clears slot/waitlist/tentative) and **Edit run**
+  (`premade_edit`). A user is only ever in one of signup / waitlist / tentative at
+  a time; each path clears the others (a freed slot is backfilled from its role's
+  waitlist via `promoteFreedSlot`). Deleting a run and signing up another player
+  both live behind the "Edit run" DM menu (see below). Older posts may still carry
+  the legacy `premade_claim` / `premade_wait` selects and a standalone **Delete
+  run** button (`premade_delete`); their handlers (`handlePremadeClaim`,
+  `handlePremadeWaitlist`, `handlePremadeDelete`) remain so those posts keep
+  working. Tentative players are stored in `premade_tentative`
+  (`054_premade_tentative.sql`; `JoinTentative`/`LeaveTentative`/`ListTentative`),
+  rendered in a "Tentative (maybe)" post section, and pinged ~15 min before the
+  run alongside signups (`tagRunSignups`).
 - **Edit** (`premade_edit` → `handlePremadeEdit`, `cmd/bot/premade_edit.go`):
   visible to everyone but gated by `canPressRestricted` — the run's **original
   poster** (matched by Discord ID; no linked web account needed), a member
@@ -887,23 +900,30 @@ the `pre_made` flag on (see "Pre-made trial run" under Teams). Tables in
   session and confirms (nothing is posted or changed).
 - **Simple signup** (`teams.simple_signup`, see Teams above): when on, the post
   hides class/gear (`premadeRosterLines`) and drops the **details** select; the
-  **claim** select instead lists **roles** with open counts
-  (`premadeSimpleComponents`) and claiming a role takes the first open matching
-  slot (`claimSimple` → `firstOpenSlotForRole`, retrying on `ErrSlotTaken`).
+  consolidated signup dropdown lists **roles** with open counts (`role:<key>`
+  options from `premadeSignupOptions`) and signing up for a role takes the first
+  open matching slot (`signupByRole` → `firstOpenSlotForRole`, retrying on
+  `ErrSlotTaken`), or auto-waitlists when the role is full and the waitlist is on.
   After a leave, role switch, or un-sign the remaining claimants are packed into
   each role's lowest slots so empty slots sit at the bottom
   (`compactSimpleSignups` runs after any waitlist promotion, before the post is
   re-rendered).
-- **Waitlist** (`teams.waitlist_enabled`, see Teams above): when on,
-  `premadeWaitlistRow` adds a **join waitlist** select (`premade_wait`) listing
-  roles that are currently full; the post shows a per-role "__Waitlist__" block
-  (`premadeWaitlistLines`). `handlePremadeWaitlist` queues the user
-  (`JoinWaitlist`; refuses if they already hold a slot). When a slot frees up —
-  on **leave** (`handlePremadeLeave`) or when a user **switches** to a different
-  slot (`handlePremadeClaim`/`claimSimple`) — the freed slot's role queue is
-  auto-promoted via `promoteFreedSlot`→`PromoteToSlot` and the promotee is DM'd
-  (`dmPromoted`). The 15-min thread
-  still tags **claimed** players only.
+- **Waitlist** (`teams.waitlist_enabled`, see Teams above): when on, the
+  consolidated signup dropdown offers a `wait:<key>` option for each **full**
+  role (and a `role:<key>` signup for a full role auto-waitlists), so joining
+  queues the user (`signupWaitlist` → `JoinWaitlist`; clears any prior
+  slot/tentative). The post shows a per-role "__Waitlist__" block
+  (`premadeWaitlistLines`). When a slot frees up — on **leave**
+  (`handlePremadeLeave`) or when a user **switches** slot (`handlePremadeSignup`)
+  — the freed slot's role queue is auto-promoted via
+  `promoteFreedSlot`→`PromoteToSlot` and the promotee is DM'd (`dmPromoted`). The
+  15-min thread tags **claimed** and **tentative** players.
+- **Tentative** (`premade_tentative`, `054_premade_tentative.sql`): the
+  consolidated dropdown's `tent:<key>` option marks the presser as a "maybe" for a
+  role (`signupTentative` → `JoinTentative`, clearing any slot/waitlist). They're
+  listed in a "Tentative (maybe)" post section and pinged ~15 min before the run
+  alongside signups. **Un-Sign** and any real signup/waitlist action clear the
+  tentative entry (`LeaveTentative`).
 - **Claims** (`PremadeStore.ClaimSlot`): per-slot, **one slot per user** —
   claiming releases the user's prior claim in the same transaction; the
   `(run_id, slot)` unique index locks a slot (a clash returns `ErrSlotTaken` →
