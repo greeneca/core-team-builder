@@ -46,10 +46,12 @@ func (c *handleNameCache) set(key, name string) {
 
 // resolveRosterNames maps each roster slot to the player's current Discord
 // display name, resolved from their stored handle, for the post's roster.
-// Mention/ID handles are looked up live (cached) via the guild member / user;
-// plain "@username" text handles are shown as the username (no live identity is
-// available without an ID). Slots with no handle are omitted so the roster falls
-// back to its slot name / fill display.
+// ID/mention handles are resolved by user id; plain "@username" text handles are
+// resolved by searching the guild for that member (so their server nickname is
+// shown). Both prefer the server nick → global name → username, are cached, and
+// fall back to the raw handle text when the guild member can't be found. Slots
+// with no handle are omitted so the roster falls back to its slot name / fill
+// display.
 func (b *bot) resolveRosterNames(s *discordgo.Session, guildID string, team *models.Team) map[int]string {
 	names := map[int]string{}
 	var (
@@ -61,26 +63,75 @@ func (b *bot) resolveRosterNames(s *discordgo.Session, guildID string, team *mod
 		if h == "" {
 			continue
 		}
-		id := discordIDFromHandle(h)
-		if id == "" {
-			// A plain text handle is already the username; drop the leading @.
-			names[p.Slot] = strings.TrimPrefix(h, "@")
-			continue
-		}
 		wg.Add(1)
-		go func(slot int, id string) {
+		go func(slot int, handle string) {
 			defer wg.Done()
-			name := b.resolveMemberName(s, guildID, id)
+			name := b.resolveHandleName(s, guildID, handle)
 			if name == "" {
 				return
 			}
 			mu.Lock()
 			names[slot] = name
 			mu.Unlock()
-		}(p.Slot, id)
+		}(p.Slot, h)
 	}
 	wg.Wait()
 	return names
+}
+
+// resolveHandleName resolves a stored roster handle to a Discord display name,
+// preferring the server nickname. An ID/mention handle is looked up by user id;
+// a plain "@username" text handle is looked up by searching the guild for a
+// member whose username or global name matches. Returns the raw username (minus
+// a leading "@") as a fallback for a text handle that can't be matched, or ""
+// for an unresolvable id handle (so the caller shows the raw handle).
+func (b *bot) resolveHandleName(s *discordgo.Session, guildID, handle string) string {
+	if id := discordIDFromHandle(handle); id != "" {
+		return b.resolveMemberName(s, guildID, id)
+	}
+	username := strings.TrimPrefix(strings.TrimSpace(handle), "@")
+	if username == "" {
+		return ""
+	}
+	if name := b.resolveUsernameName(s, guildID, username); name != "" {
+		return name
+	}
+	// No matching guild member — show the username as before.
+	return username
+}
+
+// resolveUsernameName finds a guild member by username (or global name) and
+// returns their preferred display name (server nick → global name → username).
+// Discord's member search is prefix-based, so the full username as the query
+// returns the exact member among the results; we confirm with an exact
+// (case-insensitive) match. Results are cached under a username key; a failed or
+// unmatched search returns "" (and isn't cached, so it retries next render).
+func (b *bot) resolveUsernameName(s *discordgo.Session, guildID, username string) string {
+	if guildID == "" {
+		return ""
+	}
+	key := guildID + ":@" + strings.ToLower(username)
+	if name, ok := b.nameCache.get(key); ok {
+		return name
+	}
+	members, err := s.GuildMembersSearch(guildID, username, 10)
+	if err != nil {
+		log.Printf("names: guild member search (guild %s, query %q): %v", guildID, username, err)
+		return ""
+	}
+	for _, m := range members {
+		if m == nil || m.User == nil {
+			continue
+		}
+		if strings.EqualFold(m.User.Username, username) ||
+			(m.User.GlobalName != "" && strings.EqualFold(m.User.GlobalName, username)) {
+			if name := memberDisplayName(m); name != "" {
+				b.nameCache.set(key, name)
+				return name
+			}
+		}
+	}
+	return ""
 }
 
 // resolveMemberName returns a Discord user's display name (guild nick, else
