@@ -736,14 +736,24 @@ column; the `User` JSON model hides it (`json:"-"`).
   unique per message via a partial index). Backs the post's signup dropdown
   (`DiscordStore.ClaimFill`/`LeaveFill`/`ListFills`); like RSVPs it's keyed by
   message ID so re-posting starts fresh.
-- **Posted overviews (pre-run ping)**: `discord_posts` (`049_discord_posts.sql`)
-  tracks each `/coreteam post` overview by `message_id` with its `channel_id`,
-  the discussion `thread_id` opened off it, the computed `run_at` (next-run time
-  from the team schedule; `NULL` when there's no concrete schedule, so no ping),
-  and `pinged_at`. The bot opens the thread on post and the scheduler pings
-  attendees in it ~15 min before `run_at`
-  (`DiscordStore.RecordPost`/`SetPostThread`/`DuePostPings`/`MarkPostPinged`).
-  Keyed by message ID so re-posting starts fresh.
+- **Posted overviews (pre-run ping + RSVP reminder)**: `discord_posts`
+  (`049_discord_posts.sql`, `053_discord_posts_rsvp_reminder.sql`) tracks each
+  `/coreteam post` overview by `message_id` with its `channel_id`, the discussion
+  `thread_id` opened off it, the computed `run_at` (next-run time from the team
+  schedule; `NULL` when there's no concrete schedule, so neither fires),
+  `pinged_at`, and `reminded_at`. The bot opens the thread on post; the scheduler
+  then does two things off `run_at`:
+  - **~48 h before** (`DueReminders`/`MarkPostReminded` →
+    `remindPostNonResponders`): nudges the **assigned roster members who haven't
+    RSVP'd** yet, mentioning everyone whose stored handle resolves to a Discord
+    user (via `resolveHandleID`, which searches the guild for `@username`
+    handles) and naming anyone unresolvable. Lands in the thread if present, else
+    the channel. Fires once (catch-up safe; also fires immediately when a post is
+    created inside the 48 h window), and is marked done even on failure.
+  - **~15 min before** (`DuePostPings`/`MarkPostPinged`): pings everyone who
+    RSVP'd `yes` or signed up to fill, in the thread.
+  (`DiscordStore.RecordPost`/`SetPostThread`.) Keyed by message ID so re-posting
+  starts fresh.
 - **Label data (codegen)**: the bot formats posts using
   `backend/internal/discordfmt` (`BuildPost` for the overview embed + `PlayerDetail`
   for the build-details DM, plus the GROUP-source half of `computePenCoverage` /
@@ -925,11 +935,15 @@ the `pre_made` flag on (see "Pre-made trial run" under Teams). Tables in
     ping for ordinary (non-premade) overviews. On post, `startPostThread` opens a
     discussion thread off the message (no explicit auto-archive — Discord's
     channel default applies) and records the post + its `run_at` via `RecordPost`
-    /`SetPostThread`. **15 min before** `run_at` (`DuePostPings`), the loop pings
+    /`SetPostThread`. **48 h before** `run_at` (`DueReminders`), the loop reminds
+    assigned roster members who haven't RSVP'd (`remindPostNonResponders`, then
+    `MarkPostReminded`); **15 min before** `run_at` (`DuePostPings`), it pings
     everyone who RSVP'd `yes` or signed up to fill, in the thread, then
-    `MarkPostPinged` (fires once, catch-up safe; skipped once the run has
-    started). Posts with no concrete schedule have a NULL `run_at` and are never
-    pinged. Unlike premade runs, recurring posts/threads are **not** auto-deleted. Thread deletion (both the 2 h
+    `MarkPostPinged`. Both fire once and are catch-up safe (the reminder also
+    fires right away when a post is created inside the 48 h window; both are
+    skipped once the run has started). Posts with no concrete schedule have a NULL
+    `run_at` and get neither. Unlike premade runs, recurring posts/threads are
+    **not** auto-deleted. Thread deletion (both the 2 h
   auto-cleanup and the manual **Delete run** flow) uses `threadCleanupID`: a
   thread is started *off the post*, so its channel id equals the post's message
   id — when `thread_id` wasn't recorded, cleanup falls back to the message id

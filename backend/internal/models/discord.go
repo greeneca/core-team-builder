@@ -296,15 +296,18 @@ func (s *DiscordStore) ListRSVPs(ctx context.Context, messageID string) ([]RSVP,
 }
 
 // Post is a tracked /coreteam post overview message, used by the scheduler to
-// ping attendees in its discussion thread ~15 minutes before the run. RunAt is
-// the post's next-run time (nil when the team has no concrete schedule, so no
-// ping fires); PingedAt is set once the pre-run ping has been sent.
+// ping attendees in its discussion thread ~15 minutes before the run and to
+// remind assigned roster members who haven't RSVP'd ~48 hours before it. RunAt
+// is the post's next-run time (nil when the team has no concrete schedule, so
+// neither fires); PingedAt is set once the pre-run ping has been sent, and
+// RemindedAt once the RSVP reminder has been sent.
 type Post struct {
-	MessageID string
-	ChannelID string
-	ThreadID  string
-	RunAt     *time.Time
-	PingedAt  *time.Time
+	MessageID  string
+	ChannelID  string
+	ThreadID   string
+	RunAt      *time.Time
+	PingedAt   *time.Time
+	RemindedAt *time.Time
 }
 
 // RecordPost tracks a posted overview message so the scheduler can ping its
@@ -362,6 +365,44 @@ func (s *DiscordStore) DuePostPings(ctx context.Context, now time.Time) ([]Post,
 // fires only once.
 func (s *DiscordStore) MarkPostPinged(ctx context.Context, messageID string) error {
 	_, err := s.pool.Exec(ctx, `UPDATE discord_posts SET pinged_at = now() WHERE message_id = $1`, messageID)
+	return err
+}
+
+// DueReminders returns tracked posts whose RSVP reminder is due now (within 48
+// hours before the run, up to the start time) but hasn't been sent. Catch-up
+// safe: a post created inside the 48-hour window, or missed while the bot was
+// offline, is returned as soon as it polls again, as long as the run hasn't
+// started yet. Unlike DuePostPings it doesn't require a thread — the reminder
+// falls back to the post's channel when there's no discussion thread.
+func (s *DiscordStore) DueReminders(ctx context.Context, now time.Time) ([]Post, error) {
+	const q = `
+		SELECT message_id, channel_id, thread_id, run_at, pinged_at, reminded_at
+		FROM discord_posts
+		WHERE reminded_at IS NULL
+		  AND run_at IS NOT NULL
+		  AND $1 >= run_at - INTERVAL '48 hours'
+		  AND $1 < run_at
+		ORDER BY run_at`
+	rows, err := s.pool.Query(ctx, q, now)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Post
+	for rows.Next() {
+		var p Post
+		if err := rows.Scan(&p.MessageID, &p.ChannelID, &p.ThreadID, &p.RunAt, &p.PingedAt, &p.RemindedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// MarkPostReminded records that a tracked post's RSVP reminder has been sent, so
+// it fires only once.
+func (s *DiscordStore) MarkPostReminded(ctx context.Context, messageID string) error {
+	_, err := s.pool.Exec(ctx, `UPDATE discord_posts SET reminded_at = now() WHERE message_id = $1`, messageID)
 	return err
 }
 

@@ -102,10 +102,8 @@ func (b *bot) resolveHandleName(s *discordgo.Session, guildID, handle string) st
 
 // resolveUsernameName finds a guild member by username (or global name) and
 // returns their preferred display name (server nick → global name → username).
-// Discord's member search is prefix-based, so the full username as the query
-// returns the exact member among the results; we confirm with an exact
-// (case-insensitive) match. Results are cached under a username key; a failed or
-// unmatched search returns "" (and isn't cached, so it retries next render).
+// Results are cached under a username key; a failed or unmatched search returns
+// "" (and isn't cached, so it retries next render).
 func (b *bot) resolveUsernameName(s *discordgo.Session, guildID, username string) string {
 	if guildID == "" {
 		return ""
@@ -114,10 +112,46 @@ func (b *bot) resolveUsernameName(s *discordgo.Session, guildID, username string
 	if name, ok := b.nameCache.get(key); ok {
 		return name
 	}
+	m := b.searchGuildMemberByUsername(s, guildID, username)
+	if m == nil {
+		return ""
+	}
+	name := memberDisplayName(m)
+	if name != "" {
+		b.nameCache.set(key, name)
+	}
+	return name
+}
+
+// resolveHandleID resolves a stored roster handle to a Discord user ID: directly
+// for ID/mention handles, or by searching the guild for a member whose username
+// or global name matches an "@username" text handle. Returns "" when no ID can
+// be determined (e.g. an unknown username), so callers can fall back to a plain
+// display name instead of a (non-notifying) mention.
+func (b *bot) resolveHandleID(s *discordgo.Session, guildID, handle string) string {
+	if id := discordIDFromHandle(handle); id != "" {
+		return id
+	}
+	username := strings.TrimPrefix(strings.TrimSpace(handle), "@")
+	if m := b.searchGuildMemberByUsername(s, guildID, username); m != nil && m.User != nil {
+		return m.User.ID
+	}
+	return ""
+}
+
+// searchGuildMemberByUsername returns the guild member whose username or global
+// name exactly (case-insensitively) matches, or nil. Discord's member search is
+// prefix-based, so the full username as the query returns the exact member among
+// the results; we confirm with an exact match. Returns nil (and logs) on search
+// error or when guildID/username is empty.
+func (b *bot) searchGuildMemberByUsername(s *discordgo.Session, guildID, username string) *discordgo.Member {
+	if guildID == "" || username == "" {
+		return nil
+	}
 	members, err := s.GuildMembersSearch(guildID, username, 10)
 	if err != nil {
 		log.Printf("names: guild member search (guild %s, query %q): %v", guildID, username, err)
-		return ""
+		return nil
 	}
 	for _, m := range members {
 		if m == nil || m.User == nil {
@@ -125,13 +159,10 @@ func (b *bot) resolveUsernameName(s *discordgo.Session, guildID, username string
 		}
 		if strings.EqualFold(m.User.Username, username) ||
 			(m.User.GlobalName != "" && strings.EqualFold(m.User.GlobalName, username)) {
-			if name := memberDisplayName(m); name != "" {
-				b.nameCache.set(key, name)
-				return name
-			}
+			return m
 		}
 	}
-	return ""
+	return nil
 }
 
 // resolveMemberName returns a Discord user's display name (guild nick, else

@@ -86,6 +86,18 @@ func (b *bot) schedulerTick(ctx context.Context, session *discordgo.Session) {
 	for _, p := range posts {
 		b.pingPostAttendees(ctx, session, p)
 	}
+
+	// RSVP reminders for recurring /coreteam post overviews (48 h before start):
+	// nudge assigned roster members who still haven't responded.
+	rc, rcancel := context.WithTimeout(ctx, 10*time.Second)
+	reminders, err := b.discord.DueReminders(rc, now)
+	rcancel()
+	if err != nil {
+		log.Printf("scheduler: due post reminders: %v", err)
+	}
+	for _, p := range reminders {
+		b.remindPostNonResponders(ctx, session, p)
+	}
 }
 
 // pingPostAttendees posts the pre-run heads-up in a /coreteam post's discussion
@@ -138,6 +150,100 @@ func (b *bot) pingPostAttendees(ctx context.Context, session *discordgo.Session,
 		log.Printf("scheduler: post ping mark (%s): %v", p.MessageID, err)
 	}
 	cancel()
+}
+
+// remindPostNonResponders nudges the assigned roster members on a /coreteam post
+// who haven't RSVP'd yet, ~48 hours before the run, then records the reminder so
+// it fires exactly once. It mentions everyone whose stored handle resolves to a
+// Discord user (so they're pinged) and names anyone else so it's still clear
+// who's outstanding. The reminder lands in the post's discussion thread when
+// there is one, else the post's channel. Best effort: it's marked done even on
+// failure (so it can't retry-storm), and skipped — but still marked — when the
+// roster can't be determined or everyone has already responded.
+func (b *bot) remindPostNonResponders(ctx context.Context, session *discordgo.Session, p models.Post) {
+	// Always mark reminded on the way out: a reminder is a one-shot nudge, so a
+	// transient failure shouldn't cause it to fire repeatedly on later ticks.
+	defer func() {
+		c, cancel := context.WithTimeout(ctx, 10*time.Second)
+		if err := b.discord.MarkPostReminded(c, p.MessageID); err != nil {
+			log.Printf("scheduler: post reminder mark (%s): %v", p.MessageID, err)
+		}
+		cancel()
+	}()
+
+	c, cancel := context.WithTimeout(ctx, 10*time.Second)
+	teamID, err := b.discord.GetChannelTeam(c, p.ChannelID)
+	cancel()
+	if err != nil {
+		// Channel unbound or rebound since posting — we can't know the roster.
+		log.Printf("scheduler: post reminder team (%s): %v", p.MessageID, err)
+		return
+	}
+
+	c, cancel = context.WithTimeout(ctx, 10*time.Second)
+	team, _, _, _, err := b.loadTeamData(c, teamID)
+	cancel()
+	if err != nil {
+		log.Printf("scheduler: post reminder load team (%s): %v", p.MessageID, err)
+		return
+	}
+
+	c, cancel = context.WithTimeout(ctx, 10*time.Second)
+	rsvps, err := b.discord.ListRSVPs(c, p.MessageID)
+	cancel()
+	if err != nil {
+		log.Printf("scheduler: post reminder list rsvps (%s): %v", p.MessageID, err)
+	}
+	responded := rsvpMarks(team, rsvps)
+
+	guildID := postGuildID(session, p.ChannelID)
+	var mentions []string
+	for _, pl := range team.Players {
+		handle := strings.TrimSpace(pl.DiscordHandle)
+		if handle == "" {
+			continue // open slot: nobody assigned to remind
+		}
+		if responded[pl.Slot] != "" {
+			continue // already RSVP'd (coming or not coming)
+		}
+		if id := b.resolveHandleID(session, guildID, handle); id != "" {
+			mentions = append(mentions, "<@"+id+">")
+			continue
+		}
+		// No resolvable Discord user (e.g. an unknown "@username"): name them so
+		// it's still clear who we're waiting on, even without a live ping.
+		name := strings.TrimSpace(pl.Name)
+		if name == "" {
+			name = strings.TrimPrefix(handle, "@")
+		}
+		mentions = append(mentions, name)
+	}
+	if len(mentions) == 0 {
+		return // everyone assigned has responded (or the roster is all open)
+	}
+
+	target := p.ThreadID
+	if target == "" {
+		target = p.ChannelID
+	}
+	content := "📋 RSVP reminder — this run is about 48 hours away. Please RSVP if you haven't yet: " + strings.Join(mentions, " ")
+	if url := messageURL(guildID, p.ChannelID, p.MessageID); url != "" {
+		content += "\n" + url
+	}
+	if _, err := session.ChannelMessageSend(target, content); err != nil {
+		log.Printf("scheduler: post reminder send (%s): %v", p.MessageID, err)
+	}
+}
+
+// postGuildID returns the guild a tracked post's channel belongs to (checking
+// the session's state cache first, then REST), or "" when it can't be resolved.
+// Needed to mention "@username" roster handles, which requires a guild lookup.
+func postGuildID(session *discordgo.Session, channelID string) string {
+	ch, err := session.Channel(channelID)
+	if err != nil || ch == nil {
+		return ""
+	}
+	return ch.GuildID
 }
 
 // withTimeout runs a DB query with a bounded context derived from the loop ctx,
