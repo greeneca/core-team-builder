@@ -593,9 +593,12 @@ column; the `User` JSON model hides it (`json:"-"`).
     filler took; an open slot, or an assigned player who marked "not coming" with
     no filler yet, still needs a signup). Each
     player's name is the **resolved Discord display name** for their handle:
-    mention/ID handles are looked up live (guild nick → global name → username,
-    cached in `handleNameCache`, resolved by `resolveRosterNames`), and plain
-    `@username` text handles are shown as the username (minus the `@`).
+    ID/mention handles — `<@id>`, `<@!id>`, a bare numeric id, or an `@id` (an
+    `@` before a numeric id) — are looked up live (guild nick → global name →
+    username, cached in `handleNameCache`, resolved by `resolveRosterNames` /
+    `discordIDFromHandle`), and plain `@username` text handles are shown as the
+    username (minus the `@`). A failed live lookup is logged and falls back to the
+    raw handle.
     a **Fill list** section, and groupings. Carries a button row
     (**✅ Coming**, **❌ Not coming** (RSVP), **Get My Build Details**) plus a
     **signup dropdown** (`post_fill_select`) whenever the roster has any fillable
@@ -701,9 +704,10 @@ column; the `User` JSON model hides it (`json:"-"`).
     aren't known so the message still reads cleanly.
 - **"Posted by" footer**: both the `/coreteam post` overview and the premade
   `/coreteam signup` run post carry a Discord **embed footer** ("Posted by
-  <name>") noting who posted. The overview uses the invoking user's display name
-  (preserved across RSVP/fill updates by carrying the existing embed footer
-  forward in `renderPostUpdate`); the run post resolves it from the run's
+  <name>") noting who posted. The overview uses the poster's server nickname when
+  known (`interactionDisplayName` → `i.Member.Nick`, else global name/username),
+  preserved across RSVP/fill updates by carrying the existing embed footer
+  forward in `renderPostUpdate`; the run post resolves it from the run's
   `created_by` via `DiscordStore.GetLink` (`premadePoster`), so it survives the
   DB-driven re-renders too.
 - **Account linking**: `users.discord_user_id` (unique) / `discord_username` link

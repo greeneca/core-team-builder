@@ -652,7 +652,9 @@ func (b *bot) handlePost(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	// post has no RSVPs yet, so no status marks are shown.
 	footer := ""
 	if user := invokingUser(i); user != nil {
-		footer = postedByPrefix + displayName(user)
+		// Prefer the poster's server nickname (interactionDisplayName reads
+		// i.Member.Nick) so the "Posted by" footer matches how they appear here.
+		footer = postedByPrefix + interactionDisplayName(i)
 	}
 	names := b.resolveRosterNames(s, i.GuildID, team)
 	embed := buildPostEmbed(team, primary, gr, nil, nil, names, footer)
@@ -1656,8 +1658,8 @@ func matchPlayer(team *models.Team, user *discordgo.User) (models.Player, bool) 
 		if h == "" {
 			continue
 		}
-		// Mention or raw ID forms.
-		if h == "<@"+id+">" || h == "<@!"+id+">" || h == id {
+		// Mention or raw ID forms (including an "@"-prefixed id like @<id>).
+		if h == "<@"+id+">" || h == "<@!"+id+">" || h == id || h == "@"+id {
 			return p, true
 		}
 		hl := strings.ToLower(strings.TrimPrefix(h, "@"))

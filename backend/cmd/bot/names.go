@@ -1,6 +1,7 @@
 package main
 
 import (
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -95,11 +96,15 @@ func (b *bot) resolveMemberName(s *discordgo.Session, guildID, id string) string
 	if guildID != "" {
 		if m, err := s.GuildMember(guildID, id); err == nil {
 			name = memberDisplayName(m)
+		} else {
+			log.Printf("names: guild member lookup (guild %s, user %s): %v", guildID, id, err)
 		}
 	}
 	if name == "" {
 		if u, err := s.User(id); err == nil {
 			name = displayName(u)
+		} else {
+			log.Printf("names: user lookup (user %s): %v", id, err)
 		}
 	}
 	if name != "" {
@@ -109,8 +114,9 @@ func (b *bot) resolveMemberName(s *discordgo.Session, guildID, id string) string
 }
 
 // discordIDFromHandle extracts a raw user ID from a stored handle when it is a
-// mention (<@id> / <@!id>) or a bare numeric ID; returns "" for "@username"
-// text handles (which carry no resolvable ID).
+// mention (<@id> / <@!id>), a bare numeric ID, or an "@"-prefixed numeric ID
+// (@id, how some handles get pasted); returns "" for "@username" text handles
+// (which carry no resolvable ID).
 func discordIDFromHandle(handle string) string {
 	h := strings.TrimSpace(handle)
 	if h == "" {
@@ -120,6 +126,10 @@ func discordIDFromHandle(handle string) string {
 		h = strings.TrimSuffix(strings.TrimPrefix(h, "<@"), ">")
 		h = strings.TrimPrefix(h, "!")
 	}
+	// A leading "@" on an otherwise-numeric handle (e.g. "@123456789012345678")
+	// is a user ID, not a username — strip it so it resolves to a display name
+	// rather than being shown verbatim as the id.
+	h = strings.TrimPrefix(h, "@")
 	if h == "" || !isAllDigits(h) {
 		return ""
 	}
