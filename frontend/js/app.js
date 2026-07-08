@@ -2420,7 +2420,7 @@
         <div class="player-body collapsible-body">
           ${copyControl}
           <div class="player-fields">
-            <div class="form-group">
+            <div class="form-group" data-name-field>
               <label>Name</label>
               <input class="input" data-field="name" maxlength="100" />
             </div>
@@ -2706,10 +2706,16 @@
     const target = slot.querySelector("[data-slot-summary]");
     if (!target) return;
     const num = slot.dataset.slot;
-    const nameEl = slot.querySelector('[data-field="name"]');
     const roleEl = slot.querySelector('[data-field="role"]');
-    const name = nameEl && nameEl.value.trim() ? nameEl.value.trim() : `Slot ${num}`;
     const role = roleEl ? labelFor(ROLES, roleEl.value) : "";
+    // Simple-signup templates show the role via the inline picker on the same
+    // row, so the title only needs the slot label (no name field to summarize).
+    if (preMade() && simpleSignup()) {
+      target.textContent = `Slot ${num}`;
+      return;
+    }
+    const nameEl = slot.querySelector('[data-field="name"]');
+    const name = nameEl && nameEl.value.trim() ? nameEl.value.trim() : `Slot ${num}`;
     target.textContent = role ? `${num}. ${name} — ${role}` : `${num}. ${name}`;
   }
 
@@ -3114,13 +3120,17 @@
     return !!currentTeam && currentTeam.simple_signup === true;
   }
 
-  // Simple-signup pre-made runs only collect names + roles, so the build-analysis
-  // UI is irrelevant: hide the Group Stats section (and its jump-nav link) plus
-  // each player's class/race, skill lines/masteries, and per-encounter loadout.
+  // Simple-signup pre-made runs only collect roles, so the build-analysis UI is
+  // irrelevant: hide the Group Stats section (and its jump-nav link) plus each
+  // player's class/race, skill lines/masteries, and per-encounter loadout. Each
+  // slot is reduced to just its title header and role picker (on its role-colored
+  // background), so the name field and copy/clear actions are hidden too.
   // Elements stay in the DOM so their values survive switching back to specific
   // signup. Only applies in pre-made mode, where the simple-signup toggle lives.
   function applySimpleSignupMode() {
     const on = preMade() && simpleSignup();
+    // Drives the compact single-row slot layout (title + role picker) via CSS.
+    el("roster").classList.toggle("roster--simple", on);
     // The roster-roles editor stays visible for simple signups too: players pick
     // one of the team's roster roles to be auto-placed against, so the role set
     // needs to be editable in this mode as well.
@@ -3128,11 +3138,21 @@
     if (groupStats) groupStats.classList.toggle("is-hidden", on);
     const buffsNav = document.querySelector('.player-nav-link[data-nav="buffs"]');
     if (buffsNav) buffsNav.classList.toggle("is-hidden", on);
+    // Simple-mode slots are single rows with nothing to collapse, so the bulk
+    // collapse/expand controls are pointless there.
+    const collapseAll = el("players-collapse-all-btn");
+    if (collapseAll) collapseAll.classList.toggle("is-hidden", on);
+    const expandAll = el("players-expand-all-btn");
+    if (expandAll) expandAll.classList.toggle("is-hidden", on);
     document
       .querySelectorAll(
-        "#roster .player-build, #roster [data-loadout], #roster [data-class-field], #roster [data-race-field]"
+        "#roster .player-build, #roster [data-loadout], #roster [data-class-field], #roster [data-race-field], #roster [data-name-field], #roster .slot-actions"
       )
       .forEach((node) => node.classList.toggle("is-hidden", on));
+    // The collapsed-header summary drops the (now-hidden) name in simple mode.
+    document
+      .querySelectorAll("#roster .player-slot")
+      .forEach((slot) => updateSlotSummary(slot));
   }
 
   function waitlistEnabled() {

@@ -918,6 +918,41 @@ a.brand--home:hover {
   min-width: 0;
 }
 
+/* Simple-signup templates: each slot is reduced to just its title header and
+   role picker, so lay them out on a single row against the role-colored
+   background. Collapsing is a no-op here (there's nothing else to hide), so the
+   chevron is hidden and the body stays visible even when collapsed. */
+.roster--simple .player-slot {
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.roster--simple .player-head {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.roster--simple .player-head .collapse-toggle {
+  display: none;
+}
+.roster--simple .player-body {
+  flex: 0 0 auto;
+  width: auto;
+}
+.roster--simple .player-slot.is-collapsed > .player-body {
+  display: flex;
+}
+.roster--simple .player-fields {
+  display: block;
+  width: auto;
+}
+.roster--simple .player-fields .form-group label {
+  display: none;
+}
+.roster--simple .player-fields .form-group .input {
+  width: auto;
+  min-width: 180px;
+}
+
 /* Conditional build controls (subclass toggle + skill-line/mastery selects) */
 .player-build {
   display: flex;
