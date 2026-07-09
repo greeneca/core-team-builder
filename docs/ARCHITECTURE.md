@@ -516,6 +516,9 @@ after a restart:
 | created_by        | bigint      | FK → `users(id)`, set null on delete        |
 | thread_started_at | timestamptz | NULL until the thread is created            |
 | cleaned_up_at     | timestamptz | NULL until the post/thread are deleted      |
+| cleanup_attempts  | integer     | failed cleanup attempts (backoff); `055_premade_cleanup_backoff.sql` |
+| cleanup_next_at   | timestamptz | earliest next cleanup retry (NULL = now); `055` |
+| cleanup_failed_at | timestamptz | set when cleanup retries are exhausted (stops retrying); `055` |
 | created_at        | timestamptz | default `now()`                             |
 | updated_at        | timestamptz | auto-updated via trigger                    |
 

@@ -21,6 +21,32 @@ const schedulerInterval = 60 * time.Second
 // (minutes). 1440 = 24h, comfortably past the 2-hour cleanup.
 const premadeThreadAutoArchive = 1440
 
+// Cleanup retry policy. When a run's thread can't be deleted (almost always a
+// missing Manage Threads permission), the scheduler retries with exponential
+// backoff — cleanupBaseBackoff doubled per prior failure, capped at
+// cleanupMaxBackoff — rather than hammering Discord every tick. After
+// cleanupMaxAttempts failures it gives up and marks the run cleanup-failed so it
+// stops being revisited (instead of retrying forever).
+const (
+	cleanupMaxAttempts = 10
+	cleanupBaseBackoff = 5 * time.Minute
+	cleanupMaxBackoff  = 6 * time.Hour
+)
+
+// cleanupBackoff returns the delay before the given attempt (1-based: attempt 1
+// is the first retry after the initial failure), using exponential growth capped
+// at cleanupMaxBackoff. The bit-shift guard also caps on overflow.
+func cleanupBackoff(attempt int) time.Duration {
+	if attempt < 1 {
+		attempt = 1
+	}
+	backoff := cleanupBaseBackoff << (attempt - 1)
+	if backoff <= 0 || backoff > cleanupMaxBackoff {
+		return cleanupMaxBackoff
+	}
+	return backoff
+}
+
 // runScheduler runs the pre-made-run background loop until ctx is cancelled. It
 // is the bot's only time-based worker: it pings everyone who signed up in the
 // run's discussion thread ~15 minutes before the scheduled start, and deletes
@@ -57,10 +83,12 @@ func (b *bot) schedulerTick(ctx context.Context, session *discordgo.Session) {
 	for _, run := range cleanups {
 		// Delete the post + thread, then mark the run done. If the thread could
 		// not be removed (almost always a missing Manage Threads permission), we
-		// deliberately leave cleaned_up_at NULL so this run stays "due" and a
-		// later tick retries — that way cleanup self-heals the moment an admin
-		// grants the permission, instead of orphaning the thread forever.
+		// leave cleaned_up_at NULL and schedule a backed-off retry so cleanup
+		// self-heals the moment an admin grants the permission — but only up to a
+		// cap, after which the run is marked cleanup-failed and left alone rather
+		// than retried forever.
 		if err := b.cleanupRun(ctx, session, run); err != nil {
+			b.recordCleanupFailure(ctx, run)
 			continue
 		}
 		b.markRunCleanedUp(ctx, run.ID)
@@ -416,4 +444,25 @@ func (b *bot) markRunCleanedUp(ctx context.Context, runID int64) {
 		log.Printf("scheduler: mark cleaned up (run %d): %v", runID, err)
 	}
 	cancel()
+}
+
+// recordCleanupFailure handles a failed cleanup attempt: it schedules the next
+// retry with exponential backoff, or — once the attempt cap is reached — marks
+// the run cleanup-failed so a permanently un-deletable thread (e.g. the bot is
+// never granted Manage Threads) stops being retried on every tick.
+func (b *bot) recordCleanupFailure(ctx context.Context, run models.PremadeRun) {
+	attempts := run.CleanupAttempts + 1
+	c, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if attempts >= cleanupMaxAttempts {
+		log.Printf("scheduler: giving up on cleanup (run %d) after %d attempts", run.ID, attempts)
+		if err := b.premade.MarkCleanupFailed(c, run.ID, attempts); err != nil {
+			log.Printf("scheduler: mark cleanup failed (run %d): %v", run.ID, err)
+		}
+		return
+	}
+	nextAt := time.Now().UTC().Add(cleanupBackoff(attempts))
+	if err := b.premade.RecordCleanupFailure(c, run.ID, attempts, nextAt); err != nil {
+		log.Printf("scheduler: record cleanup failure (run %d): %v", run.ID, err)
+	}
 }

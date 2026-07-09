@@ -36,6 +36,13 @@ type PremadeRun struct {
 	CreatedBy       *int64
 	ThreadStartedAt *time.Time
 	CleanedUpAt     *time.Time
+	// Cleanup retry bookkeeping: CleanupAttempts counts failed cleanup attempts
+	// (drives exponential backoff), CleanupNextAt gates when the next retry may
+	// run, and CleanupFailedAt is set once retries are exhausted so the run is no
+	// longer treated as due.
+	CleanupAttempts int
+	CleanupNextAt   *time.Time
+	CleanupFailedAt *time.Time
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 }
@@ -79,13 +86,14 @@ func NewPremadeStore(pool *pgxpool.Pool) *PremadeStore {
 	return &PremadeStore{pool: pool}
 }
 
-const premadeRunCols = `id, team_id, guild_id, channel_id, message_id, thread_id, title, post_override, scheduled_at, created_by, thread_started_at, cleaned_up_at, created_at, updated_at`
+const premadeRunCols = `id, team_id, guild_id, channel_id, message_id, thread_id, title, post_override, scheduled_at, created_by, thread_started_at, cleaned_up_at, cleanup_attempts, cleanup_next_at, cleanup_failed_at, created_at, updated_at`
 
 func scanRun(row pgx.Row) (*PremadeRun, error) {
 	r := &PremadeRun{}
 	err := row.Scan(
 		&r.ID, &r.TeamID, &r.GuildID, &r.ChannelID, &r.MessageID, &r.ThreadID,
 		&r.Title, &r.PostOverride, &r.ScheduledAt, &r.CreatedBy, &r.ThreadStartedAt, &r.CleanedUpAt,
+		&r.CleanupAttempts, &r.CleanupNextAt, &r.CleanupFailedAt,
 		&r.CreatedAt, &r.UpdatedAt,
 	)
 	if err != nil {
@@ -374,13 +382,18 @@ func (s *PremadeStore) DueThreadRuns(ctx context.Context, now time.Time) ([]Prem
 }
 
 // DueCleanupRuns returns posted runs whose cleanup is due (2 h past the
-// scheduled time) but hasn't run yet.
+// scheduled time) but hasn't run yet. Runs that failed a prior cleanup are held
+// off until their backoff (cleanup_next_at) elapses, and runs whose retries were
+// exhausted (cleanup_failed_at set) are excluded so the scheduler stops
+// revisiting them.
 func (s *PremadeStore) DueCleanupRuns(ctx context.Context, now time.Time) ([]PremadeRun, error) {
 	const q = `
 		SELECT ` + premadeRunCols + `
 		FROM premade_runs
 		WHERE cleaned_up_at IS NULL
+		  AND cleanup_failed_at IS NULL
 		  AND $1 >= scheduled_at + INTERVAL '2 hours'
+		  AND (cleanup_next_at IS NULL OR $1 >= cleanup_next_at)
 		ORDER BY scheduled_at`
 	return s.queryRuns(ctx, q, now)
 }
@@ -421,6 +434,27 @@ func (s *PremadeStore) MarkThreadStarted(ctx context.Context, runID int64, threa
 // MarkCleanedUp records that the run's post and thread were cleaned up.
 func (s *PremadeStore) MarkCleanedUp(ctx context.Context, runID int64) error {
 	_, err := s.pool.Exec(ctx, `UPDATE premade_runs SET cleaned_up_at = now() WHERE id = $1`, runID)
+	return err
+}
+
+// RecordCleanupFailure bumps the failed-cleanup attempt count and schedules the
+// next retry via cleanup_next_at (exponential backoff, computed by the caller).
+// The run stays due but DueCleanupRuns skips it until nextAt.
+func (s *PremadeStore) RecordCleanupFailure(ctx context.Context, runID int64, attempts int, nextAt time.Time) error {
+	_, err := s.pool.Exec(ctx,
+		`UPDATE premade_runs SET cleanup_attempts = $2, cleanup_next_at = $3 WHERE id = $1`,
+		runID, attempts, nextAt)
+	return err
+}
+
+// MarkCleanupFailed records that cleanup has permanently failed for a run after
+// its retries were exhausted, excluding it from DueCleanupRuns. cleaned_up_at
+// stays NULL because the post/thread may still exist (e.g. the bot never got the
+// Manage Threads permission); cleanup_failed_at is what stops the retries.
+func (s *PremadeStore) MarkCleanupFailed(ctx context.Context, runID int64, attempts int) error {
+	_, err := s.pool.Exec(ctx,
+		`UPDATE premade_runs SET cleanup_attempts = $2, cleanup_failed_at = now() WHERE id = $1`,
+		runID, attempts)
 	return err
 }
 

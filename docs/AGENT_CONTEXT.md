@@ -944,9 +944,14 @@ the `pre_made` flag on (see "Pre-made trial run" under Teams). Tables in
   - **2 h after** (`DueCleanupRuns`): deletes the thread + post. The run is
     marked done (`markRunCleanedUp`) **only when the thread was actually
     removed** — if `cleanupRun` reports a non-404 failure (typically a 403
-    missing Manage Threads), `cleaned_up_at` stays NULL so the run remains due
-    and a later tick retries. Cleanup therefore **self-heals** once an admin
-    grants Manage Threads, instead of orphaning the thread permanently.
+    missing Manage Threads), `cleaned_up_at` stays NULL so the run remains due.
+    Instead of retrying every tick forever, `recordCleanupFailure` bumps
+    `cleanup_attempts` and sets `cleanup_next_at` to **exponential backoff**
+    (`cleanupBaseBackoff` 5 min, doubled per failure, capped at
+    `cleanupMaxBackoff` 6 h). After `cleanupMaxAttempts` (10) failures it calls
+    `MarkCleanupFailed` (sets `cleanup_failed_at`) and stops revisiting the run.
+    Until then cleanup still **self-heals** once an admin grants Manage Threads;
+    after the cap the thread is left orphaned but no longer retried.
   Both are tracked by timestamp columns on `premade_runs`, so each fires **exactly
   once** and **catches up** if the bot was offline at the trigger time (cleanups
   are processed before threads, so a long-offline finished run is removed rather
