@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Dashboard — Core Team Builder</title>
-  <link rel="stylesheet" href="css/styles.css?v=112" />
+  <link rel="stylesheet" href="css/styles.css?v=113" />
 </head>
 <body>
   <div id="message" class="toast is-hidden" role="alert" aria-live="assertive"></div>
@@ -91,6 +91,10 @@
            Buffs section, and each player slot (populated by app.js). Hidden on
            narrow viewports via CSS. -->
       <nav id="player-nav" class="player-nav" aria-label="Jump to section or player">
+        <div id="roster-nav" class="player-nav-rosters">
+          <span class="player-nav-heading">Rosters</span>
+          <div id="roster-nav-list" class="player-nav-rosters-list"></div>
+        </div>
         <a class="player-nav-link player-nav-anchor" data-nav="top" href="#">↑ Top</a>
         <a class="player-nav-link player-nav-anchor" data-nav="buffs" href="#">Group Stats</a>
         <a class="player-nav-link player-nav-anchor" data-nav="groupings" href="#">Groupings</a>
@@ -600,6 +604,6 @@
   <script src="js/gear-skills.js?v=101"></script>
   <script src="js/data.js?v=108"></script>
   <script src="js/components.js?v=100"></script>
-  <script src="js/app.js?v=121"></script>
+  <script src="js/app.js?v=124"></script>
 </body>
 </html>

@@ -1705,6 +1705,8 @@
         expandAncestors(slotEl);
         smoothScrollToEl(slotEl);
       }
+    } else if (kind === "roster") {
+      selectRoster(Number(link.dataset.roster));
     }
   });
 
@@ -1906,6 +1908,17 @@
       setGroupingSaveStatus(groupingId, "error");
       handleError(err);
     }
+  }
+
+  // Immediately fire (and await) every pending grouping autosave debounce so its
+  // edit is persisted against the *current* roster before anything swaps
+  // currentGroupings out. Without this, switching rosters while a 700 ms debounce
+  // is pending lets the timer fire after currentGroupings was replaced, at which
+  // point saveGroupingNow can't resolve the grouping id and silently drops the
+  // edit. saveGroupingNow clears its own timer, so the map drains as we go.
+  async function flushPendingGroupingSaves() {
+    const ids = Object.keys(groupingSaveTimers).map(Number);
+    await Promise.all(ids.map((id) => saveGroupingNow(id)));
   }
 
   // True while the user is actively interacting with a control in the groupings
@@ -3076,9 +3089,12 @@
     const membersBtn = el("members-btn");
     if (membersBtn) membersBtn.classList.toggle("is-hidden", on);
     // Templates (pre-made runs) are locked to their single active roster, so the
-    // roster switcher/management UI is hidden in pre-made mode.
+    // roster switcher/management UI (bar + side-nav list) is hidden in pre-made
+    // mode.
     const rostersPanel = el("rosters-panel");
     if (rostersPanel) rostersPanel.classList.toggle("is-hidden", on);
+    const rosterNav = el("roster-nav");
+    if (rosterNav) rosterNav.classList.toggle("is-hidden", on);
     // Auto-share targets the member pool, which is hidden in pre-made mode, so
     // hide that toggle too (its value is preserved either way).
     const autoShareLabel = el("auto-share-pool-label");
@@ -3290,12 +3306,43 @@
     if (addBtn) addBtn.classList.toggle("is-hidden", !editable);
     const addForm = el("add-roster-form");
     if (addForm && !editable) addForm.classList.add("is-hidden");
+    renderRosterNav();
+  }
+
+  // Mirror the rosters bar into the floating side nav so you can switch rosters
+  // from there too. The currently-viewed roster is marked selected and the
+  // active (bot) roster gets a star. Hidden for templates via applyPreMadeMode
+  // (they're locked to a single roster).
+  function renderRosterNav() {
+    const list = el("roster-nav-list");
+    if (!list) return;
+    const rosters = (currentTeam && currentTeam.rosters) || [];
+    const activeId = currentTeam && currentTeam.active_roster_id;
+    list.innerHTML = "";
+    rosters.forEach((roster) => {
+      const link = document.createElement("a");
+      link.className = "player-nav-link";
+      link.href = "#";
+      link.dataset.nav = "roster";
+      link.dataset.roster = String(roster.id);
+      if (roster.id === currentRosterId) link.classList.add("is-selected");
+      const star =
+        roster.id === activeId
+          ? `<span class="player-nav-role" title="Active roster (used by the bot)">★</span>`
+          : "";
+      link.innerHTML = `<span class="player-nav-name">${escapeAttr(roster.name)}</span>${star}`;
+      list.appendChild(link);
+    });
   }
 
   // Switch the viewed/edited roster: load its lineup, encounters, and groupings.
   async function selectRoster(rosterId) {
     if (!currentTeam || rosterId === currentRosterId) return;
     try {
+      // Persist any in-flight grouping edits before we swap the roster out from
+      // under them (otherwise a pending debounce fires against the wrong roster
+      // and drops the edit).
+      await flushPendingGroupingSaves();
       const roster = await api.getRoster(currentTeam.id, rosterId);
       currentRosterId = rosterId;
       currentTeam.players = roster.players || [];
@@ -3385,6 +3432,9 @@
     try {
       currentTeam = await api.activateRoster(currentTeam.id, rosterId);
       renderRosterBar();
+      // Activating a roster also switches the view to it, so what the bot uses
+      // and what you're editing stay in sync.
+      if (rosterId !== currentRosterId) await selectRoster(rosterId);
     } catch (err) {
       handleError(err);
     }
