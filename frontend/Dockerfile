@@ -11,8 +11,9 @@ COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY security-headers.conf /etc/nginx/snippets/security-headers.conf
 
 # Copy static assets.
-COPY css/   /usr/share/nginx/html/css/
-COPY js/    /usr/share/nginx/html/js/
-COPY *.html /usr/share/nginx/html/
+COPY css/       /usr/share/nginx/html/css/
+COPY js/        /usr/share/nginx/html/js/
+COPY *.html     /usr/share/nginx/html/
+COPY favicon.png /usr/share/nginx/html/
 
 EXPOSE 8080
