@@ -311,7 +311,7 @@ func (b *bot) createRunThread(ctx context.Context, session *discordgo.Session, r
 	}
 	// Post the active roster's fight-positioning images so players can see where
 	// to stand. Best-effort; failures are logged and skipped.
-	b.postPositioningImages(ctx, session, thread.ID, run)
+	b.postPositioningImages(ctx, session, thread.ID, run.TeamID, fmt.Sprintf("run %d", run.ID))
 	c, cancel := context.WithTimeout(ctx, 10*time.Second)
 	if err := b.premade.SetRunThread(c, run.ID, thread.ID); err != nil {
 		log.Printf("premade: set thread id (run %d): %v", run.ID, err)
@@ -331,18 +331,20 @@ var positioningImageExtensions = map[string]string{
 }
 
 // postPositioningImages uploads the team's active-roster positioning images into
-// the run's thread (with their captions), so players know where to stand during
-// fights. Best-effort: a failure to load or send any image is logged and the
-// rest continue.
-func (b *bot) postPositioningImages(ctx context.Context, session *discordgo.Session, threadID string, run *models.PremadeRun) {
+// the given thread (with their captions), so players know where to stand during
+// fights. Shared by the pre-made-run thread (createRunThread) and the /coreteam
+// post overview thread (startPostThread); logLabel identifies the caller in log
+// lines. Best-effort: a failure to load or send any image is logged and the rest
+// continue.
+func (b *bot) postPositioningImages(ctx context.Context, session *discordgo.Session, threadID string, teamID int64, logLabel string) {
 	if b.rosterImages == nil {
 		return
 	}
 	c, cancel := context.WithTimeout(ctx, 20*time.Second)
-	images, err := b.rosterImages.ListDataForActiveRoster(c, run.TeamID)
+	images, err := b.rosterImages.ListDataForActiveRoster(c, teamID)
 	cancel()
 	if err != nil {
-		log.Printf("premade: load positioning images (run %d): %v", run.ID, err)
+		log.Printf("premade: load positioning images (%s): %v", logLabel, err)
 		return
 	}
 	for _, img := range images {
@@ -361,7 +363,7 @@ func (b *bot) postPositioningImages(ctx context.Context, session *discordgo.Sess
 			send.Content = "📍 " + caption
 		}
 		if _, err := session.ChannelMessageSendComplex(threadID, send); err != nil {
-			log.Printf("premade: post positioning image %d (run %d): %v", img.ID, run.ID, err)
+			log.Printf("premade: post positioning image %d (%s): %v", img.ID, logLabel, err)
 		}
 	}
 }

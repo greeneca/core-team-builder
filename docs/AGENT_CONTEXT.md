@@ -573,10 +573,12 @@ column; the `User` JSON model hides it (`json:"-"`).
 
 - **What it is** (`056_roster_images.sql`): fight-positioning reference
   screenshots (boss room diagrams, stack points, etc.) attached to a **roster**.
-  The Discord bot posts them — with captions — into a pre-made run's discussion
-  thread when the thread is created (`createRunThread` → `postPositioningImages`),
-  so players know where to stand. Stored inline as `bytea` (no persistent volume
-  on the backend; Postgres persists via `db-data`).
+  The Discord bot posts them — with captions — into a run's discussion thread when
+  the thread is created, via the shared `postPositioningImages` helper: for
+  pre-made runs / advanced signup (`createRunThread`) **and** the `/coreteam post`
+  overview thread (`startPostThread`), so players know where to stand. Stored
+  inline as `bytea` (no persistent volume on the backend; Postgres persists via
+  `db-data`).
 - **Table**: `roster_images` (keyed by `roster_id`; `position`, `caption`,
   `content_type`, `byte_size`, `data`). `RosterImageStore`
   (`backend/internal/models/roster_image.go`). Copied with a roster via
@@ -591,10 +593,11 @@ column; the `User` JSON model hides it (`json:"-"`).
   `PUT /images/{imgID}` (caption), `DELETE /images/{imgID}`, and
   `GET /images/{imgID}/raw` (raw bytes; also bearer-protected, so the frontend
   fetches with auth via `api._sendRaw` and renders through an object URL).
-- **UI** (`app.js` / `index.html`): a **Positioning Images** card at the bottom
-  of the team detail page — thumbnail grid, per-image caption (autosaved on a
-  debounce, `scheduleImageCaptionSave`), upload via a hidden file input, and
-  delete. **Hidden for simple-signup templates** (`applySimpleSignupMode`).
+- **UI** (`app.js` / `index.html`): an **Images** card at the bottom of the team
+  detail page (with an "Images" side-nav jump link) — thumbnail grid, per-image
+  caption (autosaved on a debounce, `scheduleImageCaptionSave`), upload via a
+  hidden file input, and delete. **Hidden for simple-signup templates**
+  (`applySimpleSignupMode`).
 
 ## Discord bot (current)
 

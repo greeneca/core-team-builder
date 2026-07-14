@@ -407,12 +407,14 @@ Managed via `GroupingStore`; see `docs/AGENT_CONTEXT.md` "Groupings model".
 ### `roster_images` (positioning images)
 
 Fight-positioning reference screenshots (`056_roster_images.sql`) attached to a
-roster. The web app uploads them (bottom "Positioning Images" section) and the
-Discord bot posts them into a pre-made run's discussion thread — with their
-captions — when the thread is created, so players know where to stand. Bytes are
-stored inline as `bytea` (the backend container has no persistent volume;
-Postgres persists via `db-data`). Capped at **5 MB/image** and **10/roster**
-(`handlers.maxImageBytes` / `maxRosterImagesPerRoster`).
+roster. The web app uploads them (bottom "Images" section) and the Discord bot
+posts them — with their captions — into a run's discussion thread when the thread
+is created (shared `postPositioningImages`): both the pre-made run / advanced
+signup thread (`createRunThread`) and the `/coreteam post` overview thread
+(`startPostThread`), so players know where to stand. Bytes are stored inline as
+`bytea` (the backend container has no persistent volume; Postgres persists via
+`db-data`). Capped at **5 MB/image** and **10/roster** (`handlers.maxImageBytes`
+/ `maxRosterImagesPerRoster`).
 
 | column       | type              | notes                                        |
 |--------------|-------------------|----------------------------------------------|

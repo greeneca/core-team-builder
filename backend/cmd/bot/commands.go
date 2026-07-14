@@ -725,6 +725,9 @@ func (b *bot) startPostThread(ctx context.Context, s *discordgo.Session, i *disc
 	if _, err := s.ChannelMessageSend(thread.ID, postThreadIntro); err != nil {
 		log.Printf("post: thread intro: %v", err)
 	}
+	// Post the active roster's fight-positioning images so players can see where
+	// to stand. Best-effort; failures are logged and skipped.
+	b.postPositioningImages(ctx, s, thread.ID, team.ID, fmt.Sprintf("team %d post", team.ID))
 }
 
 // buildPostEmbed assembles the channel-post embed from team data, the current
