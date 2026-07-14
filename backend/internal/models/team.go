@@ -490,6 +490,9 @@ func (s *TeamStore) Create(ctx context.Context, ownerID int64, name string, copy
 			if err := copyGroupingsTx(ctx, tx, sr.id, newRosterID); err != nil {
 				return nil, err
 			}
+			if err := copyRosterImagesTx(ctx, tx, sr.id, newRosterID); err != nil {
+				return nil, err
+			}
 		}
 		// A source team always has at least one roster post-migration; guard
 		// defensively so a copy never leaves the team without one.

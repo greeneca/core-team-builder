@@ -404,6 +404,36 @@ holds slot assignments with PK `(grouping_id, player_slot)`, which guarantees a
 player is in at most one group per grouping. Both cascade on grouping delete.
 Managed via `GroupingStore`; see `docs/AGENT_CONTEXT.md` "Groupings model".
 
+### `roster_images` (positioning images)
+
+Fight-positioning reference screenshots (`056_roster_images.sql`) attached to a
+roster. The web app uploads them (bottom "Positioning Images" section) and the
+Discord bot posts them into a pre-made run's discussion thread — with their
+captions — when the thread is created, so players know where to stand. Bytes are
+stored inline as `bytea` (the backend container has no persistent volume;
+Postgres persists via `db-data`). Capped at **5 MB/image** and **10/roster**
+(`handlers.maxImageBytes` / `maxRosterImagesPerRoster`).
+
+| column       | type              | notes                                        |
+|--------------|-------------------|----------------------------------------------|
+| id           | bigint (IDENTITY) | primary key                                  |
+| roster_id    | bigint            | FK → `rosters(id)`, cascade                  |
+| position     | int               | display / post order within the roster       |
+| caption      | varchar(200)      | optional per-image label (default `''`)      |
+| content_type | text              | sniffed MIME (png/jpeg/gif/webp only)        |
+| byte_size    | int               | stored so listings avoid reading the blob    |
+| data         | bytea             | the raw image bytes                          |
+| created_at   | timestamptz       | default `now()`                              |
+| updated_at   | timestamptz       | set on caption update                        |
+
+Managed via `RosterImageStore`. HTTP under `/api/teams/{id}/images`: list +
+multipart `POST` (upload), `PUT {imgID}` (caption), `DELETE {imgID}`, and
+`GET {imgID}/raw` (bearer-protected bytes — the frontend fetches with auth and
+renders via an object URL). Uploads get a larger body cap in both nginx
+(`client_max_body_size 6m` on `^/api/teams/[0-9]+/images`) and the backend
+(`maxImageUploadBody`). Copied with a roster (`copyRosterImagesTx`). Hidden for
+simple-signup templates.
+
 ### `team_roster_members` (member pool)
 
 A per-team list of prospective players (`030_team_members_pool.sql`), **separate**

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/core-team-builder/backend/internal/auth"
@@ -21,6 +22,11 @@ import (
 // payloads here are small (a team with a 12-player roster and loadouts is a few
 // KB), so 1 MiB is generous while still preventing memory-exhaustion DoS.
 const maxRequestBody = 1 << 20 // 1 MiB
+
+// maxImageUploadBody is the request-body cap for the positioning-image upload
+// route only. It's larger than maxRequestBody because that request carries a
+// binary image (up to maxImageBytes) plus the multipart envelope.
+const maxImageUploadBody = 6 << 20 // 6 MiB
 
 // Per-user / per-resource caps. These bound how much an authenticated user can
 // create so a single account can't exhaust storage or degrade the service.
@@ -54,6 +60,7 @@ type Server struct {
 	users            *models.UserStore
 	teams            *models.TeamStore
 	rosters          *models.RosterStore
+	rosterImages     *models.RosterImageStore
 	encounters       *models.EncounterStore
 	groupings        *models.GroupingStore
 	members          *models.MemberStore
@@ -75,6 +82,7 @@ type Config struct {
 	Users            *models.UserStore
 	Teams            *models.TeamStore
 	Rosters          *models.RosterStore
+	RosterImages     *models.RosterImageStore
 	Encounters       *models.EncounterStore
 	Groupings        *models.GroupingStore
 	Members          *models.MemberStore
@@ -111,6 +119,7 @@ func New(c Config) *Server {
 		users:            c.Users,
 		teams:            c.Teams,
 		rosters:          c.Rosters,
+		rosterImages:     c.RosterImages,
 		encounters:       c.Encounters,
 		groupings:        c.Groupings,
 		members:          c.Members,
@@ -214,6 +223,15 @@ func (s *Server) Routes() http.Handler {
 	mux.Handle("PUT /api/teams/{id}/groupings/{gid}", protected(s.handleUpdateGrouping))
 	mux.Handle("DELETE /api/teams/{id}/groupings/{gid}", protected(s.handleDeleteGrouping))
 
+	// Positioning images: fight-positioning reference screenshots the Discord bot
+	// posts into a pre-made run's thread. Roster-scoped via ?roster_id= (default:
+	// active). Upload is multipart; the raw route serves the stored bytes.
+	mux.Handle("GET /api/teams/{id}/images", protected(s.handleListRosterImages))
+	mux.Handle("POST /api/teams/{id}/images", protected(s.handleUploadRosterImage))
+	mux.Handle("GET /api/teams/{id}/images/{imgID}/raw", protected(s.handleGetRosterImageRaw))
+	mux.Handle("PUT /api/teams/{id}/images/{imgID}", protected(s.handleUpdateRosterImage))
+	mux.Handle("DELETE /api/teams/{id}/images/{imgID}", protected(s.handleDeleteRosterImage))
+
 	return s.withCORS(s.withMaxBytes(mux))
 }
 
@@ -223,7 +241,13 @@ func (s *Server) Routes() http.Handler {
 func (s *Server) withMaxBytes(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Body != nil {
-			r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
+			limit := int64(maxRequestBody)
+			// The positioning-image upload carries a binary file, so it gets a
+			// larger budget than the small JSON endpoints.
+			if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/images") {
+				limit = maxImageUploadBody
+			}
+			r.Body = http.MaxBytesReader(w, r.Body, limit)
 		}
 		next.ServeHTTP(w, r)
 	})

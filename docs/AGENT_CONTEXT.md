@@ -569,6 +569,33 @@ column; the `User` JSON model hides it (`json:"-"`).
   without re-rendering to preserve focus. `renderGroupings` reads the live roster
   for slot labels. Groupings are also included in the Discord bot's post overview.
 
+## Positioning images (current)
+
+- **What it is** (`056_roster_images.sql`): fight-positioning reference
+  screenshots (boss room diagrams, stack points, etc.) attached to a **roster**.
+  The Discord bot posts them — with captions — into a pre-made run's discussion
+  thread when the thread is created (`createRunThread` → `postPositioningImages`),
+  so players know where to stand. Stored inline as `bytea` (no persistent volume
+  on the backend; Postgres persists via `db-data`).
+- **Table**: `roster_images` (keyed by `roster_id`; `position`, `caption`,
+  `content_type`, `byte_size`, `data`). `RosterImageStore`
+  (`backend/internal/models/roster_image.go`). Copied with a roster via
+  `copyRosterImagesTx` (also when a team is copied).
+- **Limits/validation**: `maxImageBytes` (5 MB) and `maxRosterImagesPerRoster`
+  (10) in `handlers.go`; the content type is **sniffed** from the bytes
+  (`http.DetectContentType`) and must be png/jpeg/gif/webp. Uploads get a larger
+  request-body cap in both nginx (`^/api/teams/[0-9]+/images` → 6m) and the
+  backend (`maxImageUploadBody`, applied in `withMaxBytes`).
+- **Endpoints** (JWT-protected): `GET /api/teams/{id}/images` (list, optional
+  `?roster_id=`), multipart `POST` (upload, field `image` + optional `caption`),
+  `PUT /images/{imgID}` (caption), `DELETE /images/{imgID}`, and
+  `GET /images/{imgID}/raw` (raw bytes; also bearer-protected, so the frontend
+  fetches with auth via `api._sendRaw` and renders through an object URL).
+- **UI** (`app.js` / `index.html`): a **Positioning Images** card at the bottom
+  of the team detail page — thumbnail grid, per-image caption (autosaved on a
+  debounce, `scheduleImageCaptionSave`), upload via a hidden file input, and
+  delete. **Hidden for simple-signup templates** (`applySimpleSignupMode`).
+
 ## Discord bot (current)
 
 - **What it is** (`027_discord.sql`): a separate Go binary (`backend/cmd/bot`,
@@ -936,7 +963,10 @@ the `pre_made` flag on (see "Pre-made trial run" under Teams). Tables in
   - **At post time** (`finishPremadeDM` → `createRunThread`): a discussion thread
     is created off the post (`MessageThreadStartComplex`) with an intro message
     inviting players to chat; the id is stored via `SetRunThread` (leaving
-    `thread_started_at` NULL).
+    `thread_started_at` NULL). Right after the intro, `postPositioningImages`
+    uploads the active roster's fight-positioning images (with captions) into the
+    thread via `ChannelMessageSendComplex` + `discordgo.File` (best-effort). See
+    "Positioning images" below.
   - **15 min before** (`DueThreadRuns`): posts a message in that thread pinging
     every signup; `MarkThreadStarted` (records the ping ran). If the thread is
     somehow missing (older run, or post-time creation failed) it's created here as

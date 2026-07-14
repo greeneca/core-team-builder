@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Dashboard — Core Team Builder</title>
-  <link rel="stylesheet" href="css/styles.css?v=116" />
+  <link rel="stylesheet" href="css/styles.css?v=117" />
 </head>
 <body>
   <div id="message" class="toast is-hidden" role="alert" aria-live="assertive"></div>
@@ -95,6 +95,7 @@
         <a class="player-nav-link player-nav-anchor" data-nav="rosters" href="#">Rosters</a>
         <a class="player-nav-link player-nav-anchor" data-nav="buffs" href="#">Group Stats</a>
         <a class="player-nav-link player-nav-anchor" data-nav="groupings" href="#">Groupings</a>
+        <a class="player-nav-link player-nav-anchor" data-nav="images" href="#">Images</a>
         <div id="player-nav-list" class="player-nav-list"></div>
       </nav>
 
@@ -402,6 +403,27 @@
           <div id="groupings-list" class="groupings-list mt-4"></div>
         </div>
       </div>
+
+      <!-- Positioning Images: fight-positioning reference screenshots the Discord
+           bot posts into a pre-made run's discussion thread so players know where
+           to stand during fights. Hidden for simple-signup templates. -->
+      <div id="positioning-images-card" class="card mt-4 collapsible section-collapsible">
+        <div class="section-head collapsible-head">
+          <div class="collapsible-head-main">
+            <button class="collapse-toggle" type="button" aria-expanded="true" aria-label="Collapse section"></button>
+            <h2 style="margin: 0;">Images<span class="info-indicator" tabindex="0" role="img" aria-label="Images: upload reference screenshots (boss room diagrams, stack points, etc.) that the Discord bot posts into a trial run's discussion thread so players know where to stand during fights. Each image can have an optional caption." data-tip="Upload reference screenshots (boss room diagrams, stack points, etc.). The Discord bot posts them into a trial run's discussion thread so players know where to stand during fights. Each image can have an optional caption.">i</span></h2>
+          </div>
+          <div class="form-actions">
+            <label id="add-image-label" class="btn btn--ghost btn--sm is-hidden" for="add-image-input">+ Upload image</label>
+            <input id="add-image-input" type="file" accept="image/png,image/jpeg,image/gif,image/webp" class="is-hidden" />
+          </div>
+        </div>
+        <div class="collapsible-body">
+          <p id="positioning-images-hint" class="text-muted mt-4">Uploaded images are posted in the trial run's Discord thread to help with fight positioning.</p>
+          <p id="positioning-images-empty" class="text-muted mt-4 is-hidden">No images yet.</p>
+          <div id="positioning-images-list" class="positioning-images-list mt-4"></div>
+        </div>
+      </div>
     </section>
 
     <!-- Buffs details modal -->
@@ -597,10 +619,10 @@
     <a href="https://github.com/greeneca/core-team-builder/issues/new" target="_blank" rel="noopener noreferrer">Report it on GitHub</a>.
   </footer>
 
-  <script src="js/api.js?v=110"></script>
+  <script src="js/api.js?v=111"></script>
   <script src="js/gear-skills.js?v=101"></script>
   <script src="js/data.js?v=108"></script>
   <script src="js/components.js?v=100"></script>
-  <script src="js/app.js?v=126"></script>
+  <script src="js/app.js?v=128"></script>
 </body>
 </html>

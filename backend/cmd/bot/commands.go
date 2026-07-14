@@ -17,12 +17,13 @@ import (
 
 // bot bundles the data stores the interaction handlers need.
 type bot struct {
-	teams      *models.TeamStore
-	encounters *models.EncounterStore
-	groupings  *models.GroupingStore
-	members    *models.MemberStore
-	discord    *models.DiscordStore
-	premade    *models.PremadeStore
+	teams        *models.TeamStore
+	encounters   *models.EncounterStore
+	groupings    *models.GroupingStore
+	members      *models.MemberStore
+	discord      *models.DiscordStore
+	premade      *models.PremadeStore
+	rosterImages *models.RosterImageStore
 	// appBaseURL is the public base URL of the web app (APP_BASE_URL), used to
 	// build sign-in links the bot sends to users. Empty when unconfigured.
 	appBaseURL string

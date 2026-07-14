@@ -130,6 +130,20 @@ server {
     # Bound bodies at the edge too (the project nginx caps at 256k; backend 1 MiB).
     client_max_body_size 256k;
 
+    # Positioning-image uploads carry a binary file, so this route needs a larger
+    # body cap — matching the project nginx (6m) and the backend upload limit.
+    # Without it the upstream returns 413 before the request reaches the app.
+    # Must appear before `location /` (regex locations take precedence anyway).
+    location ~ ^/api/teams/[0-9]+/images {
+        client_max_body_size 6m;
+        proxy_pass         http://127.0.0.1:8081;   # = FRONTEND_PORT
+        proxy_http_version 1.1;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+    }
+
     location / {
         proxy_pass         http://127.0.0.1:8081;   # = FRONTEND_PORT
         proxy_http_version 1.1;
@@ -163,7 +177,11 @@ server {
 
 - [x] Verify the upstream does **not** add a duplicate/looser CSP (it would
       override the app's). Optionally add `Permissions-Policy`/`Referrer-Policy`
-      here too if you prefer them centralized — but avoid conflicting CSPs.
+      here too if you prefer them centralized — but avoid conflicting CSPs. If
+      you *do* set the CSP at the upstream, its `img-src` must include `blob:`
+      (the app uses `img-src 'self' data: blob:`) or the positioning-image
+      thumbnails — fetched with auth and rendered from an object URL — will be
+      blocked and show as broken.
 - [x] If the upstream→frontend hop crosses an untrusted network, use TLS (or
       mTLS) on that hop as well.
 

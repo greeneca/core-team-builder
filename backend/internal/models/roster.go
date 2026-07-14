@@ -182,6 +182,9 @@ func (s *RosterStore) Create(ctx context.Context, teamID int64, name string, cop
 		if err := copyGroupingsTx(ctx, tx, copyFromRosterID, rosterID); err != nil {
 			return nil, err
 		}
+		if err := copyRosterImagesTx(ctx, tx, copyFromRosterID, rosterID); err != nil {
+			return nil, err
+		}
 	} else {
 		if err := seedRosterPlayersTx(ctx, tx, rosterID); err != nil {
 			return nil, err

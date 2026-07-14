@@ -46,6 +46,13 @@
   // { id, name, group_count, position, groups: [{ group_number, name, slots }] }.
   // Edited locally and autosaved per-grouping.
   let currentGroupings = [];
+  // The open roster's fight-positioning images (metadata only; bytes are fetched
+  // lazily as object URLs). Each is { id, roster_id, caption, content_type,
+  // byte_size, position }.
+  let currentRosterImages = [];
+  // Object URLs created for positioning-image thumbnails, tracked so they can be
+  // revoked before a re-render to avoid leaking blob URLs.
+  let imageObjectURLs = [];
   // The open team's recruitment/availability pool (team_roster_members), loaded
   // when a team is opened. Feeds the Members page and the roster Discord-handle
   // combobox suggestions.
@@ -57,9 +64,13 @@
   // Client-side mirrors of the backend caps (the server still enforces these).
   const MAX_GROUPINGS = 10;
   const MAX_GROUPS_PER_GROUPING = 12;
+  const MAX_ROSTER_IMAGES = 10;
   // Per-grouping debounce timers, keyed by grouping id.
   const groupingSaveTimers = {};
   const GROUPING_SAVE_DELAY = 700;
+  // Per-image caption debounce timers, keyed by image id.
+  const imageCaptionSaveTimers = {};
+  const IMAGE_CAPTION_SAVE_DELAY = 700;
 
   // --- Helpers ---
   // A fixed toast at the top of the screen (see #message in index.html). It is
@@ -304,6 +315,7 @@
       }
       const { groupings } = await api.listGroupings(id, currentRosterId);
       currentGroupings = groupings || [];
+      currentRosterImages = await loadRosterImages(id, currentRosterId);
       // Load the member pool so the roster's Discord-handle combobox can suggest
       // known members. Best-effort: a failure here shouldn't block the team page.
       try {
@@ -525,6 +537,7 @@
       currentEncounter = enc ? await api.getEncounter(teamId, enc.id) : null;
       const { groupings } = await api.listGroupings(teamId, currentRosterId);
       currentGroupings = groupings || [];
+      currentRosterImages = await loadRosterImages(teamId, currentRosterId);
       try {
         const { members } = await api.listRosterMembers(teamId);
         currentRosterMembers = members || [];
@@ -1169,6 +1182,7 @@
     renderRoster();
     applySimpleSignupMode();
     renderGroupings();
+    renderPositioningImages();
     refreshBuffCoverage();
   }
 
@@ -1697,6 +1711,12 @@
         expandAncestors(card);
         smoothScrollToEl(card);
       }
+    } else if (kind === "images") {
+      const card = el("positioning-images-card");
+      if (card) {
+        expandAncestors(card);
+        smoothScrollToEl(card);
+      }
     } else if (kind === "player") {
       const slotEl = el("roster").querySelector(
         `.player-slot[data-slot="${link.dataset.slot}"]`
@@ -1934,6 +1954,191 @@
     return !!card && card.contains(document.activeElement);
   }
 
+  // --- Positioning images ---
+  // Fight-positioning reference screenshots, stored per roster and posted by the
+  // Discord bot into a pre-made run's thread. Uploaded/deleted immediately;
+  // captions autosave on a per-image debounce.
+
+  // Fetch a roster's image metadata, tolerating failure (e.g. an older backend)
+  // so opening a team never breaks on this optional section.
+  async function loadRosterImages(teamId, rosterId) {
+    try {
+      const { images } = await api.listRosterImages(teamId, rosterId);
+      return images || [];
+    } catch {
+      return [];
+    }
+  }
+
+  // Revoke any object URLs created for thumbnails so blob URLs don't leak across
+  // re-renders / roster switches.
+  function revokeImageObjectURLs() {
+    imageObjectURLs.forEach((u) => {
+      try {
+        URL.revokeObjectURL(u);
+      } catch {
+        /* already revoked */
+      }
+    });
+    imageObjectURLs = [];
+  }
+
+  function setImageSaveStatus(imageId, state) {
+    const node = el(`image-status-${imageId}`);
+    if (!node) return;
+    node.classList.remove("is-saving", "is-saved", "is-error");
+    if (state === "saving") {
+      node.textContent = "Saving…";
+      node.classList.add("is-saving");
+    } else if (state === "saved") {
+      node.textContent = "Saved ✓";
+      node.classList.add("is-saved");
+    } else if (state === "error") {
+      node.textContent = "Not saved";
+      node.classList.add("is-error");
+    } else {
+      node.textContent = "";
+    }
+  }
+
+  function scheduleImageCaptionSave(imageId) {
+    if (!canEdit()) return;
+    setImageSaveStatus(imageId, "saving");
+    clearTimeout(imageCaptionSaveTimers[imageId]);
+    imageCaptionSaveTimers[imageId] = setTimeout(
+      () => saveImageCaptionNow(imageId),
+      IMAGE_CAPTION_SAVE_DELAY
+    );
+  }
+
+  async function saveImageCaptionNow(imageId) {
+    clearTimeout(imageCaptionSaveTimers[imageId]);
+    delete imageCaptionSaveTimers[imageId];
+    const img = currentRosterImages.find((x) => x.id === imageId);
+    if (!img || !currentTeam || !canEdit()) return;
+    setImageSaveStatus(imageId, "saving");
+    try {
+      // Persist against the local object (kept as the source of truth so the live
+      // caption input's closure isn't orphaned by a server-object swap).
+      await api.updateRosterImageCaption(currentTeam.id, imageId, (img.caption || "").trim());
+      setImageSaveStatus(imageId, "saved");
+    } catch (err) {
+      setImageSaveStatus(imageId, "error");
+      handleError(err);
+    }
+  }
+
+  async function handleImageUpload(file) {
+    if (!file || !currentTeam || !canEdit()) return;
+    if (currentRosterImages.length >= MAX_ROSTER_IMAGES) {
+      showMessage(`Image limit reached (max ${MAX_ROSTER_IMAGES})`, "error");
+      return;
+    }
+    try {
+      const created = await api.uploadRosterImage(currentTeam.id, currentRosterId, file, "");
+      currentRosterImages.push(created);
+      renderPositioningImages();
+      showMessage("Image uploaded", "success");
+    } catch (err) {
+      handleError(err);
+    }
+  }
+
+  async function deletePositioningImage(img) {
+    if (!currentTeam || !canEdit()) return;
+    try {
+      await api.deleteRosterImage(currentTeam.id, img.id);
+      currentRosterImages = currentRosterImages.filter((x) => x.id !== img.id);
+      renderPositioningImages();
+    } catch (err) {
+      handleError(err);
+    }
+  }
+
+  function renderPositioningImages() {
+    const list = el("positioning-images-list");
+    if (!list) return;
+    const editable = canEdit();
+    const addLabel = el("add-image-label");
+    if (addLabel) {
+      addLabel.classList.toggle(
+        "is-hidden",
+        !editable || currentRosterImages.length >= MAX_ROSTER_IMAGES
+      );
+    }
+    const empty = el("positioning-images-empty");
+    if (empty) empty.classList.toggle("is-hidden", currentRosterImages.length > 0);
+    const hint = el("positioning-images-hint");
+    if (hint) hint.classList.toggle("is-hidden", currentRosterImages.length === 0);
+    revokeImageObjectURLs();
+    list.innerHTML = "";
+    currentRosterImages.forEach((img) => {
+      list.appendChild(renderPositioningImageCard(img, editable));
+    });
+  }
+
+  function renderPositioningImageCard(img, editable) {
+    const card = document.createElement("div");
+    card.className = "positioning-image";
+
+    const thumb = document.createElement("button");
+    thumb.type = "button";
+    thumb.className = "positioning-image-thumb";
+    thumb.title = "Open full size";
+    const imgEl = document.createElement("img");
+    imgEl.alt = img.caption || "Positioning image";
+    imgEl.loading = "lazy";
+    thumb.appendChild(imgEl);
+    // Load the auth-protected bytes as a blob URL (tracked for later revocation).
+    api
+      .rosterImageObjectURL(currentTeam.id, img.id)
+      .then((url) => {
+        imageObjectURLs.push(url);
+        imgEl.src = url;
+      })
+      .catch(() => {
+        /* leave the thumbnail blank on failure */
+      });
+    thumb.addEventListener("click", () => {
+      if (imgEl.src) window.open(imgEl.src, "_blank", "noopener");
+    });
+    card.appendChild(thumb);
+
+    const meta = document.createElement("div");
+    meta.className = "positioning-image-meta";
+
+    const caption = document.createElement("input");
+    caption.className = "input positioning-image-caption";
+    caption.type = "text";
+    caption.maxLength = 200;
+    caption.placeholder = "Caption (optional) — e.g. HRC boss 3 stacks";
+    caption.value = img.caption || "";
+    caption.readOnly = !editable;
+    caption.addEventListener("input", () => {
+      img.caption = caption.value;
+      scheduleImageCaptionSave(img.id);
+    });
+    meta.appendChild(caption);
+
+    const actions = document.createElement("div");
+    actions.className = "form-actions positioning-image-actions";
+    const status = document.createElement("span");
+    status.className = "save-status";
+    status.id = `image-status-${img.id}`;
+    actions.appendChild(status);
+    if (editable) {
+      const del = document.createElement("button");
+      del.type = "button";
+      del.className = "btn btn--ghost btn--sm btn--danger";
+      del.textContent = "Delete";
+      del.addEventListener("click", () => deletePositioningImage(img));
+      actions.appendChild(del);
+    }
+    meta.appendChild(actions);
+    card.appendChild(meta);
+    return card;
+  }
+
   function renderGroupings() {
     const list = el("groupings-list");
     if (!list) return;
@@ -2122,6 +2327,17 @@
   }
 
   el("add-grouping-btn").addEventListener("click", addGrouping);
+
+  // Positioning-image upload: the "+ Upload image" label targets this hidden file
+  // input; reset its value after each pick so re-selecting the same file fires.
+  const addImageInput = el("add-image-input");
+  if (addImageInput) {
+    addImageInput.addEventListener("change", (e) => {
+      const file = e.target.files && e.target.files[0];
+      e.target.value = "";
+      if (file) handleImageUpload(file);
+    });
+  }
 
   // --- Sharing ---
   function renderMembers() {
@@ -3164,6 +3380,12 @@
     if (collapseAll) collapseAll.classList.toggle("is-hidden", on);
     const expandAll = el("players-expand-all-btn");
     if (expandAll) expandAll.classList.toggle("is-hidden", on);
+    // Positioning images are irrelevant to simple (roles-only) signups, so hide
+    // that whole section (and its jump-nav link) in this mode.
+    const positioningCard = el("positioning-images-card");
+    if (positioningCard) positioningCard.classList.toggle("is-hidden", on);
+    const imagesNav = document.querySelector('.player-nav-link[data-nav="images"]');
+    if (imagesNav) imagesNav.classList.toggle("is-hidden", on);
     document
       .querySelectorAll(
         "#roster .player-build, #roster [data-loadout], #roster [data-class-field], #roster [data-race-field], #roster [data-name-field], #roster .slot-actions"
@@ -3330,6 +3552,7 @@
         : null;
       const { groupings } = await api.listGroupings(currentTeam.id, rosterId);
       currentGroupings = groupings || [];
+      currentRosterImages = await loadRosterImages(currentTeam.id, rosterId);
       // Switching rosters discards any unsaved per-slot edits for the prior one.
       dirtyPlayerSlots.clear();
       dirtyLoadoutSlots.clear();

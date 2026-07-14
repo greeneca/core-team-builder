@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"strings"
@@ -307,6 +309,9 @@ func (b *bot) createRunThread(ctx context.Context, session *discordgo.Session, r
 	if _, err := session.ChannelMessageSend(thread.ID, premadeThreadIntro); err != nil {
 		log.Printf("premade: thread intro (run %d): %v", run.ID, err)
 	}
+	// Post the active roster's fight-positioning images so players can see where
+	// to stand. Best-effort; failures are logged and skipped.
+	b.postPositioningImages(ctx, session, thread.ID, run)
 	c, cancel := context.WithTimeout(ctx, 10*time.Second)
 	if err := b.premade.SetRunThread(c, run.ID, thread.ID); err != nil {
 		log.Printf("premade: set thread id (run %d): %v", run.ID, err)
@@ -314,6 +319,51 @@ func (b *bot) createRunThread(ctx context.Context, session *discordgo.Session, r
 	cancel()
 	run.ThreadID = thread.ID
 	return thread.ID
+}
+
+// positioningImageExtensions maps an image MIME type to a file extension for the
+// Discord upload filename.
+var positioningImageExtensions = map[string]string{
+	"image/png":  "png",
+	"image/jpeg": "jpg",
+	"image/gif":  "gif",
+	"image/webp": "webp",
+}
+
+// postPositioningImages uploads the team's active-roster positioning images into
+// the run's thread (with their captions), so players know where to stand during
+// fights. Best-effort: a failure to load or send any image is logged and the
+// rest continue.
+func (b *bot) postPositioningImages(ctx context.Context, session *discordgo.Session, threadID string, run *models.PremadeRun) {
+	if b.rosterImages == nil {
+		return
+	}
+	c, cancel := context.WithTimeout(ctx, 20*time.Second)
+	images, err := b.rosterImages.ListDataForActiveRoster(c, run.TeamID)
+	cancel()
+	if err != nil {
+		log.Printf("premade: load positioning images (run %d): %v", run.ID, err)
+		return
+	}
+	for _, img := range images {
+		ext := positioningImageExtensions[img.ContentType]
+		if ext == "" {
+			ext = "png"
+		}
+		send := &discordgo.MessageSend{
+			Files: []*discordgo.File{{
+				Name:        fmt.Sprintf("positioning-%d.%s", img.ID, ext),
+				ContentType: img.ContentType,
+				Reader:      bytes.NewReader(img.Data),
+			}},
+		}
+		if caption := strings.TrimSpace(img.Caption); caption != "" {
+			send.Content = "📍 " + caption
+		}
+		if _, err := session.ChannelMessageSendComplex(threadID, send); err != nil {
+			log.Printf("premade: post positioning image %d (run %d): %v", img.ID, run.ID, err)
+		}
+	}
 }
 
 // tagRunSignups pings everyone who signed up, in the run's discussion thread,

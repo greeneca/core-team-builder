@@ -491,4 +491,82 @@ const api = {
       method: "DELETE",
     });
   },
+
+  // --- Roster positioning images ---
+
+  // rosterId targets a specific roster (default: the team's active roster).
+  listRosterImages(teamId, rosterId) {
+    return this.request(`/api/teams/${teamId}/images${rosterQuery(rosterId)}`);
+  },
+
+  // Upload an image file (multipart) with an optional caption. rosterId targets a
+  // specific roster (default: active).
+  uploadRosterImage(teamId, rosterId, file, caption) {
+    const form = new FormData();
+    form.append("image", file);
+    if (caption) form.append("caption", caption);
+    return this._sendMultipart(
+      `/api/teams/${teamId}/images${rosterQuery(rosterId)}`,
+      form
+    );
+  },
+
+  updateRosterImageCaption(teamId, imageId, caption) {
+    return this.request(`/api/teams/${teamId}/images/${imageId}`, {
+      method: "PUT",
+      body: { caption },
+    });
+  },
+
+  deleteRosterImage(teamId, imageId) {
+    return this.request(`/api/teams/${teamId}/images/${imageId}`, {
+      method: "DELETE",
+    });
+  },
+
+  // Fetch an image's bytes (with auth) and return an object URL for use as an
+  // <img src>. Callers should URL.revokeObjectURL() it when done.
+  async rosterImageObjectURL(teamId, imageId) {
+    const res = await this._sendRaw(`/api/teams/${teamId}/images/${imageId}/raw`);
+    const blob = await res.blob();
+    return URL.createObjectURL(blob);
+  },
+
+  // Like request(), but sends a multipart FormData body and parses the JSON
+  // response. Content-Type is intentionally left unset so the browser adds the
+  // multipart boundary. Refreshes once on a 401, mirroring request().
+  async _sendMultipart(path, form) {
+    const send = () => {
+      const headers = { "X-Client-Id": CLIENT_ID };
+      const token = this.getToken();
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      return fetch(path, { method: "POST", headers, body: form });
+    };
+    let res = await send();
+    if (res.status === 401 && this.getRefreshToken()) {
+      if (await this.tryRefresh()) res = await send();
+    }
+    return this._parse(res);
+  },
+
+  // Fetch a binary resource with auth, refreshing once on a 401. Returns the raw
+  // Response (throws on other non-2xx).
+  async _sendRaw(path) {
+    const send = () => {
+      const headers = { "X-Client-Id": CLIENT_ID };
+      const token = this.getToken();
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      return fetch(path, { headers });
+    };
+    let res = await send();
+    if (res.status === 401 && this.getRefreshToken()) {
+      if (await this.tryRefresh()) res = await send();
+    }
+    if (!res.ok) {
+      const err = new Error(`Request failed (${res.status})`);
+      err.status = res.status;
+      throw err;
+    }
+    return res;
+  },
 };

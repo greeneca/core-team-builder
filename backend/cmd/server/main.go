@@ -47,6 +47,7 @@ func run() error {
 	users := models.NewUserStore(pool)
 	teams := models.NewTeamStore(pool)
 	rosters := models.NewRosterStore(pool)
+	rosterImages := models.NewRosterImageStore(pool)
 	encounters := models.NewEncounterStore(pool)
 	groupings := models.NewGroupingStore(pool)
 	members := models.NewMemberStore(pool)
@@ -82,6 +83,7 @@ func run() error {
 		Users:            users,
 		Teams:            teams,
 		Rosters:          rosters,
+		RosterImages:     rosterImages,
 		Encounters:       encounters,
 		Groupings:        groupings,
 		Members:          members,
