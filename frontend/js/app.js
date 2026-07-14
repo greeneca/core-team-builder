@@ -1705,8 +1705,12 @@
         expandAncestors(slotEl);
         smoothScrollToEl(slotEl);
       }
-    } else if (kind === "roster") {
-      selectRoster(Number(link.dataset.roster));
+    } else if (kind === "rosters") {
+      const panel = el("rosters-panel");
+      if (panel) {
+        expandAncestors(panel);
+        smoothScrollToEl(panel);
+      }
     }
   });
 
@@ -3093,8 +3097,8 @@
     // mode.
     const rostersPanel = el("rosters-panel");
     if (rostersPanel) rostersPanel.classList.toggle("is-hidden", on);
-    const rosterNav = el("roster-nav");
-    if (rosterNav) rosterNav.classList.toggle("is-hidden", on);
+    const rosterNavLink = document.querySelector('.player-nav-anchor[data-nav="rosters"]');
+    if (rosterNavLink) rosterNavLink.classList.toggle("is-hidden", on);
     // Auto-share targets the member pool, which is hidden in pre-made mode, so
     // hide that toggle too (its value is preserved either way).
     const autoShareLabel = el("auto-share-pool-label");
@@ -3306,33 +3310,6 @@
     if (addBtn) addBtn.classList.toggle("is-hidden", !editable);
     const addForm = el("add-roster-form");
     if (addForm && !editable) addForm.classList.add("is-hidden");
-    renderRosterNav();
-  }
-
-  // Mirror the rosters bar into the floating side nav so you can switch rosters
-  // from there too. The currently-viewed roster is marked selected and the
-  // active (bot) roster gets a star. Hidden for templates via applyPreMadeMode
-  // (they're locked to a single roster).
-  function renderRosterNav() {
-    const list = el("roster-nav-list");
-    if (!list) return;
-    const rosters = (currentTeam && currentTeam.rosters) || [];
-    const activeId = currentTeam && currentTeam.active_roster_id;
-    list.innerHTML = "";
-    rosters.forEach((roster) => {
-      const link = document.createElement("a");
-      link.className = "player-nav-link";
-      link.href = "#";
-      link.dataset.nav = "roster";
-      link.dataset.roster = String(roster.id);
-      if (roster.id === currentRosterId) link.classList.add("is-selected");
-      const star =
-        roster.id === activeId
-          ? `<span class="player-nav-role" title="Active roster (used by the bot)">★</span>`
-          : "";
-      link.innerHTML = `<span class="player-nav-name">${escapeAttr(roster.name)}</span>${star}`;
-      list.appendChild(link);
-    });
   }
 
   // Switch the viewed/edited roster: load its lineup, encounters, and groupings.
