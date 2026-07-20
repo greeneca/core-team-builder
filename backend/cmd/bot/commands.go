@@ -55,6 +55,13 @@ const (
 	postFillLeaveValue = "leave"
 )
 
+// postLocked reports whether a post's signups are closed because its locked run
+// time has passed. runAtUnix is 0 for posts with no concrete schedule (or an
+// untracked post), which are never locked — there's no run instant to pass.
+func postLocked(runAtUnix int64) bool {
+	return runAtUnix > 0 && time.Now().Unix() >= runAtUnix
+}
+
 // postComponents are the controls attached to a posted trial overview: a button
 // row (the two RSVP buttons + the per-player details button) and a signup
 // dropdown so players can fill a slot or join the general fill list (the
@@ -62,7 +69,11 @@ const (
 // is open). marks is the slot -> RSVP status map (so slots whose assigned player
 // declined become fillable). Defined once so the initial post and every in-place
 // update render the same controls.
-func postComponents(team *models.Team, fills []models.PostFill, marks map[int]string) []discordgo.MessageComponent {
+//
+// locked closes signups once the run time has passed (see postLocked): the RSVP
+// buttons and the signup dropdown are disabled, but "Get My Build Details" stays
+// active so players can still pull their loadout for a run in progress.
+func postComponents(team *models.Team, fills []models.PostFill, marks map[int]string, locked bool) []discordgo.MessageComponent {
 	rows := []discordgo.MessageComponent{
 		discordgo.ActionsRow{Components: []discordgo.MessageComponent{
 			discordgo.Button{
@@ -70,12 +81,14 @@ func postComponents(team *models.Team, fills []models.PostFill, marks map[int]st
 				Emoji:    &discordgo.ComponentEmoji{Name: "✅"},
 				Style:    discordgo.SuccessButton,
 				CustomID: "rsvp_yes",
+				Disabled: locked,
 			},
 			discordgo.Button{
 				Label:    "Not coming",
 				Emoji:    &discordgo.ComponentEmoji{Name: "❌"},
 				Style:    discordgo.DangerButton,
 				CustomID: "rsvp_no",
+				Disabled: locked,
 			},
 			discordgo.Button{
 				Label:    "Get My Build Details",
@@ -84,7 +97,7 @@ func postComponents(team *models.Team, fills []models.PostFill, marks map[int]st
 			},
 		}},
 	}
-	if row, ok := postFillSelectRow(team, fills, marks); ok {
+	if row, ok := postFillSelectRow(team, fills, marks, locked); ok {
 		rows = append(rows, row)
 	}
 	return rows
@@ -97,7 +110,10 @@ func postComponents(team *models.Team, fills []models.PostFill, marks map[int]st
 // "Join the fill list" / "Remove my signup" options are always present, so the
 // dropdown is shown even on a fully staffed post (people can still volunteer as
 // backups). ok=false only when team is nil.
-func postFillSelectRow(team *models.Team, fills []models.PostFill, marks map[int]string) (discordgo.MessageComponent, bool) {
+//
+// locked disables the dropdown and swaps its placeholder to a "signups closed"
+// note once the run time has passed (see postLocked).
+func postFillSelectRow(team *models.Team, fills []models.PostFill, marks map[int]string, locked bool) (discordgo.MessageComponent, bool) {
 	if team == nil {
 		return nil, false
 	}
@@ -144,11 +160,16 @@ func postFillSelectRow(team *models.Team, fills []models.PostFill, marks map[int
 			Description: "Leave your slot or the fill list",
 		},
 	)
+	placeholder := "Sign up to fill a slot or join the fill list"
+	if locked {
+		placeholder = "Signups are closed — this run has started"
+	}
 	return discordgo.ActionsRow{Components: []discordgo.MessageComponent{
 		discordgo.SelectMenu{
 			CustomID:    postFillSelectID,
-			Placeholder: "Sign up to fill a slot or join the fill list",
+			Placeholder: placeholder,
 			Options:     opts,
+			Disabled:    locked,
 		},
 	}}, true
 }
@@ -657,13 +678,23 @@ func (b *bot) handlePost(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		// i.Member.Nick) so the "Posted by" footer matches how they appear here.
 		footer = postedByPrefix + interactionDisplayName(i)
 	}
+	// Lock the run date at post time: compute the next-run instant once, show it
+	// on the embed, and hand the same value to startPostThread so the tracked
+	// post and the embed agree. Re-renders reuse this locked value (loaded from
+	// discord_posts) instead of recomputing, so the advertised date never drifts
+	// and disappears once the run is past. 0 when the team has no concrete
+	// schedule (BuildPost then falls back to the plain day/time text).
+	var runAtUnix int64
+	if unix, ok := discordfmt.NextRunUnix(team.ScheduleDays, team.ScheduleTime); ok {
+		runAtUnix = unix
+	}
 	names := b.resolveRosterNames(s, i.GuildID, team)
-	embed := buildPostEmbed(team, primary, gr, nil, nil, names, footer)
+	embed := buildPostEmbed(team, primary, gr, nil, nil, names, footer, runAtUnix)
 	err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
 			Embeds:     []*discordgo.MessageEmbed{embed},
-			Components: postComponents(team, nil, nil),
+			Components: postComponents(team, nil, nil, postLocked(runAtUnix)),
 		},
 	})
 	if err != nil {
@@ -672,7 +703,7 @@ func (b *bot) handlePost(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	}
 	// Open a discussion thread off the post and track it so attendees get a
 	// pre-run ping. Best effort — the post is already up.
-	b.startPostThread(ctx, s, i, team)
+	b.startPostThread(ctx, s, i, team, runAtUnix)
 }
 
 // postThreadIntro is posted in a /coreteam post discussion thread to invite the
@@ -686,18 +717,20 @@ const postThreadIntro = "🗣️ Discuss this run here — strategy, builds, swa
 // effort: failures are logged but don't fail the command, since the post itself
 // already succeeded. The thread is created without an explicit auto-archive
 // window (Discord applies the channel default); the pre-run ping keeps it active.
-func (b *bot) startPostThread(ctx context.Context, s *discordgo.Session, i *discordgo.InteractionCreate, team *models.Team) {
+func (b *bot) startPostThread(ctx context.Context, s *discordgo.Session, i *discordgo.InteractionCreate, team *models.Team, runAtUnix int64) {
 	msg, err := s.InteractionResponse(i.Interaction)
 	if err != nil {
 		log.Printf("post: fetch response for thread: %v", err)
 		return
 	}
 
-	// Record the post with its next-run time (nil when there's no concrete
-	// schedule) so the scheduler can ping attendees before the run.
+	// Record the post with the run date locked at post time (nil when there's no
+	// concrete schedule) so the scheduler can ping attendees before the run and
+	// re-renders can reuse the same fixed date. This is the value handlePost
+	// already showed on the embed, so the two never diverge.
 	var runAt *time.Time
-	if unix, ok := discordfmt.NextRunUnix(team.ScheduleDays, team.ScheduleTime); ok {
-		t := time.Unix(unix, 0).UTC()
+	if runAtUnix > 0 {
+		t := time.Unix(runAtUnix, 0).UTC()
 		runAt = &t
 	}
 	c, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -736,8 +769,10 @@ func (b *bot) startPostThread(ctx context.Context, s *discordgo.Session, i *disc
 // with a `fill` tag and an automatic ✅, and fill-list backups get their own
 // section. names maps a slot to the player's resolved Discord display name (shown
 // instead of the raw handle). footerText, when non-empty, is shown as the embed
-// footer (used to note who posted). Pass nil rsvps/fills for the initial post.
-func buildPostEmbed(team *models.Team, primary *models.Encounter, gr []models.Grouping, rsvps []models.RSVP, fills []models.PostFill, names map[int]string, footerText string) *discordgo.MessageEmbed {
+// footer (used to note who posted). runAtUnix is the run date locked at first
+// post time (0 when unknown), shown while upcoming and hidden once past (see
+// discordfmt.BuildPost). Pass nil rsvps/fills for the initial post.
+func buildPostEmbed(team *models.Team, primary *models.Encounter, gr []models.Grouping, rsvps []models.RSVP, fills []models.PostFill, names map[int]string, footerText string, runAtUnix int64) *discordgo.MessageEmbed {
 	fillBySlot := map[int]string{}
 	var fillList []string
 	for _, f := range fills {
@@ -751,7 +786,7 @@ func buildPostEmbed(team *models.Team, primary *models.Encounter, gr []models.Gr
 			fillBySlot[f.Slot] = name
 		}
 	}
-	title, desc := discordfmt.BuildPost(team, primary, gr, rsvpMarks(team, rsvps), fillBySlot, fillList, names)
+	title, desc := discordfmt.BuildPost(team, primary, gr, rsvpMarks(team, rsvps), fillBySlot, fillList, names, runAtUnix)
 	embed := &discordgo.MessageEmbed{
 		Title:       truncate(title, embedTitleLimit),
 		Description: truncate(desc, embedDescriptionLimit),
@@ -965,6 +1000,19 @@ func signupComponents(teamID int64) []discordgo.MessageComponent {
 
 // --- RSVP buttons (✅ Coming / ❌ Not coming) ---
 
+// postSignupsClosed reports whether a tracked post's signups are locked because
+// its run time has passed (see postLocked). A lookup failure is logged and
+// treated as "not locked" so a transient DB error never blocks a legitimate
+// RSVP/fill.
+func (b *bot) postSignupsClosed(ctx context.Context, messageID string) bool {
+	runAtUnix, err := b.discord.GetPostRunAt(ctx, messageID)
+	if err != nil {
+		log.Printf("post: get locked run_at (%s): %v", messageID, err)
+		return false
+	}
+	return postLocked(runAtUnix)
+}
+
 // handleRSVP records the presser's attendance for the post they clicked, then
 // edits the post in place so everyone sees the updated Coming / Not coming
 // tally. RSVPs are keyed to this specific message, so a fresh /coreteam post
@@ -982,6 +1030,17 @@ func (b *bot) handleRSVP(s *discordgo.Session, i *discordgo.InteractionCreate, s
 
 	ctx, cancel := handlerContext()
 	defer cancel()
+
+	// Signups close once the run has started. Guard here too (not just by
+	// disabling the button) so a stale client that still shows an enabled button
+	// can't record a late RSVP; re-render to lock the controls for everyone.
+	if b.postSignupsClosed(ctx, i.Message.ID) {
+		if err := b.renderPostUpdate(ctx, s, i); err != nil {
+			log.Printf("rsvp: lock post: %v", err)
+			ephemeral(s, i, "This run has already started — signups are closed.")
+		}
+		return
+	}
 
 	if err := b.discord.SetRSVP(ctx, i.Message.ID, i.ChannelID, user.ID, user.Username, user.GlobalName, status); err != nil {
 		log.Printf("rsvp: set: %v", err)
@@ -1135,6 +1194,17 @@ func (b *bot) handlePostFill(s *discordgo.Session, i *discordgo.InteractionCreat
 	ctx, cancel := handlerContext()
 	defer cancel()
 
+	// Signups close once the run has started. Guard here too (not just by
+	// disabling the dropdown) so a stale client can't sign up late; re-render to
+	// lock the controls for everyone.
+	if b.postSignupsClosed(ctx, i.Message.ID) {
+		if err := b.renderPostUpdate(ctx, s, i); err != nil {
+			log.Printf("post fill: lock post: %v", err)
+			ephemeral(s, i, "This run has already started — signups are closed.")
+		}
+		return
+	}
+
 	switch choice := values[0]; choice {
 	case postFillLeaveValue:
 		if err := b.discord.LeaveFill(ctx, i.Message.ID, user.ID); err != nil {
@@ -1259,14 +1329,23 @@ func (b *bot) renderPostUpdate(ctx context.Context, s *discordgo.Session, i *dis
 	}
 	names := b.resolveRosterNames(s, i.GuildID, team)
 	marks := rsvpMarks(team, rsvps)
+	// Reuse the run date locked when the post was first created rather than
+	// recomputing from the (possibly since-changed) team schedule, so the
+	// advertised date stays fixed and drops off once the run is past. A lookup
+	// failure or an untracked/NULL post yields 0, which makes buildPostEmbed fall
+	// back to the live schedule — the pre-lock behavior — so re-renders still work.
+	runAtUnix, err := b.discord.GetPostRunAt(ctx, i.Message.ID)
+	if err != nil {
+		log.Printf("post: get locked run_at (%s): %v", i.Message.ID, err)
+	}
 	// Preserve the "Posted by" footer set on the original post (RSVP/fill updates
 	// re-render the embed from scratch, which would otherwise drop it).
-	embed := buildPostEmbed(team, primary, gr, rsvps, fills, names, existingFooterText(i.Message))
+	embed := buildPostEmbed(team, primary, gr, rsvps, fills, names, existingFooterText(i.Message), runAtUnix)
 	if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseUpdateMessage,
 		Data: &discordgo.InteractionResponseData{
 			Embeds:     []*discordgo.MessageEmbed{embed},
-			Components: postComponents(team, fills, marks),
+			Components: postComponents(team, fills, marks, postLocked(runAtUnix)),
 		},
 	}); err != nil {
 		log.Printf("post: update respond: %v", err)

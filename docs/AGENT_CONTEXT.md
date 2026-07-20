@@ -616,7 +616,16 @@ column; the `User` JSON model hides it (`json:"-"`).
     opens a modal for the name.
   - `post` — posts the team's **overview** as a boxed embed: title (team name),
     a single dynamic schedule timestamp (`<t:unix:F>`/`<t:unix:R>`, shown in each
-    viewer's own timezone — no more per-tz list), the roster grouped by role with
+    viewer's own timezone — no more per-tz list). The **run date is locked at
+    first post time**: `handlePost` computes the next-run instant once, shows it,
+    and stores it as `discord_posts.run_at` (see below); every re-render
+    (`renderPostUpdate` → `GetPostRunAt` → `BuildPost`'s `runAtUnix`) reuses that
+    fixed value instead of recomputing from the (possibly changed) team schedule,
+    so the advertised date never drifts — and once that run is **past**, the "Next
+    run" line is dropped entirely rather than rolling forward to the next
+    occurrence. (Posts with no concrete schedule store a NULL `run_at`/`runAtUnix`
+    0, so `BuildPost` falls back to the live next-run computation, then the plain
+    day/time text.) Then the roster grouped by role with
     abbreviated gear (Markdown lines, one player each, RSVP icon beside the name;
     each role header shows a `(filled/total)` count, where a slot is "filled" when
     someone is covering it — an assigned player who hasn't declined, or any slot a
@@ -634,7 +643,15 @@ column; the `User` JSON model hides it (`json:"-"`).
     **signup dropdown** (`post_fill_select`) whenever the roster has any fillable
     slots (open slots, or slots whose assigned player marked themselves **not
     coming**). Built by `discordfmt.BuildPost`; the bot wraps the parts in the
-    embed and attaches the controls via `postComponents(team, fills, marks)`.
+    embed and attaches the controls via `postComponents(team, fills, marks,
+    locked)`. Once the locked run time has **passed** (`postLocked(runAtUnix)`,
+    from the same locked `run_at`), signups **close**: the RSVP buttons and the
+    signup dropdown render **disabled** (the dropdown's placeholder becomes
+    "Signups are closed — this run has started"), while **Get My Build Details**
+    stays active. The `handleRSVP` / `handlePostFill` handlers also re-check
+    `postSignupsClosed` server-side, so a stale client that still shows enabled
+    controls can't record a late signup — the interaction just re-renders the
+    post into its locked state.
   - `recruit` — posts a team's **recruitment post** as an embed (the team's
     free-form `signup_post` body, or a default prompt) with a single **I'm
     Interested** button. Pressing it starts an interactive **DM intake flow**
@@ -769,8 +786,10 @@ column; the `User` JSON model hides it (`json:"-"`).
 - **Posted overviews (pre-run ping + RSVP reminder)**: `discord_posts`
   (`049_discord_posts.sql`, `053_discord_posts_rsvp_reminder.sql`) tracks each
   `/coreteam post` overview by `message_id` with its `channel_id`, the discussion
-  `thread_id` opened off it, the computed `run_at` (next-run time from the team
-  schedule; `NULL` when there's no concrete schedule, so neither fires),
+  `thread_id` opened off it, the computed `run_at` (next-run time **locked at
+  first post time** — `RecordPost` COALESCEs on conflict so it never moves, and
+  `GetPostRunAt` reads it back for both the scheduler and the embed's locked date;
+  `NULL` when there's no concrete schedule, so neither fires),
   `pinged_at`, and `reminded_at`. The bot opens the thread on post; the scheduler
   then does two things off `run_at`:
   - **~48 h before** (`DueReminders`/`MarkPostReminded` →

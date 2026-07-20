@@ -42,16 +42,32 @@ import (
 // matching their stored handle); when present it replaces the raw handle in the
 // roster line. Slots without an entry fall back to the slot name.
 //
+// runAtUnix is the run date locked at first post time (Unix seconds), or 0 when
+// unknown. When set, it's shown verbatim while still upcoming and omitted once
+// past; when 0, the schedule line falls back to a live next-run computation (or
+// the plain day/time text). See the schedule block below for details.
+//
 // The self-required penetration/crit and missing self-buffs now live in the
 // per-player build-details DM (see PlayerDetail), not on this post.
-func BuildPost(team *models.Team, primary *models.Encounter, groupings []models.Grouping, marks map[int]string, fillBySlot map[int]string, fillList []string, names map[int]string) (title, description string) {
+func BuildPost(team *models.Team, primary *models.Encounter, groupings []models.Grouping, marks map[int]string, fillBySlot map[int]string, fillList []string, names map[int]string, runAtUnix int64) (title, description string) {
 	title = team.Name
 
 	var L []string
 	// Schedule as a single Discord timestamp: each viewer sees it in their own
-	// timezone, plus a relative "in X" hint. Falls back to the day list when
-	// there is no concrete next run to anchor a timestamp on.
-	if unix, ok := nextRunUnix(team.ScheduleDays, team.ScheduleTime); ok {
+	// timezone, plus a relative "in X" hint.
+	//
+	// runAtUnix is the run date locked at first post time (0 when unknown — e.g.
+	// the team had no concrete schedule then, or the post isn't tracked). When
+	// locked we show that fixed instant rather than recomputing from the live
+	// schedule, so the advertised date never drifts as the schedule changes; and
+	// once that run has passed we drop the line entirely instead of rolling
+	// forward to the next occurrence. Only when there's no locked date do we fall
+	// back to the live next-run computation, then to the plain day/time text.
+	if runAtUnix > 0 {
+		if time.Now().Unix() < runAtUnix {
+			L = append(L, fmt.Sprintf("\U0001F5D3\uFE0F  Next run: <t:%d:F> (<t:%d:R>)", runAtUnix, runAtUnix))
+		}
+	} else if unix, ok := nextRunUnix(team.ScheduleDays, team.ScheduleTime); ok {
 		L = append(L, fmt.Sprintf("\U0001F5D3\uFE0F  Next run: <t:%d:F> (<t:%d:R>)", unix, unix))
 	} else if s := scheduleFallback(team); s != "" {
 		L = append(L, "\U0001F5D3\uFE0F  "+s)

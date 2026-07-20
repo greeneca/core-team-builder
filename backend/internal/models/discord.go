@@ -315,13 +315,37 @@ type Post struct {
 // pinged). Upserts on message_id so a re-render of the same message is a no-op
 // on the bookkeeping.
 func (s *DiscordStore) RecordPost(ctx context.Context, messageID, channelID string, runAt *time.Time) error {
+	// The run date is locked at first post time: COALESCE keeps any already-set
+	// run_at on conflict so re-recording the same message can never move the
+	// advertised date. A NULL is still fillable (e.g. the schedule was set after
+	// posting), but once set it stays put.
 	const q = `
 		INSERT INTO discord_posts (message_id, channel_id, run_at)
 		VALUES ($1, $2, $3)
 		ON CONFLICT (message_id)
-		DO UPDATE SET channel_id = EXCLUDED.channel_id, run_at = EXCLUDED.run_at`
+		DO UPDATE SET channel_id = EXCLUDED.channel_id,
+		              run_at = COALESCE(discord_posts.run_at, EXCLUDED.run_at)`
 	_, err := s.pool.Exec(ctx, q, messageID, channelID, runAt)
 	return err
+}
+
+// GetPostRunAt returns the run date locked for a tracked post as a Unix
+// timestamp (seconds), or 0 when the post has no recorded run time (NULL run_at)
+// or isn't tracked. Used to re-render a post with the date fixed at first post
+// time (see BuildPost) instead of recomputing it from the live team schedule.
+func (s *DiscordStore) GetPostRunAt(ctx context.Context, messageID string) (int64, error) {
+	var runAt *time.Time
+	err := s.pool.QueryRow(ctx, `SELECT run_at FROM discord_posts WHERE message_id = $1`, messageID).Scan(&runAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	if runAt == nil {
+		return 0, nil
+	}
+	return runAt.Unix(), nil
 }
 
 // SetPostThread records the discussion thread opened off a tracked post.
