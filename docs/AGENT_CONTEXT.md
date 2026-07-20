@@ -782,6 +782,11 @@ column; the `User` JSON model hides it (`json:"-"`).
     created inside the 48 h window), and is marked done even on failure.
   - **~15 min before** (`DuePostPings`/`MarkPostPinged`): pings everyone who
     RSVP'd `yes` or signed up to fill, in the thread.
+  Both scheduled actions first check the tracked message still exists
+  (`postRemoved` → `session.ChannelMessage`, 404 = gone): if the overview post
+  was **deleted**, they send nothing and call `MarkPostGone` (sets both
+  `pinged_at` and `reminded_at`) so neither the reminder nor the ping fires
+  again.
   (`DiscordStore.RecordPost`/`SetPostThread`.) Keyed by message ID so re-posting
   starts fresh.
 - **Label data (codegen)**: the bot formats posts using
@@ -973,7 +978,10 @@ the `pre_made` flag on (see "Pre-made trial run" under Teams). Tables in
   - **15 min before** (`DueThreadRuns`): posts a message in that thread pinging
     every signup; `MarkThreadStarted` (records the ping ran). If the thread is
     somehow missing (older run, or post-time creation failed) it's created here as
-    a fallback.
+    a fallback. First, though, `tagRunSignups` checks the post still exists
+    (`postRemoved` → `session.ChannelMessage`, 404 = gone): if the original post
+    was **deleted**, it skips the thread/ping entirely and marks the run cleaned
+    up (`markRunCleanedUp`) so neither this ping nor the later cleanup revisits it.
   - **2 h after** (`DueCleanupRuns`): deletes the thread + post. The run is
     marked done (`markRunCleanedUp`) **only when the thread was actually
     removed** — if `cleanupRun` reports a non-404 failure (typically a 403

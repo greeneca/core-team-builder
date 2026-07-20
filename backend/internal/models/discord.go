@@ -406,6 +406,17 @@ func (s *DiscordStore) MarkPostReminded(ctx context.Context, messageID string) e
 	return err
 }
 
+// MarkPostGone records that a tracked post's message no longer exists on Discord
+// (it was deleted), so neither its pre-run ping nor its RSVP reminder fires
+// again. Both one-shot markers are set (preserving any already-recorded time via
+// COALESCE) so whichever scheduled action detects the deletion stops the other.
+func (s *DiscordStore) MarkPostGone(ctx context.Context, messageID string) error {
+	_, err := s.pool.Exec(ctx,
+		`UPDATE discord_posts SET pinged_at = COALESCE(pinged_at, now()), reminded_at = COALESCE(reminded_at, now()) WHERE message_id = $1`,
+		messageID)
+	return err
+}
+
 // PostFillList is the sentinel slot value meaning "the general fill list" (a
 // backup pool not tied to a specific roster slot). Any slot > 0 is a real open
 // roster slot a single user can fill.

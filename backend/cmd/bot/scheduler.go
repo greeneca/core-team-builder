@@ -135,6 +135,14 @@ func (b *bot) schedulerTick(ctx context.Context, session *discordgo.Session) {
 // signed up to fill, then records the ping so it fires once. Best effort: send
 // failures are logged but the ping is still marked done to avoid retry storms.
 func (b *bot) pingPostAttendees(ctx context.Context, session *discordgo.Session, p models.Post) {
+	// If the tracked post was deleted, skip the pre-run ping and mark the post
+	// done so neither the ping nor the RSVP reminder fires for it again.
+	if postRemoved(session, p.ChannelID, p.MessageID) {
+		log.Printf("scheduler: post %s removed; skipping pre-run ping and marking cleaned up", p.MessageID)
+		b.markPostGone(ctx, p.MessageID)
+		return
+	}
+
 	c, cancel := context.WithTimeout(ctx, 10*time.Second)
 	rsvps, err := b.discord.ListRSVPs(c, p.MessageID)
 	cancel()
@@ -191,6 +199,14 @@ func (b *bot) pingPostAttendees(ctx context.Context, session *discordgo.Session,
 // failure (so it can't retry-storm), and skipped — but still marked — when the
 // roster can't be determined or everyone has already responded.
 func (b *bot) remindPostNonResponders(ctx context.Context, session *discordgo.Session, p models.Post) {
+	// If the tracked post was deleted, skip the reminder and mark the post done
+	// so neither the RSVP reminder nor the pre-run ping fires for it again.
+	if postRemoved(session, p.ChannelID, p.MessageID) {
+		log.Printf("scheduler: post %s removed; skipping RSVP reminder and marking cleaned up", p.MessageID)
+		b.markPostGone(ctx, p.MessageID)
+		return
+	}
+
 	// Always mark reminded on the way out: a reminder is a one-shot nudge, so a
 	// transient failure shouldn't cause it to fire repeatedly on later ticks.
 	defer func() {
@@ -374,6 +390,16 @@ func (b *bot) postPositioningImages(ctx context.Context, session *discordgo.Sess
 // if it's missing here (an older run, or post-time creation failed) we create it
 // now as a fallback so the ping always lands somewhere.
 func (b *bot) tagRunSignups(ctx context.Context, session *discordgo.Session, run models.PremadeRun) {
+	// If the original post was deleted, there's nothing left to ping about and
+	// no post to anchor a thread on — stop here, send nothing, and mark the run
+	// cleaned up so neither this ping nor the later cleanup pass revisits it
+	// (both DueThreadRuns and DueCleanupRuns skip cleaned-up runs).
+	if postRemoved(session, run.ChannelID, run.MessageID) {
+		log.Printf("scheduler: run %d post removed; skipping signup ping and marking cleaned up", run.ID)
+		b.markRunCleanedUp(ctx, run.ID)
+		return
+	}
+
 	threadID := run.ThreadID
 	if threadID == "" {
 		threadID = b.createRunThread(ctx, session, &run)
@@ -454,6 +480,22 @@ func discordStatus(err error) int {
 	return 0
 }
 
+// postRemoved reports whether the original post a scheduled action is anchored
+// to has been deleted on Discord. It fetches the message and treats a 404
+// (Unknown Message, or an Unknown Channel when the whole channel was removed) as
+// "gone". A missing id or any other error (transient network/permission blips)
+// returns false so we never mistake a temporary failure for a deletion and stop
+// scheduled work prematurely — those callers just retry on a later tick.
+func postRemoved(session *discordgo.Session, channelID, messageID string) bool {
+	if channelID == "" || messageID == "" {
+		return false
+	}
+	if _, err := session.ChannelMessage(channelID, messageID); err != nil {
+		return discordStatus(err) == http.StatusNotFound
+	}
+	return false
+}
+
 // cleanupRun deletes the run's thread and post. It returns a non-nil error only
 // when a thread that should exist could not be deleted for a reason other than
 // "already gone" — almost always a 403 because the bot lacks the Manage Threads
@@ -494,6 +536,17 @@ func (b *bot) markRunCleanedUp(ctx context.Context, runID int64) {
 	c, cancel := context.WithTimeout(ctx, 10*time.Second)
 	if err := b.premade.MarkCleanedUp(c, runID); err != nil {
 		log.Printf("scheduler: mark cleaned up (run %d): %v", runID, err)
+	}
+	cancel()
+}
+
+// markPostGone records that a tracked /coreteam post overview's message was
+// deleted, so the scheduler stops both its pre-run ping and RSVP reminder. Best
+// effort: a failure is logged, leaving the post to be retried on a later tick.
+func (b *bot) markPostGone(ctx context.Context, messageID string) {
+	c, cancel := context.WithTimeout(ctx, 10*time.Second)
+	if err := b.discord.MarkPostGone(c, messageID); err != nil {
+		log.Printf("scheduler: mark post gone (%s): %v", messageID, err)
 	}
 	cancel()
 }
