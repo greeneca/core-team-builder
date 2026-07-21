@@ -1866,6 +1866,24 @@ func updateEphemeral(s *discordgo.Session, i *discordgo.InteractionCreate, msg s
 	}
 }
 
+// dismissEphemeral deletes the ephemeral message a component interaction was
+// attached to (e.g. a one-shot signup picker that's done its job). It first
+// acknowledges the interaction with a deferred message update — the only way to
+// respond without changing the message — then deletes that response, which for a
+// component interaction is the ephemeral message itself. Best effort: failures
+// are logged.
+func dismissEphemeral(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseDeferredMessageUpdate,
+	}); err != nil {
+		log.Printf("dismiss ephemeral ack: %v", err)
+		return
+	}
+	if err := s.InteractionResponseDelete(i.Interaction); err != nil {
+		log.Printf("dismiss ephemeral delete: %v", err)
+	}
+}
+
 // truncate caps s to at most max characters (rune-aware so multibyte runes are
 // never split), appending an ellipsis when it had to cut.
 func truncate(s string, max int) string {

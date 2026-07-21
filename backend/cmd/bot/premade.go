@@ -709,17 +709,19 @@ func premadeSignupIsDetached(i *discordgo.InteractionCreate, run *models.Premade
 
 // commitDetachedPremadeSignup finishes a signup made from the private signup
 // dropdown: it edits the run's post in place out of band (the interaction is on
-// the ephemeral picker, not the post) and replaces the picker with a short
-// confirmation. notice, when set, is shown instead of the default confirmation.
+// the ephemeral picker, not the post). A plain signup then dismisses the picker
+// automatically — the refreshed post already reflects the change, so no
+// confirmation is needed. A notice (e.g. a waitlist message) carries information
+// the post doesn't, so the picker is replaced with that text instead of deleted.
 func (b *bot) commitDetachedPremadeSignup(ctx context.Context, s *discordgo.Session, i *discordgo.InteractionCreate, run *models.PremadeRun, notice string) {
 	if err := b.refreshPremadePostMessage(ctx, s, run); err != nil {
 		log.Printf("premade: detached signup refresh post (run %d): %v", run.ID, err)
 	}
-	msg := notice
-	if msg == "" {
-		msg = "\u2705 Your signup has been updated — see the run post."
+	if notice == "" {
+		dismissEphemeral(s, i)
+		return
 	}
-	updateEphemeral(s, i, msg)
+	updateEphemeral(s, i, notice)
 }
 
 // signupClaimSlot claims a specific open slot (advanced mode), releasing any

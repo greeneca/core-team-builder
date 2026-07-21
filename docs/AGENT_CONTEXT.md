@@ -910,8 +910,11 @@ the `pre_made` flag on (see "Pre-made trial run" under Teams). Tables in
   `dispatchPremadeSignupChoice` with the on-post dropdown). Because the private
   dropdown isn't on the post, its signup helpers detect the detached interaction
   (`premadeSignupIsDetached`) and edit the post **out of band**
-  (`commitDetachedPremadeSignup` → `refreshPremadePostMessage`), confirming in the
-  ephemeral message. The final button row (`premadeActionRow(showMaybe)`) has the
+  (`commitDetachedPremadeSignup` → `refreshPremadePostMessage`). A plain signup
+  then **auto-dismisses** the ephemeral picker (`dismissEphemeral`: deferred
+  message update + `InteractionResponseDelete`), since the refreshed post already
+  reflects the change; only a notice (e.g. a waitlist message) keeps the message,
+  shown via `updateEphemeral`. The final button row (`premadeActionRow(showMaybe)`) has the
   simple-`buttons` **Maybe** button (when `showMaybe`), **Un-Sign**
   (`premade_leave`, clears slot/waitlist/tentative) and **Edit run**
   (`premade_edit`). A user is only ever in one of signup / waitlist / tentative at
