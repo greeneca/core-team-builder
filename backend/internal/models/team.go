@@ -42,6 +42,36 @@ var ValidRoleBases = map[string]bool{
 // or unrecognized (e.g. older saved data created before role bases existed).
 const DefaultRoleBase = "dps"
 
+// Simple-signup visual styles (Team.SimpleSignupStyle). They control how a
+// simple (role-based) pre-made run post presents its signup controls; advanced
+// signup is unaffected.
+const (
+	// SimpleSignupStyleDropdown (the default) renders one consolidated signup
+	// dropdown listing each role.
+	SimpleSignupStyleDropdown = "dropdown"
+	// SimpleSignupStyleButtons renders one color-coded button per role plus a
+	// separate "Maybe" (tentative) button.
+	SimpleSignupStyleButtons = "buttons"
+	// SimpleSignupStyleEphemeral renders a single green "Sign up" button that
+	// opens the consolidated signup dropdown privately (ephemerally) for the
+	// presser, instead of showing the dropdown on the post itself.
+	SimpleSignupStyleEphemeral = "ephemeral"
+)
+
+// NormalizeSimpleSignupStyle returns a known simple-signup style, defaulting to
+// SimpleSignupStyleDropdown for empty or unrecognized values so older data and
+// clients keep the current appearance.
+func NormalizeSimpleSignupStyle(style string) string {
+	switch style {
+	case SimpleSignupStyleButtons:
+		return SimpleSignupStyleButtons
+	case SimpleSignupStyleEphemeral:
+		return SimpleSignupStyleEphemeral
+	default:
+		return SimpleSignupStyleDropdown
+	}
+}
+
 // TeamRoles is a team's ordered set of roster roles, stored as JSONB. It
 // implements sql.Scanner / driver.Valuer so it round-trips through the database
 // as a JSON array of {key, label} objects.
@@ -356,6 +386,11 @@ type Team struct {
 	// pre-made run; when a slot of that role frees up, the head of that role's
 	// waitlist is auto-promoted into it. Only meaningful when PreMade is true.
 	WaitlistEnabled bool `json:"waitlist_enabled"`
+	// SimpleSignupStyle controls how a simple (role-based) signup post presents
+	// its controls (only meaningful when PreMade and SimpleSignup are true). One
+	// of SimpleSignupStyle* — "dropdown" (default: one consolidated dropdown) or
+	// "buttons" (one color-coded button per role plus a separate Maybe button).
+	SimpleSignupStyle string `json:"simple_signup_style"`
 	// Roles is the team's customizable set of roster roles (key + display
 	// label). The roster role picker reads from this; defaults to the historical
 	// fixed set (see DefaultTeamRoles).
@@ -405,12 +440,12 @@ func (s *TeamStore) Create(ctx context.Context, ownerID int64, name string, copy
 	if copyFromTeamID != 0 {
 		// Copy the source team's schedule onto the new team.
 		const insertTeamCopy = `
-			INSERT INTO teams (name, owner_id, schedule_days, schedule_time, encounters_enabled, post_footer, dm_footer, signup_post, auto_share_pool_viewers, pre_made, premade_post, simple_signup, waitlist_enabled, roles)
-			SELECT $1, $2, schedule_days, schedule_time, encounters_enabled, post_footer, dm_footer, signup_post, auto_share_pool_viewers, pre_made, premade_post, simple_signup, waitlist_enabled, roles
+			INSERT INTO teams (name, owner_id, schedule_days, schedule_time, encounters_enabled, post_footer, dm_footer, signup_post, auto_share_pool_viewers, pre_made, premade_post, simple_signup, waitlist_enabled, simple_signup_style, roles)
+			SELECT $1, $2, schedule_days, schedule_time, encounters_enabled, post_footer, dm_footer, signup_post, auto_share_pool_viewers, pre_made, premade_post, simple_signup, waitlist_enabled, simple_signup_style, roles
 			FROM teams WHERE id = $3
-			RETURNING id, name, owner_id, schedule_days, schedule_time, encounters_enabled, post_footer, dm_footer, signup_post, auto_share_pool_viewers, pre_made, premade_post, simple_signup, waitlist_enabled, roles, created_at, updated_at`
+			RETURNING id, name, owner_id, schedule_days, schedule_time, encounters_enabled, post_footer, dm_footer, signup_post, auto_share_pool_viewers, pre_made, premade_post, simple_signup, waitlist_enabled, simple_signup_style, roles, created_at, updated_at`
 		if err := tx.QueryRow(ctx, insertTeamCopy, name, ownerID, copyFromTeamID).Scan(
-			&team.ID, &team.Name, &team.OwnerID, &team.ScheduleDays, &team.ScheduleTime, &team.EncountersEnabled, &team.PostFooter, &team.DMFooter, &team.SignupPost, &team.AutoSharePoolViewers, &team.PreMade, &team.PremadePost, &team.SimpleSignup, &team.WaitlistEnabled, &team.Roles, &team.CreatedAt, &team.UpdatedAt,
+			&team.ID, &team.Name, &team.OwnerID, &team.ScheduleDays, &team.ScheduleTime, &team.EncountersEnabled, &team.PostFooter, &team.DMFooter, &team.SignupPost, &team.AutoSharePoolViewers, &team.PreMade, &team.PremadePost, &team.SimpleSignup, &team.WaitlistEnabled, &team.SimpleSignupStyle, &team.Roles, &team.CreatedAt, &team.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -418,9 +453,9 @@ func (s *TeamStore) Create(ctx context.Context, ownerID int64, name string, copy
 		const insertTeam = `
 			INSERT INTO teams (name, owner_id)
 			VALUES ($1, $2)
-			RETURNING id, name, owner_id, schedule_days, schedule_time, encounters_enabled, post_footer, dm_footer, signup_post, auto_share_pool_viewers, pre_made, premade_post, simple_signup, waitlist_enabled, roles, created_at, updated_at`
+			RETURNING id, name, owner_id, schedule_days, schedule_time, encounters_enabled, post_footer, dm_footer, signup_post, auto_share_pool_viewers, pre_made, premade_post, simple_signup, waitlist_enabled, simple_signup_style, roles, created_at, updated_at`
 		if err := tx.QueryRow(ctx, insertTeam, name, ownerID).Scan(
-			&team.ID, &team.Name, &team.OwnerID, &team.ScheduleDays, &team.ScheduleTime, &team.EncountersEnabled, &team.PostFooter, &team.DMFooter, &team.SignupPost, &team.AutoSharePoolViewers, &team.PreMade, &team.PremadePost, &team.SimpleSignup, &team.WaitlistEnabled, &team.Roles, &team.CreatedAt, &team.UpdatedAt,
+			&team.ID, &team.Name, &team.OwnerID, &team.ScheduleDays, &team.ScheduleTime, &team.EncountersEnabled, &team.PostFooter, &team.DMFooter, &team.SignupPost, &team.AutoSharePoolViewers, &team.PreMade, &team.PremadePost, &team.SimpleSignup, &team.WaitlistEnabled, &team.SimpleSignupStyle, &team.Roles, &team.CreatedAt, &team.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -585,7 +620,7 @@ func (s *TeamStore) CountOwned(ctx context.Context, ownerID int64) (int, error) 
 // most recently updated first. Players and members are not populated here.
 func (s *TeamStore) ListForUser(ctx context.Context, userID int64) ([]Team, error) {
 	const q = `
-		SELECT t.id, t.name, t.owner_id, t.schedule_days, t.schedule_time, t.encounters_enabled, t.post_footer, t.dm_footer, t.signup_post, t.auto_share_pool_viewers, t.pre_made, t.premade_post, t.simple_signup, t.waitlist_enabled, t.roles, t.created_at, t.updated_at
+		SELECT t.id, t.name, t.owner_id, t.schedule_days, t.schedule_time, t.encounters_enabled, t.post_footer, t.dm_footer, t.signup_post, t.auto_share_pool_viewers, t.pre_made, t.premade_post, t.simple_signup, t.waitlist_enabled, t.simple_signup_style, t.roles, t.created_at, t.updated_at
 		FROM teams t
 		JOIN team_members m ON m.team_id = t.id
 		WHERE m.user_id = $1
@@ -600,7 +635,7 @@ func (s *TeamStore) ListForUser(ctx context.Context, userID int64) ([]Team, erro
 	teams := []Team{}
 	for rows.Next() {
 		var t Team
-		if err := rows.Scan(&t.ID, &t.Name, &t.OwnerID, &t.ScheduleDays, &t.ScheduleTime, &t.EncountersEnabled, &t.PostFooter, &t.DMFooter, &t.SignupPost, &t.AutoSharePoolViewers, &t.PreMade, &t.PremadePost, &t.SimpleSignup, &t.WaitlistEnabled, &t.Roles, &t.CreatedAt, &t.UpdatedAt); err != nil {
+		if err := rows.Scan(&t.ID, &t.Name, &t.OwnerID, &t.ScheduleDays, &t.ScheduleTime, &t.EncountersEnabled, &t.PostFooter, &t.DMFooter, &t.SignupPost, &t.AutoSharePoolViewers, &t.PreMade, &t.PremadePost, &t.SimpleSignup, &t.WaitlistEnabled, &t.SimpleSignupStyle, &t.Roles, &t.CreatedAt, &t.UpdatedAt); err != nil {
 			return nil, err
 		}
 		teams = append(teams, t)
@@ -614,10 +649,10 @@ func (s *TeamStore) Get(ctx context.Context, teamID int64) (*Team, error) {
 	team := &Team{}
 	var activeRosterID *int64
 	const teamQ = `
-		SELECT id, name, owner_id, schedule_days, schedule_time, encounters_enabled, post_footer, dm_footer, signup_post, auto_share_pool_viewers, pre_made, premade_post, simple_signup, waitlist_enabled, roles, active_roster_id, created_at, updated_at
+		SELECT id, name, owner_id, schedule_days, schedule_time, encounters_enabled, post_footer, dm_footer, signup_post, auto_share_pool_viewers, pre_made, premade_post, simple_signup, waitlist_enabled, simple_signup_style, roles, active_roster_id, created_at, updated_at
 		FROM teams WHERE id = $1`
 	err := s.pool.QueryRow(ctx, teamQ, teamID).Scan(
-		&team.ID, &team.Name, &team.OwnerID, &team.ScheduleDays, &team.ScheduleTime, &team.EncountersEnabled, &team.PostFooter, &team.DMFooter, &team.SignupPost, &team.AutoSharePoolViewers, &team.PreMade, &team.PremadePost, &team.SimpleSignup, &team.WaitlistEnabled, &team.Roles, &activeRosterID, &team.CreatedAt, &team.UpdatedAt,
+		&team.ID, &team.Name, &team.OwnerID, &team.ScheduleDays, &team.ScheduleTime, &team.EncountersEnabled, &team.PostFooter, &team.DMFooter, &team.SignupPost, &team.AutoSharePoolViewers, &team.PreMade, &team.PremadePost, &team.SimpleSignup, &team.WaitlistEnabled, &team.SimpleSignupStyle, &team.Roles, &activeRosterID, &team.CreatedAt, &team.UpdatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrTeamNotFound
@@ -702,30 +737,33 @@ func (s *TeamStore) Access(ctx context.Context, teamID, userID int64) (found boo
 // Save updates a team's metadata: name, trial schedule (days and the UTC time),
 // the encounters-enabled flag, the bot footers, the signup post, the auto-share
 // flag, the pre-made flag and its post body, the simple-signup flag, the
-// waitlist flag, and the roster role set. Roster lineups live under rosters and
-// are saved via SavePlayer, so this no longer touches players.
+// waitlist flag, the simple-signup visual style, and the roster role set.
+// simpleSignupStyle is normalized (see NormalizeSimpleSignupStyle). Roster
+// lineups live under rosters and are saved via SavePlayer, so this no longer
+// touches players.
 //
 // expectedUpdatedAt enables optimistic concurrency: when non-zero, the team row
 // is updated only if its current updated_at still matches, otherwise
 // ErrVersionConflict is returned so a stale save doesn't clobber a concurrent
 // edit. A zero value skips the check (used by callers that don't track a
 // version, e.g. older clients).
-func (s *TeamStore) Save(ctx context.Context, teamID int64, name string, days []string, scheduleTime string, encountersEnabled bool, postFooter string, dmFooter string, signupPost string, autoSharePoolViewers bool, preMade bool, premadePost string, simpleSignup bool, waitlistEnabled bool, roles TeamRoles, expectedUpdatedAt time.Time) error {
+func (s *TeamStore) Save(ctx context.Context, teamID int64, name string, days []string, scheduleTime string, encountersEnabled bool, postFooter string, dmFooter string, signupPost string, autoSharePoolViewers bool, preMade bool, premadePost string, simpleSignup bool, waitlistEnabled bool, simpleSignupStyle string, roles TeamRoles, expectedUpdatedAt time.Time) error {
+	simpleSignupStyle = NormalizeSimpleSignupStyle(simpleSignupStyle)
 	if expectedUpdatedAt.IsZero() {
 		const updateTeam = `
 			UPDATE teams
-			SET name = $1, schedule_days = $2, schedule_time = $3, encounters_enabled = $4, post_footer = $5, dm_footer = $6, signup_post = $7, auto_share_pool_viewers = $8, pre_made = $9, premade_post = $10, simple_signup = $11, waitlist_enabled = $12, roles = $13
-			WHERE id = $14`
-		if _, err := s.pool.Exec(ctx, updateTeam, name, days, scheduleTime, encountersEnabled, postFooter, dmFooter, signupPost, autoSharePoolViewers, preMade, premadePost, simpleSignup, waitlistEnabled, roles, teamID); err != nil {
+			SET name = $1, schedule_days = $2, schedule_time = $3, encounters_enabled = $4, post_footer = $5, dm_footer = $6, signup_post = $7, auto_share_pool_viewers = $8, pre_made = $9, premade_post = $10, simple_signup = $11, waitlist_enabled = $12, roles = $13, simple_signup_style = $14
+			WHERE id = $15`
+		if _, err := s.pool.Exec(ctx, updateTeam, name, days, scheduleTime, encountersEnabled, postFooter, dmFooter, signupPost, autoSharePoolViewers, preMade, premadePost, simpleSignup, waitlistEnabled, roles, simpleSignupStyle, teamID); err != nil {
 			return err
 		}
 		return nil
 	}
 	const updateTeamVer = `
 		UPDATE teams
-		SET name = $1, schedule_days = $2, schedule_time = $3, encounters_enabled = $4, post_footer = $5, dm_footer = $6, signup_post = $7, auto_share_pool_viewers = $8, pre_made = $9, premade_post = $10, simple_signup = $11, waitlist_enabled = $12, roles = $13
-		WHERE id = $14 AND updated_at = $15`
-	tag, err := s.pool.Exec(ctx, updateTeamVer, name, days, scheduleTime, encountersEnabled, postFooter, dmFooter, signupPost, autoSharePoolViewers, preMade, premadePost, simpleSignup, waitlistEnabled, roles, teamID, expectedUpdatedAt)
+		SET name = $1, schedule_days = $2, schedule_time = $3, encounters_enabled = $4, post_footer = $5, dm_footer = $6, signup_post = $7, auto_share_pool_viewers = $8, pre_made = $9, premade_post = $10, simple_signup = $11, waitlist_enabled = $12, roles = $13, simple_signup_style = $14
+		WHERE id = $15 AND updated_at = $16`
+	tag, err := s.pool.Exec(ctx, updateTeamVer, name, days, scheduleTime, encountersEnabled, postFooter, dmFooter, signupPost, autoSharePoolViewers, preMade, premadePost, simpleSignup, waitlistEnabled, roles, simpleSignupStyle, teamID, expectedUpdatedAt)
 	if err != nil {
 		return err
 	}
@@ -993,7 +1031,7 @@ func (s *TeamStore) IsTemplatePublishedToGuild(ctx context.Context, teamID int64
 // are returned (a template that was un-flagged stops being runnable).
 func (s *TeamStore) ListPublishedTemplatesForGuild(ctx context.Context, guildID string) ([]Team, error) {
 	const q = `
-		SELECT t.id, t.name, t.owner_id, t.schedule_days, t.schedule_time, t.encounters_enabled, t.post_footer, t.dm_footer, t.signup_post, t.auto_share_pool_viewers, t.pre_made, t.premade_post, t.simple_signup, t.waitlist_enabled, t.roles, t.created_at, t.updated_at
+		SELECT t.id, t.name, t.owner_id, t.schedule_days, t.schedule_time, t.encounters_enabled, t.post_footer, t.dm_footer, t.signup_post, t.auto_share_pool_viewers, t.pre_made, t.premade_post, t.simple_signup, t.waitlist_enabled, t.simple_signup_style, t.roles, t.created_at, t.updated_at
 		FROM teams t
 		JOIN team_guild_templates g ON g.team_id = t.id
 		WHERE g.guild_id = $1 AND t.pre_made = true
@@ -1007,7 +1045,7 @@ func (s *TeamStore) ListPublishedTemplatesForGuild(ctx context.Context, guildID 
 	teams := []Team{}
 	for rows.Next() {
 		var t Team
-		if err := rows.Scan(&t.ID, &t.Name, &t.OwnerID, &t.ScheduleDays, &t.ScheduleTime, &t.EncountersEnabled, &t.PostFooter, &t.DMFooter, &t.SignupPost, &t.AutoSharePoolViewers, &t.PreMade, &t.PremadePost, &t.SimpleSignup, &t.WaitlistEnabled, &t.Roles, &t.CreatedAt, &t.UpdatedAt); err != nil {
+		if err := rows.Scan(&t.ID, &t.Name, &t.OwnerID, &t.ScheduleDays, &t.ScheduleTime, &t.EncountersEnabled, &t.PostFooter, &t.DMFooter, &t.SignupPost, &t.AutoSharePoolViewers, &t.PreMade, &t.PremadePost, &t.SimpleSignup, &t.WaitlistEnabled, &t.SimpleSignupStyle, &t.Roles, &t.CreatedAt, &t.UpdatedAt); err != nil {
 			return nil, err
 		}
 		teams = append(teams, t)

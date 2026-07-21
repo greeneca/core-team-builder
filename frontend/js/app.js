@@ -295,6 +295,11 @@
       premade_post: team.premade_post || "",
       simple_signup: true,
       waitlist_enabled: team.waitlist_enabled === true,
+      simple_signup_style:
+        team.simple_signup_style === "buttons" ||
+        team.simple_signup_style === "ephemeral"
+          ? team.simple_signup_style
+          : "dropdown",
     };
   }
 
@@ -1500,6 +1505,7 @@
       premade_post: el("premade-post-input") ? el("premade-post-input").value : "",
       simple_signup: simpleSignup(),
       waitlist_enabled: waitlistEnabled(),
+      simple_signup_style: simpleSignupStyle(),
       roles: teamRoles(),
     };
   }
@@ -3365,6 +3371,15 @@
   // signup. Only applies in pre-made mode, where the simple-signup toggle lives.
   function applySimpleSignupMode() {
     const on = preMade() && simpleSignup();
+    // The simple-signup layout picker (dropdown vs role buttons) only applies to
+    // a simple pre-made run, so surface it only in that mode.
+    const styleLabel = el("simple-signup-style-label");
+    if (styleLabel) styleLabel.classList.toggle("is-hidden", !on);
+    const styleSelect = el("simple-signup-style-select");
+    if (styleSelect) {
+      styleSelect.value = simpleSignupStyle();
+      styleSelect.disabled = !canEdit();
+    }
     // Drives the compact single-row slot layout (title + role picker) via CSS.
     el("roster").classList.toggle("roster--simple", on);
     // The roster-roles editor stays visible for simple signups too: players pick
@@ -3399,6 +3414,14 @@
 
   function waitlistEnabled() {
     return !!currentTeam && currentTeam.waitlist_enabled === true;
+  }
+
+  // The stored simple-signup layout style ("dropdown" | "buttons" |
+  // "ephemeral"), defaulting to "dropdown" for teams saved before the style
+  // existed or with an unknown value. Only meaningful for a simple pre-made run.
+  function simpleSignupStyle() {
+    const v = currentTeam && currentTeam.simple_signup_style;
+    return v === "buttons" || v === "ephemeral" ? v : "dropdown";
   }
 
   // The encounters bar lets you pick the *current* encounter (whose per-player
@@ -3895,6 +3918,19 @@
       return;
     }
     currentTeam.waitlist_enabled = e.target.checked;
+  });
+  // Pick the simple-signup layout (dropdown, color-coded role buttons, or a
+  // single button that opens a private dropdown). The generic detail-view change
+  // handler persists it via the team autosave; this just updates the cached team
+  // so that save sends the new value.
+  el("simple-signup-style-select").addEventListener("change", (e) => {
+    if (!canEdit()) {
+      e.target.value = simpleSignupStyle();
+      return;
+    }
+    const v = e.target.value;
+    currentTeam.simple_signup_style =
+      v === "buttons" || v === "ephemeral" ? v : "dropdown";
   });
   addEncounterForm.addEventListener("submit", async (e) => {
     e.preventDefault();

@@ -166,6 +166,14 @@
           <label class="toggle" id="advanced-signup-label" title="Only applies to a pre-made trial run. Off (simple, the default): class, gear, and the details dropdown are hidden; players pick a role and are placed in the first open slot matching it. On (advanced): the post shows each slot's class and gear, players can request a slot's build details, and they claim an exact slot.">
             <input type="checkbox" id="advanced-signup-toggle" /> Advanced signup (per slot)
           </label>
+          <label class="toggle is-hidden" id="simple-signup-style-label" for="simple-signup-style-select" title="Only applies to a simple (role-based) pre-made run. Chooses how players sign up on the post: a single dropdown listing each role; one color-coded button per role (tank = blue, healer = green, dps/support dps = red) plus a separate Maybe button; or a single green Sign up button that opens the dropdown privately (just for the presser).">
+            Simple signup layout
+            <select id="simple-signup-style-select" class="input input--sm">
+              <option value="dropdown">Dropdown (single menu)</option>
+              <option value="buttons">Buttons (one per role)</option>
+              <option value="ephemeral">Button → private dropdown</option>
+            </select>
+          </label>
           <label class="toggle" id="waitlist-label" title="Only applies to a pre-made trial run. When on, players can join a per-role waitlist once a role is full; when a slot of that role opens up, the next person on that role's waitlist is automatically moved in and notified by DM.">
             <input type="checkbox" id="waitlist-toggle" /> Allow waitlist (per role)
           </label>

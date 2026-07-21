@@ -27,6 +27,15 @@ import (
 //	                                    "slot:<n>" claim a specific slot, "role:<key>" sign up by
 //	                                    role (auto-waitlists when the role is full), "wait:<key>"
 //	                                    join a full role's waitlist, "tent:<key>" mark tentative)
+//	premade_srole_<key>                (simple "buttons" style; one color-coded button per role —
+//	                                    signs up for <key>, auto-waitlisting when the role is full)
+//	premade_tentative                  (simple "buttons" style; the "Maybe" button — marks tentative)
+//	premade_signup_closed              (simple "buttons"/"ephemeral" styles; disabled placeholder when
+//	                                    nothing is actionable)
+//	premade_signup_open                (simple "ephemeral" style; the green "Sign up" button — opens
+//	                                    the signup dropdown privately for the presser)
+//	premade_esignup_<runID>            (simple "ephemeral" style; the private signup dropdown — same
+//	                                    prefixed values as premade_signup, run id carried in the id)
 //	premade_claim                      (legacy, older posts; value = slot to claim, or role in simple mode)
 //	premade_details                    (on the post; value = slot to DM details for)
 //	premade_wait                       (legacy, older posts; value = role to waitlist for)
@@ -63,6 +72,34 @@ const (
 	premadeSignupTentPrefix = "tent:" // mark tentative ("maybe") for a role
 )
 
+// Simple "buttons"-style signup custom IDs. When a simple-signup team picks the
+// "buttons" visual style (Team.SimpleSignupStyle == SimpleSignupStyleButtons),
+// the post shows one color-coded button per role plus a separate Maybe button
+// instead of the consolidated dropdown; those actions are buttons rather than
+// select values.
+const (
+	// premadeSignupRoleBtnPrefix is followed by the role key; pressing signs the
+	// user up for that role (see handlePremadeSignupRoleButton).
+	premadeSignupRoleBtnPrefix = "premade_srole_"
+	premadeTentativeID         = "premade_tentative"
+	premadeSignupClosedID      = "premade_signup_closed"
+)
+
+// Simple "ephemeral"-style signup custom IDs. When a simple-signup team picks
+// the "ephemeral" visual style (Team.SimpleSignupStyle ==
+// SimpleSignupStyleEphemeral), the post shows a single green "Sign up" button
+// that opens the consolidated signup dropdown privately for the presser instead
+// of rendering the dropdown on the post.
+const (
+	// premadeSignupOpenID is the green "Sign up" button on the post; pressing it
+	// opens the private signup dropdown (see handlePremadeSignupOpen).
+	premadeSignupOpenID = "premade_signup_open"
+	// premadeSignupEphemeralPrefix is followed by the run id; it's the custom id
+	// of the private signup dropdown so its selection handler can find the run
+	// (the ephemeral message isn't the post and can't be looked up by message).
+	premadeSignupEphemeralPrefix = "premade_esignup_"
+)
+
 // onPremadeComponent dispatches every premade_* component interaction.
 func (b *bot) onPremadeComponent(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	id := i.MessageComponentData().CustomID
@@ -71,6 +108,14 @@ func (b *bot) onPremadeComponent(s *discordgo.Session, i *discordgo.InteractionC
 		b.handlePremadeDMTimezone(s, i)
 	case id == premadeSignupID:
 		b.handlePremadeSignup(s, i)
+	case strings.HasPrefix(id, premadeSignupRoleBtnPrefix):
+		b.handlePremadeSignupRoleButton(s, i)
+	case id == premadeTentativeID:
+		b.handlePremadeTentative(s, i)
+	case id == premadeSignupOpenID:
+		b.handlePremadeSignupOpen(s, i)
+	case strings.HasPrefix(id, premadeSignupEphemeralPrefix):
+		b.handlePremadeEphemeralSignup(s, i)
 	case id == premadeClaimID:
 		b.handlePremadeClaim(s, i)
 	case id == premadeDetailsID:
@@ -428,6 +473,14 @@ func (b *bot) handlePremadeSignup(s *discordgo.Session, i *discordgo.Interaction
 		return
 	}
 
+	b.dispatchPremadeSignupChoice(ctx, s, i, run, team, user, choice)
+}
+
+// dispatchPremadeSignupChoice routes a consolidated-signup selection value to
+// the matching signup helper based on its prefix (see the premadeSignup*Prefix
+// constants). Shared by the on-post dropdown (handlePremadeSignup) and the
+// private "ephemeral"-style dropdown (handlePremadeEphemeralSignup).
+func (b *bot) dispatchPremadeSignupChoice(ctx context.Context, s *discordgo.Session, i *discordgo.InteractionCreate, run *models.PremadeRun, team *models.Team, user *discordgo.User, choice string) {
 	switch {
 	case strings.HasPrefix(choice, premadeSignupSlotPrefix):
 		slot, err := strconv.Atoi(strings.TrimPrefix(choice, premadeSignupSlotPrefix))
@@ -442,6 +495,170 @@ func (b *bot) handlePremadeSignup(s *discordgo.Session, i *discordgo.Interaction
 	case strings.HasPrefix(choice, premadeSignupTentPrefix):
 		b.signupTentative(ctx, s, i, run, team, user, strings.TrimPrefix(choice, premadeSignupTentPrefix))
 	}
+}
+
+// handlePremadeSignupOpen backs the simple "ephemeral"-style green "Sign up"
+// button (premade_signup_open): instead of showing the signup dropdown on the
+// post, it opens the same consolidated dropdown in a private (ephemeral) message
+// just for the presser. The dropdown's custom id carries the run id so its
+// selection handler can find the run without the post message.
+func (b *bot) handlePremadeSignupOpen(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	user := invokingUser(i)
+	if user == nil || i.Message == nil {
+		ephemeral(s, i, "Could not identify your Discord account.")
+		return
+	}
+
+	ctx, cancel := handlerContext()
+	defer cancel()
+
+	run, ok := b.premadeRunForMessage(ctx, s, i)
+	if !ok {
+		return
+	}
+	team, _, _, _, err := b.loadTeamData(ctx, run.TeamID)
+	if err != nil {
+		log.Printf("premade: signup open load team: %v", err)
+		ephemeral(s, i, "Something went wrong. Please try again.")
+		return
+	}
+	signups, err := b.premade.ListSignups(ctx, run.ID)
+	if err != nil {
+		log.Printf("premade: signup open list signups: %v", err)
+		ephemeral(s, i, "Something went wrong. Please try again.")
+		return
+	}
+	taken := map[int]bool{}
+	for _, sg := range signups {
+		taken[sg.Slot] = true
+	}
+	opts := premadeSignupOptions(team, taken)
+	if len(opts) == 0 {
+		ephemeral(s, i, "Signups are closed — there's nothing to sign up for right now.")
+		return
+	}
+	if len(opts) > 25 {
+		opts = opts[:25]
+	}
+	if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Flags:   discordgo.MessageFlagsEphemeral,
+			Content: "Choose how you'd like to sign up:",
+			Components: []discordgo.MessageComponent{
+				discordgo.ActionsRow{Components: []discordgo.MessageComponent{
+					discordgo.SelectMenu{
+						CustomID:    premadeSignupEphemeralPrefix + strconv.FormatInt(run.ID, 10),
+						Placeholder: "Sign up, join a waitlist, or mark tentative",
+						Options:     opts,
+					},
+				}},
+			},
+		},
+	}); err != nil {
+		log.Printf("premade: signup open respond: %v", err)
+	}
+}
+
+// handlePremadeEphemeralSignup handles a pick from the private signup dropdown
+// (simple "ephemeral" style). The run id is encoded in the select's custom id
+// because the ephemeral message isn't the post and can't be looked up by
+// message. It dispatches the same prefixed values as handlePremadeSignup; the
+// shared signup helpers detect the detached interaction and edit the post out of
+// band, confirming in the ephemeral message (see renderPremadeUpdate).
+func (b *bot) handlePremadeEphemeralSignup(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	user := invokingUser(i)
+	if user == nil {
+		ephemeral(s, i, "Could not identify your Discord account.")
+		return
+	}
+	values := i.MessageComponentData().Values
+	if len(values) == 0 {
+		return
+	}
+	choice := values[0]
+	runID, err := strconv.ParseInt(strings.TrimPrefix(i.MessageComponentData().CustomID, premadeSignupEphemeralPrefix), 10, 64)
+	if err != nil {
+		return
+	}
+
+	ctx, cancel := handlerContext()
+	defer cancel()
+
+	run, err := b.premade.GetRun(ctx, runID)
+	if errors.Is(err, models.ErrPremadeRunNotFound) {
+		updateEphemeral(s, i, "This run is no longer active.")
+		return
+	}
+	if err != nil {
+		log.Printf("premade: ephemeral signup get run: %v", err)
+		ephemeral(s, i, "Something went wrong. Please try again.")
+		return
+	}
+	team, _, _, _, err := b.loadTeamData(ctx, run.TeamID)
+	if err != nil {
+		log.Printf("premade: ephemeral signup load team: %v", err)
+		ephemeral(s, i, "Something went wrong. Please try again.")
+		return
+	}
+	b.dispatchPremadeSignupChoice(ctx, s, i, run, team, user, choice)
+}
+
+// handlePremadeSignupRoleButton signs the presser up for the pressed role button
+// (simple "buttons" style). The role key is encoded in the button's custom ID.
+// It mirrors the dropdown's role option: claim the first open slot for that
+// role, or join its waitlist when the role is full (if the waitlist is enabled).
+func (b *bot) handlePremadeSignupRoleButton(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	user := invokingUser(i)
+	if user == nil || i.Message == nil {
+		ephemeral(s, i, "Could not identify your Discord account.")
+		return
+	}
+	role := strings.TrimPrefix(i.MessageComponentData().CustomID, premadeSignupRoleBtnPrefix)
+	if role == "" {
+		return
+	}
+
+	ctx, cancel := handlerContext()
+	defer cancel()
+
+	run, ok := b.premadeRunForMessage(ctx, s, i)
+	if !ok {
+		return
+	}
+	team, _, _, _, err := b.loadTeamData(ctx, run.TeamID)
+	if err != nil {
+		log.Printf("premade: signup role button load team: %v", err)
+		ephemeral(s, i, "Something went wrong. Please try again.")
+		return
+	}
+	b.signupByRole(ctx, s, i, run, team, user, role)
+}
+
+// handlePremadeTentative marks the presser tentative ("maybe") for the run. It
+// backs the simple "buttons"-style Maybe button; the dropdown style keeps
+// tentative as an option in the consolidated signup dropdown instead.
+func (b *bot) handlePremadeTentative(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	user := invokingUser(i)
+	if user == nil || i.Message == nil {
+		ephemeral(s, i, "Could not identify your Discord account.")
+		return
+	}
+
+	ctx, cancel := handlerContext()
+	defer cancel()
+
+	run, ok := b.premadeRunForMessage(ctx, s, i)
+	if !ok {
+		return
+	}
+	team, _, _, _, err := b.loadTeamData(ctx, run.TeamID)
+	if err != nil {
+		log.Printf("premade: tentative load team: %v", err)
+		ephemeral(s, i, "Something went wrong. Please try again.")
+		return
+	}
+	b.signupTentative(ctx, s, i, run, team, user, "")
 }
 
 // currentSlot returns the slot/role the user currently holds on the run (if
@@ -462,6 +679,13 @@ func (b *bot) currentSlot(ctx context.Context, run *models.PremadeRun, team *mod
 // presser an ephemeral follow-up (e.g. "you were waitlisted"). The update
 // consumes the interaction response, so the notice must be a follow-up.
 func (b *bot) renderPremadeUpdateWithNotice(ctx context.Context, s *discordgo.Session, i *discordgo.InteractionCreate, run *models.PremadeRun, notice string) {
+	// A signup made from the private ("ephemeral"-style) dropdown can't update
+	// the post in place — the interaction is on the ephemeral picker, not the
+	// post — so edit the post out of band and show the notice in the picker.
+	if premadeSignupIsDetached(i, run) {
+		b.commitDetachedPremadeSignup(ctx, s, i, run, notice)
+		return
+	}
 	b.renderPremadeUpdate(ctx, s, i, run)
 	if notice == "" {
 		return
@@ -472,6 +696,30 @@ func (b *bot) renderPremadeUpdateWithNotice(ctx context.Context, s *discordgo.Se
 	}); err != nil {
 		log.Printf("premade: signup notice (run %d): %v", run.ID, err)
 	}
+}
+
+// premadeSignupIsDetached reports whether a signup interaction came from a
+// surface other than the run's post itself — i.e. the private signup dropdown
+// opened by the "Sign up" button in the simple "ephemeral" style. Such
+// interactions can't update the post in place (i.Message is the ephemeral
+// picker), so the post is edited out of band instead.
+func premadeSignupIsDetached(i *discordgo.InteractionCreate, run *models.PremadeRun) bool {
+	return run != nil && run.MessageID != "" && i.Message != nil && i.Message.ID != run.MessageID
+}
+
+// commitDetachedPremadeSignup finishes a signup made from the private signup
+// dropdown: it edits the run's post in place out of band (the interaction is on
+// the ephemeral picker, not the post) and replaces the picker with a short
+// confirmation. notice, when set, is shown instead of the default confirmation.
+func (b *bot) commitDetachedPremadeSignup(ctx context.Context, s *discordgo.Session, i *discordgo.InteractionCreate, run *models.PremadeRun, notice string) {
+	if err := b.refreshPremadePostMessage(ctx, s, run); err != nil {
+		log.Printf("premade: detached signup refresh post (run %d): %v", run.ID, err)
+	}
+	msg := notice
+	if msg == "" {
+		msg = "\u2705 Your signup has been updated — see the run post."
+	}
+	updateEphemeral(s, i, msg)
 }
 
 // signupClaimSlot claims a specific open slot (advanced mode), releasing any
@@ -1081,6 +1329,13 @@ func (b *bot) premadeRunForMessage(ctx context.Context, s *discordgo.Session, i 
 
 // renderPremadeUpdate re-renders the run post in place with the current signups.
 func (b *bot) renderPremadeUpdate(ctx context.Context, s *discordgo.Session, i *discordgo.InteractionCreate, run *models.PremadeRun) {
+	// A signup from the private ("ephemeral"-style) dropdown is on the ephemeral
+	// picker, not the post, so it can't update in place — edit the post out of
+	// band and confirm in the picker.
+	if premadeSignupIsDetached(i, run) {
+		b.commitDetachedPremadeSignup(ctx, s, i, run, "")
+		return
+	}
 	team, _, primary, gr, err := b.loadTeamData(ctx, run.TeamID)
 	if err != nil {
 		log.Printf("premade: render load team: %v", err)
@@ -1186,28 +1441,178 @@ func (b *bot) premadePoster(ctx context.Context, run *models.PremadeRun) string 
 	return link.DiscordUsername
 }
 
-// premadeComponents builds the post's control rows. Signing up is now a single
-// consolidated dropdown (`premade_signup`) that carries every action: claiming a
-// specific open slot (advanced mode) or a role (simple mode, which auto-waitlists
-// when the role is full), joining a full role's waitlist, and marking tentative
-// ("maybe"). Advanced mode additionally keeps the per-slot build-details select.
-// Both layouts end with the "Un-Sign" / "Edit run" button row.
+// premadeComponents builds the post's control rows. Most layouts sign up via a
+// single consolidated dropdown (`premade_signup`) that carries every action:
+// claiming a specific open slot (advanced mode) or a role (simple mode, which
+// auto-waitlists when the role is full), joining a full role's waitlist, and
+// marking tentative ("maybe"). Advanced mode additionally keeps the per-slot
+// build-details select.
+//
+// A simple-signup team can pick a visual style (Team.SimpleSignupStyle):
+//   - "buttons": one color-coded button per role (premadeRoleButtonRows) and a
+//     separate Maybe button on the action row.
+//   - "ephemeral": a single green "Sign up" button (premadeSignupButtonRow) that
+//     opens the consolidated dropdown privately for the presser.
+//
+// All layouts end with the management button row.
 func premadeComponents(team *models.Team, signups []models.PremadeSignup) []discordgo.MessageComponent {
 	taken := map[int]bool{}
 	for _, sg := range signups {
 		taken[sg.Slot] = true
 	}
 
-	rows := []discordgo.MessageComponent{premadeSignupRow(team, taken)}
-	// Advanced (specific) signup keeps a per-slot build-details select. Simple
-	// signup hides per-slot detail, so it has none.
-	if !team.SimpleSignup {
-		if detailsRow, ok := premadeDetailsRow(team); ok {
-			rows = append(rows, detailsRow)
+	style := ""
+	if team.SimpleSignup {
+		style = models.NormalizeSimpleSignupStyle(team.SimpleSignupStyle)
+	}
+
+	var rows []discordgo.MessageComponent
+	switch style {
+	case models.SimpleSignupStyleButtons:
+		// Simple "buttons" style: one prominent color-coded button per role,
+		// with tentative moved to a Maybe button on the management row below.
+		rows = append(rows, premadeRoleButtonRows(team, taken)...)
+	case models.SimpleSignupStyleEphemeral:
+		// Simple "ephemeral" style: a single "Sign up" button that opens the
+		// dropdown privately (tentative stays inside that dropdown).
+		rows = append(rows, premadeSignupButtonRow(team, taken))
+	default:
+		rows = append(rows, premadeSignupRow(team, taken))
+		// Advanced (specific) signup keeps a per-slot build-details select.
+		// Simple signup hides per-slot detail, so it has none.
+		if !team.SimpleSignup {
+			if detailsRow, ok := premadeDetailsRow(team); ok {
+				rows = append(rows, detailsRow)
+			}
 		}
 	}
-	rows = append(rows, premadeActionRow())
+	rows = append(rows, premadeActionRow(style == models.SimpleSignupStyleButtons))
 	return rows
+}
+
+// premadeSignupButtonRow builds the simple "ephemeral"-style control: a single
+// green "Sign up" button (premade_signup_open → handlePremadeSignupOpen) that
+// opens the consolidated signup dropdown privately for the presser. When there's
+// nothing to sign up for, a disabled "Signups are closed" button shows instead.
+func premadeSignupButtonRow(team *models.Team, taken map[int]bool) discordgo.MessageComponent {
+	if len(premadeSignupOptions(team, taken)) == 0 {
+		return discordgo.ActionsRow{Components: []discordgo.MessageComponent{
+			discordgo.Button{
+				Label:    "Signups are closed",
+				Style:    discordgo.SecondaryButton,
+				CustomID: premadeSignupClosedID,
+				Disabled: true,
+			},
+		}}
+	}
+	return discordgo.ActionsRow{Components: []discordgo.MessageComponent{
+		discordgo.Button{
+			Label:    "Sign up",
+			Style:    discordgo.SuccessButton,
+			CustomID: premadeSignupOpenID,
+			Emoji:    &discordgo.ComponentEmoji{Name: "\U0001F4DD"}, // 📝
+		},
+	}}
+}
+
+// premadeRoleButtonRows builds the simple "buttons"-style role buttons: one
+// color-coded button per roster role (colored by the role's base via
+// roleButtonStyle so they read at a glance), grouped on their own action rows
+// (up to 5 buttons per row). A role with an open slot is enabled; a full role
+// shows an enabled "waitlist" button when the waitlist is on, otherwise a
+// disabled "full" button so the role still displays. Returns a single disabled
+// "Signups are closed" row when nothing is actionable.
+func premadeRoleButtonRows(team *models.Team, taken map[int]bool) []discordgo.MessageComponent {
+	total := map[string]int{}
+	open := map[string]int{}
+	for _, p := range team.Players {
+		if p.Role == "" {
+			continue
+		}
+		total[p.Role]++
+		if !taken[p.Slot] {
+			open[p.Role]++
+		}
+	}
+	playerRoles := make([]string, 0, len(team.Players))
+	for _, p := range team.Players {
+		playerRoles = append(playerRoles, p.Role)
+	}
+
+	buttons := make([]discordgo.Button, 0, len(total))
+	seen := map[string]bool{}
+	for _, r := range team.OrderedRoleKeys(playerRoles...) {
+		if r == "" || seen[r] || total[r] == 0 {
+			continue
+		}
+		seen[r] = true
+		btn := discordgo.Button{
+			CustomID: premadeSignupRoleBtnPrefix + r,
+			Style:    roleButtonStyle(team.RoleBase(r)),
+			Emoji:    &discordgo.ComponentEmoji{Name: team.RoleEmoji(r)},
+		}
+		switch {
+		case open[r] > 0:
+			btn.Label = truncate(fmt.Sprintf("%s (%d open)", team.RoleLabel(r), open[r]), 80)
+		case team.WaitlistEnabled:
+			btn.Label = truncate(fmt.Sprintf("%s — waitlist", team.RoleLabel(r)), 80)
+		default:
+			// Full and no waitlist: show the role but make it non-actionable.
+			btn.Label = truncate(fmt.Sprintf("%s — full", team.RoleLabel(r)), 80)
+			btn.Style = discordgo.SecondaryButton
+			btn.Disabled = true
+		}
+		buttons = append(buttons, btn)
+	}
+
+	if len(buttons) == 0 {
+		return []discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{
+			discordgo.Button{
+				Label:    "Signups are closed",
+				Style:    discordgo.SecondaryButton,
+				CustomID: premadeSignupClosedID,
+				Disabled: true,
+			},
+		}}}
+	}
+
+	// Discord allows at most 5 buttons per action row and 5 rows per message.
+	// Reserve the last row for the management actions, so cap role buttons at 4
+	// rows (20 buttons); any beyond that are dropped (a simple template with 20+
+	// distinct roles isn't a real scenario).
+	rows := make([]discordgo.MessageComponent, 0, 4)
+	for len(buttons) > 0 && len(rows) < 4 {
+		n := len(buttons)
+		if n > 5 {
+			n = 5
+		}
+		row := make([]discordgo.MessageComponent, 0, n)
+		for _, btn := range buttons[:n] {
+			row = append(row, btn)
+		}
+		rows = append(rows, discordgo.ActionsRow{Components: row})
+		buttons = buttons[n:]
+	}
+	return rows
+}
+
+// roleButtonStyle maps a role's color base to a Discord button style so the
+// simple "buttons"-style role buttons are color-coded. Discord offers only four
+// button colors: tank is blurple, healer green, and both DPS and support DPS red
+// (they share the damage-dealer color); unknown/custom bases fall back to the
+// neutral style (the management buttons also use neutral but sit on their own
+// trailing row, so the role buttons still read as the primary action).
+func roleButtonStyle(base string) discordgo.ButtonStyle {
+	switch base {
+	case "tank":
+		return discordgo.PrimaryButton
+	case "healer":
+		return discordgo.SuccessButton
+	case "dps", "support_dps":
+		return discordgo.DangerButton
+	default: // unknown/custom bases
+		return discordgo.SecondaryButton
+	}
 }
 
 // premadeSignupRow builds the single consolidated signup dropdown. When there's
@@ -1354,14 +1759,26 @@ func premadeDetailsRow(team *models.Team) (discordgo.MessageComponent, bool) {
 	}}, true
 }
 
-// premadeActionRow is the post's final button row: "Un-Sign" (any claimant
-// releases their slot) and "Edit run" (gated to the run's creator / team
-// owner-editor in its handler — Discord can't hide a button per-user on a shared
-// post, so non-editors get a private rejection instead). Deleting a run and
-// signing up another player both live behind the "Edit run" DM menu. Shared by
-// the specific and simple component layouts.
-func premadeActionRow() discordgo.MessageComponent {
-	return discordgo.ActionsRow{Components: []discordgo.MessageComponent{
+// premadeActionRow is the post's final button row of management actions: an
+// optional "Maybe" button (showMaybe — the simple "buttons" style, where
+// tentative isn't in a dropdown; other layouts keep tentative in the signup
+// dropdown), "Un-Sign" (any claimant releases their slot), and "Edit run" (gated
+// to the run's creator / team owner-editor in its handler — Discord can't hide a
+// button per-user on a shared post, so non-editors get a private rejection
+// instead). Deleting a run and signing up another player both live behind the
+// "Edit run" DM menu. All buttons use the neutral style so the "buttons"-style
+// color-coded role buttons stay the prominent, primary action.
+func premadeActionRow(showMaybe bool) discordgo.MessageComponent {
+	comps := make([]discordgo.MessageComponent, 0, 3)
+	if showMaybe {
+		comps = append(comps, discordgo.Button{
+			Label:    "Maybe",
+			Style:    discordgo.SecondaryButton,
+			CustomID: premadeTentativeID,
+			Emoji:    &discordgo.ComponentEmoji{Name: "\U0001F914"}, // 🤔
+		})
+	}
+	comps = append(comps,
 		discordgo.Button{
 			Label:    "Un-Sign",
 			Style:    discordgo.SecondaryButton,
@@ -1369,10 +1786,11 @@ func premadeActionRow() discordgo.MessageComponent {
 		},
 		discordgo.Button{
 			Label:    "Edit run",
-			Style:    discordgo.PrimaryButton,
+			Style:    discordgo.SecondaryButton,
 			CustomID: premadeEditID,
 		},
-	}}
+	)
+	return discordgo.ActionsRow{Components: comps}
 }
 
 // slotOptionLabel renders a slot's picker label, e.g. "Slot 3 · Tank · Dragonknight".

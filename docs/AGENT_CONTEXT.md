@@ -320,6 +320,19 @@ column; the `User` JSON model hides it (`json:"-"`).
   the bottom (`compactSimpleSignups` → `compactedSimpleAssignment` →
   `PremadeStore.ReplaceSignups`); specific signup never compacts (slots there
   carry deliberately-chosen builds).
+- **Simple signup style** (`057_team_simple_signup_style.sql`):
+  `teams.simple_signup_style TEXT` (default **`'dropdown'`**), a "Simple signup
+  layout" `<select>` in "Team Features" shown only for a **simple** template.
+  Chooses how a simple-signup run post presents its controls (advanced signup is
+  unaffected): `'dropdown'` (the current single consolidated dropdown),
+  `'buttons'` (one **color-coded button per role** — `roleButtonStyle`:
+  tank→blurple, healer→green, dps & support_dps→red, custom→neutral — plus a
+  separate **Maybe** tentative button), or `'ephemeral'` (a single green **Sign
+  up** button — `premadeSignupButtonRow` → `premade_signup_open` — that opens the
+  same consolidated dropdown **privately/ephemerally** for the presser instead of
+  on the post). Normalized server-side (`models.NormalizeSimpleSignupStyle`,
+  unknown → `'dropdown'`). See the bot's `premadeComponents` /
+  `premadeRoleButtonRows` / `premadeSignupButtonRow` below.
 - **Waitlist** (`038_premade_waitlist.sql`): `teams.waitlist_enabled BOOLEAN`
   (default **false**) — a "Team Features" checkbox shown only when **Pre-made** is
   on. When on, a "Join a waitlist (role is full)" select appears on the post for
@@ -339,7 +352,7 @@ column; the `User` JSON model hides it (`json:"-"`).
   the old web-app clipboard export (detailed post / condensed list) was removed.
 - **Save-all**: `PUT /api/teams/{id}` is the team **metadata** save — body is
   `{ name, schedule_days, schedule_time,
-  encounters_enabled, post_footer, dm_footer, signup_post, auto_share_pool_viewers, pre_made, premade_post, simple_signup, waitlist_enabled, roles }`
+  encounters_enabled, post_footer, dm_footer, signup_post, auto_share_pool_viewers, pre_made, premade_post, simple_signup, waitlist_enabled, simple_signup_style, roles }`
   and the backend (`TeamStore.Save`) updates only team meta (it no longer touches
   players). Roster lineups are saved **per slot** via
   `PUT /api/teams/{id}/players/{slot}` (optional `?roster_id=`, default active),
@@ -873,15 +886,33 @@ the `pre_made` flag on (see "Pre-made trial run" under Teams). Tables in
   it prefers the presser's **server nickname** (`i.Member.Nick`), then global
   name, then username. The same applies to post fills (`ClaimFill`) and waitlist
   joins.
-  Controls (`premadeComponents`): a single **consolidated signup dropdown**
-  (`premade_signup` → `handlePremadeSignup`, options built by
+  Controls (`premadeComponents`): usually a single **consolidated signup
+  dropdown** (`premade_signup` → `handlePremadeSignup`, options built by
   `premadeSignupOptions`) whose values are prefixed so one menu does everything —
   `slot:<n>` claim a specific open slot (advanced mode), `role:<key>` sign up by
   role (simple mode: claims the first open matching slot, or **auto-waitlists**
   when the role is full and the waitlist is on, notifying the presser),
   `wait:<key>` join a full role's waitlist, and `tent:<key>` mark **tentative
   ("maybe")**. Advanced mode also keeps a **details** select listing all slots
-  (`premade_details`). A final button row (`premadeActionRow`) has **Un-Sign**
+  (`premade_details`). **Exceptions** by simple-signup style (see Teams):
+  `simple_signup_style='buttons'` instead renders one **color-coded button per
+  role** (`premadeRoleButtonRows`; custom ID `premade_srole_<key>` →
+  `handlePremadeSignupRoleButton`, which calls the same `signupByRole` as the
+  dropdown's `role:` option) grouped 5-per-row, with tentative moved to a
+  separate **Maybe** button (`premade_tentative` → `handlePremadeTentative`); a
+  full role with no waitlist shows a disabled "— full" button, and a disabled
+  "Signups are closed" button (`premade_signup_closed`) shows when nothing is
+  actionable. `simple_signup_style='ephemeral'` renders a single green **Sign
+  up** button (`premadeSignupButtonRow` → `premade_signup_open` →
+  `handlePremadeSignupOpen`) that opens the **same consolidated dropdown
+  privately (ephemerally)** for the presser; that private dropdown's custom ID is
+  `premade_esignup_<runID>` (→ `handlePremadeEphemeralSignup`, which shares
+  `dispatchPremadeSignupChoice` with the on-post dropdown). Because the private
+  dropdown isn't on the post, its signup helpers detect the detached interaction
+  (`premadeSignupIsDetached`) and edit the post **out of band**
+  (`commitDetachedPremadeSignup` → `refreshPremadePostMessage`), confirming in the
+  ephemeral message. The final button row (`premadeActionRow(showMaybe)`) has the
+  simple-`buttons` **Maybe** button (when `showMaybe`), **Un-Sign**
   (`premade_leave`, clears slot/waitlist/tentative) and **Edit run**
   (`premade_edit`). A user is only ever in one of signup / waitlist / tentative at
   a time; each path clears the others (a freed slot is backfilled from its role's
@@ -953,11 +984,15 @@ the `pre_made` flag on (see "Pre-made trial run" under Teams). Tables in
   it works at any step of both the create and edit flows — it deletes the
   session and confirms (nothing is posted or changed).
 - **Simple signup** (`teams.simple_signup`, see Teams above): when on, the post
-  hides class/gear (`premadeRosterLines`) and drops the **details** select; the
-  consolidated signup dropdown lists **roles** with open counts (`role:<key>`
-  options from `premadeSignupOptions`) and signing up for a role takes the first
-  open matching slot (`signupByRole` → `firstOpenSlotForRole`, retrying on
-  `ErrSlotTaken`), or auto-waitlists when the role is full and the waitlist is on.
+  hides class/gear (`premadeRosterLines`) and drops the **details** select;
+  signing up lists **roles** with open counts and takes the first open matching
+  slot (`signupByRole` → `firstOpenSlotForRole`, retrying on `ErrSlotTaken`), or
+  auto-waitlists when the role is full and the waitlist is on. The signup UI
+  depends on `simple_signup_style` (see Teams): the consolidated dropdown
+  (`role:<key>` options from `premadeSignupOptions`), one color-coded role button
+  each (`'buttons'`: `premadeRoleButtonRows` → `premade_srole_<key>`), or a single
+  green **Sign up** button that opens that dropdown privately (`'ephemeral'`:
+  `premadeSignupButtonRow` → `premade_signup_open` → `premade_esignup_<runID>`).
   After a leave, role switch, or un-sign the remaining claimants are packed into
   each role's lowest slots so empty slots sit at the bottom
   (`compactSimpleSignups` runs after any waitlist promotion, before the post is

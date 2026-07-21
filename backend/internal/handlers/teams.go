@@ -178,6 +178,9 @@ type updateTeamRequest struct {
 	// WaitlistEnabled lets players join a per-role waitlist on a pre-made run;
 	// freed slots auto-promote the head of that role's waitlist.
 	WaitlistEnabled bool `json:"waitlist_enabled"`
+	// SimpleSignupStyle picks how a simple (role-based) run post presents its
+	// controls: "dropdown" (default) or "buttons". Normalized server-side.
+	SimpleSignupStyle string `json:"simple_signup_style"`
 	// Roles is the team's customizable roster role set (key + label). When
 	// omitted/empty the server falls back to the default role set.
 	Roles   []models.TeamRole `json:"roles"`
@@ -285,7 +288,7 @@ func (s *Server) handleUpdateTeam(w http.ResponseWriter, r *http.Request) {
 	if req.ExpectedUpdatedAt != nil {
 		expected = *req.ExpectedUpdatedAt
 	}
-	if err := s.teams.Save(r.Context(), teamID, req.Name, days, scheduleTime, req.EncountersEnabled, postFooter, dmFooter, signupPost, req.AutoSharePoolViewers, req.PreMade, premadePost, req.SimpleSignup, req.WaitlistEnabled, roles, expected); err != nil {
+	if err := s.teams.Save(r.Context(), teamID, req.Name, days, scheduleTime, req.EncountersEnabled, postFooter, dmFooter, signupPost, req.AutoSharePoolViewers, req.PreMade, premadePost, req.SimpleSignup, req.WaitlistEnabled, models.NormalizeSimpleSignupStyle(req.SimpleSignupStyle), roles, expected); err != nil {
 		if errors.Is(err, models.ErrVersionConflict) {
 			writeError(w, http.StatusConflict, "this team was changed by someone else; reload to get the latest")
 			return
