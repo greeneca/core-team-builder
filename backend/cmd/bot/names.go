@@ -79,6 +79,49 @@ func (b *bot) resolveRosterNames(s *discordgo.Session, guildID string, team *mod
 	return names
 }
 
+// rosterNamesFromCache maps roster slots to display names using only the
+// in-memory name cache — no Discord REST lookups — so it's safe on the
+// interaction hot path (the immediate, "fast" post re-render) without risking
+// the 3-second deadline. An uncached handle falls back the same way
+// resolveHandleName would without a network call: an "@username" text handle
+// shows the bare username; an id/mention handle with no cache entry is omitted
+// (so the slot shows its name until the full re-render resolves it).
+func (b *bot) rosterNamesFromCache(guildID string, team *models.Team) map[int]string {
+	names := map[int]string{}
+	for _, p := range team.Players {
+		h := strings.TrimSpace(p.DiscordHandle)
+		if h == "" {
+			continue
+		}
+		if name := b.cachedHandleName(guildID, h); name != "" {
+			names[p.Slot] = name
+		}
+	}
+	return names
+}
+
+// cachedHandleName returns a handle's display name from the cache only (no REST).
+// It uses the same cache keys as resolveMemberName ("guildID:id") and
+// resolveUsernameName ("guildID:@username"). Returns "" for an uncached
+// id/mention handle (caller omits the slot), or the bare username as the
+// fallback for a text handle — mirroring resolveHandleName's non-network path.
+func (b *bot) cachedHandleName(guildID, handle string) string {
+	if id := discordIDFromHandle(handle); id != "" {
+		if name, ok := b.nameCache.get(guildID + ":" + id); ok {
+			return name
+		}
+		return ""
+	}
+	username := strings.TrimPrefix(strings.TrimSpace(handle), "@")
+	if username == "" {
+		return ""
+	}
+	if name, ok := b.nameCache.get(guildID + ":@" + strings.ToLower(username)); ok {
+		return name
+	}
+	return username
+}
+
 // resolveHandleName resolves a stored roster handle to a Discord display name,
 // preferring the server nickname. An ID/mention handle is looked up by user id;
 // a plain "@username" text handle is looked up by searching the guild for a

@@ -720,7 +720,21 @@ column; the `User` JSON model hides it (`json:"-"`).
     `data.js`).
   - **✅ Coming / ❌ Not coming** buttons → record the presser's attendance for
     that specific post (`discord_rsvps`, keyed by message ID), then edit the post
-    in place (`InteractionResponseUpdateMessage`). The post is fully re-rendered
+    in place. Re-rendering runs in **two passes** (`renderPostUpdate` =
+    `renderPostUpdateFast` + `renderPostUpdateFull`) so the presser's change shows
+    instantly without risking Discord's 3-second deadline: the **fast pass**
+    rebuilds from DB state using only **cached** display names
+    (`rosterNamesFromCache` — no REST) and delivers the change as the
+    interaction's in-place `InteractionResponseUpdateMessage` (its
+    acknowledgement); the **full pass** then resolves names over REST
+    (`resolveRosterNames`, a fan-out that alone can exceed the deadline on a cold
+    cache), re-reads the roster/fills (picking up side effects like a displaced
+    filler), and edits the post again via the webhook edit
+    (`InteractionResponseEdit`). `handleRSVP` runs its slow best-effort side
+    effects (fill-list DMs) **between** the two passes so they don't delay the
+    acknowledgement. A fast-pass build failure means the interaction isn't
+    acknowledged yet, so callers fall back to a fresh `ephemeral` notice. The post
+    is fully re-rendered
     so each responder's status shows as a **✅/❌ icon beside their name** in the
     roster (matched to a slot by Discord ID/handle; no-response shows 🟡). The
     roster is plain Markdown (not a code block) so the icons render; there is no

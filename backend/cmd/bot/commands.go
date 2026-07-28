@@ -1048,24 +1048,34 @@ func (b *bot) handleRSVP(s *discordgo.Session, i *discordgo.InteractionCreate, s
 		return
 	}
 
-	// A roster player marking themselves coming again reclaims their slot: if
-	// someone was filling it while they were out, move that filler to the fill
-	// list and DM them. Best-effort, so it never blocks the RSVP itself.
+	// Reflect the presser's ✅/❌ on the post immediately (fast pass: cached names
+	// only, no REST fan-out), so they get instant feedback within Discord's
+	// 3-second window. This is the interaction acknowledgement; a build failure
+	// means we haven't acknowledged yet, so fall back to an ephemeral notice.
+	if err := b.renderPostUpdateFast(ctx, s, i); err != nil {
+		log.Printf("rsvp: fast refresh: %v", err)
+		ephemeral(s, i, "Saved your RSVP, but couldn't refresh the post.")
+		return
+	}
+
+	// Best-effort side effects that may change the post's data. A roster player
+	// marking themselves coming again reclaims their slot: if someone was filling
+	// it while they were out, move that filler to the fill list and DM them. A
+	// roster player marking themselves not coming opens their slot: let the
+	// fill-list backups know so they can grab it. These run after the fast
+	// acknowledgement (they can DM, which is slow), and the full pass below picks
+	// up any resulting change.
 	if status == models.RSVPYes {
 		b.displaceFillerForReturningPlayer(ctx, s, i, user)
 	}
-	// A roster player marking themselves not coming opens their slot: let the
-	// fill-list backups know so they can grab it. Best-effort.
 	if status == models.RSVPNo {
 		b.notifyFillListOfOpening(ctx, s, i, user)
 	}
 
-	// Rebuild the post from current team data so each responder's ✅/❌ lands
-	// beside their name in the roster (the RSVP is saved regardless).
-	if err := b.renderPostUpdate(ctx, s, i); err != nil {
-		log.Printf("rsvp: refresh post: %v", err)
-		ephemeral(s, i, "Saved your RSVP, but couldn't refresh the post.")
-	}
+	// Full pass: re-read the roster/fills (reflecting any displacement above) and
+	// re-render with display names fully resolved over REST, editing the post
+	// again. Best effort — the fast pass already showed the presser's change.
+	b.renderPostUpdateFull(ctx, s, i)
 }
 
 // displaceFillerForReturningPlayer handles a roster player marking themselves
@@ -1272,6 +1282,10 @@ func (b *bot) handlePostFill(s *discordgo.Session, i *discordgo.InteractionCreat
 		}
 	}
 
+	// Re-render in place: a fast pass (cached names) acknowledges the interaction
+	// immediately with the presser's change, then a full pass resolves names over
+	// REST. A fast-pass build failure means we haven't acknowledged yet, so fall
+	// back to an ephemeral notice.
 	if err := b.renderPostUpdate(ctx, s, i); err != nil {
 		log.Printf("post fill: refresh post: %v", err)
 		ephemeral(s, i, "Saved your signup, but couldn't refresh the post.")
@@ -1305,52 +1319,112 @@ func isFillableSlot(team *models.Team, marks map[int]string, slot int) bool {
 	return false
 }
 
-// renderPostUpdate re-renders a posted trial overview in place (embed + controls)
-// from current team data, RSVPs, and fill signups, in response to a button or
-// dropdown interaction on the post. It returns an error only when the post can't
-// be rebuilt (so callers can surface a "saved, but couldn't refresh" notice);
-// failures from the Discord update call itself are logged and swallowed.
-func (b *bot) renderPostUpdate(ctx context.Context, s *discordgo.Session, i *discordgo.InteractionCreate) error {
+// postRenderData is the current DB state needed to re-render a posted trial
+// overview: the team + its active-roster composition, this message's RSVPs and
+// fills, and the run date locked at post time.
+type postRenderData struct {
+	team      *models.Team
+	primary   *models.Encounter
+	groupings []models.Grouping
+	rsvps     []models.RSVP
+	fills     []models.PostFill
+	runAtUnix int64
+}
+
+// loadPostRenderData gathers the DB state for a post re-render. These are all
+// local queries (no Discord REST), so it's safe on the interaction hot path. A
+// missing/NULL locked run date yields runAtUnix 0 (logged, not fatal), matching
+// the pre-lock fallback in buildPostEmbed.
+func (b *bot) loadPostRenderData(ctx context.Context, i *discordgo.InteractionCreate) (*postRenderData, error) {
 	teamID, err := b.discord.GetChannelTeam(ctx, i.ChannelID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	team, _, primary, gr, err := b.loadTeamData(ctx, teamID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	rsvps, err := b.discord.ListRSVPs(ctx, i.Message.ID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	fills, err := b.discord.ListFills(ctx, i.Message.ID)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	names := b.resolveRosterNames(s, i.GuildID, team)
-	marks := rsvpMarks(team, rsvps)
-	// Reuse the run date locked when the post was first created rather than
-	// recomputing from the (possibly since-changed) team schedule, so the
-	// advertised date stays fixed and drops off once the run is past. A lookup
-	// failure or an untracked/NULL post yields 0, which makes buildPostEmbed fall
-	// back to the live schedule — the pre-lock behavior — so re-renders still work.
 	runAtUnix, err := b.discord.GetPostRunAt(ctx, i.Message.ID)
 	if err != nil {
 		log.Printf("post: get locked run_at (%s): %v", i.Message.ID, err)
 	}
-	// Preserve the "Posted by" footer set on the original post (RSVP/fill updates
-	// re-render the embed from scratch, which would otherwise drop it).
-	embed := buildPostEmbed(team, primary, gr, rsvps, fills, names, existingFooterText(i.Message), runAtUnix)
+	return &postRenderData{team: team, primary: primary, groupings: gr, rsvps: rsvps, fills: fills, runAtUnix: runAtUnix}, nil
+}
+
+// renderPostUpdate re-renders a posted trial overview in place in two passes so
+// the presser sees their change instantly without risking Discord's 3-second
+// deadline: a fast pass using only cached display names (delivered as the
+// interaction's in-place message update — its acknowledgement), then a full pass
+// that resolves names over REST and edits the post again. It returns an error
+// only when the fast pass can't be built (so callers can still surface an
+// ephemeral notice, since the interaction isn't acknowledged yet); full-pass and
+// Discord delivery failures are logged and swallowed.
+func (b *bot) renderPostUpdate(ctx context.Context, s *discordgo.Session, i *discordgo.InteractionCreate) error {
+	if err := b.renderPostUpdateFast(ctx, s, i); err != nil {
+		return err
+	}
+	b.renderPostUpdateFull(ctx, s, i)
+	return nil
+}
+
+// renderPostUpdateFast re-renders the post using only cached display names (no
+// Discord REST lookups) and delivers it as the interaction's in-place message
+// update — the acknowledgement. Because it skips the name fan-out it stays well
+// within the 3-second deadline, so the presser's ✅/❌ (or fill change) shows
+// immediately even if a few roster names are momentarily stale; renderPostUpdateFull
+// corrects them right after. Returns an error only when the post can't be built
+// from DB state (interaction not yet acknowledged, so the caller can fall back to
+// an ephemeral notice); the Discord update call's own error is logged.
+func (b *bot) renderPostUpdateFast(ctx context.Context, s *discordgo.Session, i *discordgo.InteractionCreate) error {
+	d, err := b.loadPostRenderData(ctx, i)
+	if err != nil {
+		return err
+	}
+	names := b.rosterNamesFromCache(i.GuildID, d.team)
+	// Preserve the "Posted by" footer set on the original post (re-renders build
+	// the embed from scratch, which would otherwise drop it).
+	embed := buildPostEmbed(d.team, d.primary, d.groupings, d.rsvps, d.fills, names, existingFooterText(i.Message), d.runAtUnix)
 	if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseUpdateMessage,
 		Data: &discordgo.InteractionResponseData{
 			Embeds:     []*discordgo.MessageEmbed{embed},
-			Components: postComponents(team, fills, marks, postLocked(runAtUnix)),
+			Components: postComponents(d.team, d.fills, rsvpMarks(d.team, d.rsvps), postLocked(d.runAtUnix)),
 		},
 	}); err != nil {
-		log.Printf("post: update respond: %v", err)
+		log.Printf("post: fast update respond: %v", err)
 	}
 	return nil
+}
+
+// renderPostUpdateFull re-reads the post's DB state (picking up any side effects
+// since the fast pass, e.g. a filler moved to the fill list) and re-renders with
+// display names fully resolved over REST, editing the already-acknowledged
+// response via the webhook edit. Best effort: build and delivery failures are
+// logged and swallowed, since the fast pass already updated the post.
+func (b *bot) renderPostUpdateFull(ctx context.Context, s *discordgo.Session, i *discordgo.InteractionCreate) {
+	d, err := b.loadPostRenderData(ctx, i)
+	if err != nil {
+		log.Printf("post: full update load: %v", err)
+		return
+	}
+	names := b.resolveRosterNames(s, i.GuildID, d.team)
+	embed := buildPostEmbed(d.team, d.primary, d.groupings, d.rsvps, d.fills, names, existingFooterText(i.Message), d.runAtUnix)
+	embeds := []*discordgo.MessageEmbed{embed}
+	components := postComponents(d.team, d.fills, rsvpMarks(d.team, d.rsvps), postLocked(d.runAtUnix))
+	if _, err := s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+		Embeds:     &embeds,
+		Components: &components,
+	}); err != nil {
+		log.Printf("post: full update edit: %v", err)
+	}
 }
 
 // rsvpMarks matches each RSVP to a roster slot (by Discord ID/handle) and
