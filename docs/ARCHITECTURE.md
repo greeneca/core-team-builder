@@ -529,6 +529,17 @@ overview, so the scheduler can ping attendees in the post's discussion thread
 | pinged_at  | timestamptz | set once the pre-run ping has fired (once-only)    |
 | created_at | timestamptz | default `now()`                                    |
 
+`discord_action_log_channels` (`058_discord_action_log.sql`) — the channel a
+server mirrors signup activity to. One row per guild (absent row = logging off),
+managed via `/coreteam actionlog set|off|status`:
+
+| column                 | type        | notes                                  |
+|------------------------|-------------|----------------------------------------|
+| guild_id               | text        | primary key (one log channel per guild)|
+| channel_id             | text        | channel the entries are posted to      |
+| set_by_discord_user_id | text        | who designated it (`''` when unknown)  |
+| updated_at             | timestamptz | bump on re-designation                 |
+
 `premade_runs` (`036_premade_runs.sql`) — one row per posted **pre-made trial
 run**. The bookkeeping timestamps drive the bot's scheduler (thread 15 min
 before, cleanup 2 h after) and make those actions fire exactly once / catch up

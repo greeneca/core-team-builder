@@ -696,6 +696,13 @@ column; the `User` JSON model hides it (`json:"-"`).
     `role_id`); read by `canPressRestricted`. A subcommand **group** dispatched in
     `onCommand` to `handlePermissions`. Regardless of the list, each run's
     original poster and server admins can always edit/delete.
+  - `actionlog set|off|status` — (Manage Server) designates the channel this
+    guild mirrors signup activity to (see "Action log" below). Stored in
+    `discord_action_log_channels` (keyed by `guild_id`, so one channel per
+    server); a subcommand **group** dispatched in `onCommand` to
+    `handleActionLog` (`backend/cmd/bot/actionlog.go`). `set` writes the row and
+    then posts a confirmation in the chosen channel — that post doubles as a
+    permission check, and a failure warns the runner the log would be silent.
   - `help` — DMs the runner a **command guide** (`backend/cmd/bot/help.go`): an
     overview embed (intro, the web app link from `APP_BASE_URL`, plus
     "report a bug"/"source code" links built from `REPO_URL`, default
@@ -835,6 +842,25 @@ column; the `User` JSON model hides it (`json:"-"`).
   again.
   (`DiscordStore.RecordPost`/`SetPostThread`.) Keyed by message ID so re-posting
   starts fresh.
+- **Action log**: `discord_action_log_channels` (`058_discord_action_log.sql`)
+  holds one row per guild — the channel that server mirrors signup activity to
+  (no row = logging off; `DiscordStore.SetActionLogChannel`/
+  `GetActionLogChannel`/`ClearActionLogChannel`). Everything lives in
+  `backend/cmd/bot/actionlog.go`: `logAction` looks up the guild's channel and
+  posts an embed titled with the post (hyperlinked to it) over a
+  "**who** did what" line naming the source channel and a jump link;
+  `logRunAction` (pre-made runs, using the run's own guild/channel/message so it
+  works from the DM edit flow too) and `logPostAction` (`/coreteam post`
+  overviews, taking the title off the post's own embed) are the two wrappers
+  call sites use. Logged actions: signing up for a slot or role, switching
+  slot/role, un-signing, joining a waitlist, going tentative, both RSVP buttons,
+  the overview's fill dropdown (fill a slot / join the fill list / remove a
+  signup), and the editor actions behind **Edit run** (signing up another
+  player, removing a signup, deleting the run — the delete entries carry no jump
+  link, since the post is gone). Every call site logs **after** the interaction
+  has been acknowledged and re-rendered, and every failure (lookup or delivery)
+  is logged to stderr only — the action log must never delay or break the action
+  it records.
 - **Label data (codegen)**: the bot formats posts using
   `backend/internal/discordfmt` (`BuildPost` for the overview embed + `PlayerDetail`
   for the build-details DM, plus the GROUP-source half of `computePenCoverage` /

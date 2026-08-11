@@ -281,7 +281,9 @@ Discord-side setup (one-time):
       removed. Note **Manage Threads** is required to delete a thread — deleting
       the post does **not** remove its thread, so without it a deleted run leaves
       an orphaned, still-visible thread (the bot will warn the deleter when this
-      happens).
+      happens). If you designate an **action log** channel
+      (`/coreteam actionlog set`), the bot also needs **View Channel** and
+      **Send Messages** there — it says so when the confirmation post fails.
 - [ ] Enable the **MESSAGE CONTENT** privileged intent for the application
       (developer portal → Bot → Privileged Gateway Intents). `/coreteam signup`
       is a free-text DM conversation, so the bot must be able to read the

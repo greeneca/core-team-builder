@@ -293,6 +293,39 @@ var coreTeamCommand = &discordgo.ApplicationCommand{
 			},
 		},
 		{
+			Type:        discordgo.ApplicationCommandOptionSubCommandGroup,
+			Name:        "actionlog",
+			Description: "Log signup activity (signups, RSVPs, changes) to a channel",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionSubCommand,
+					Name:        "set",
+					Description: "Designate a channel as this server's action log",
+					Options: []*discordgo.ApplicationCommandOption{
+						{
+							Type:        discordgo.ApplicationCommandOptionChannel,
+							Name:        "channel",
+							Description: "The channel to log signup activity to",
+							Required:    true,
+							ChannelTypes: []discordgo.ChannelType{
+								discordgo.ChannelTypeGuildText,
+							},
+						},
+					},
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionSubCommand,
+					Name:        "off",
+					Description: "Stop logging signup activity in this server",
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionSubCommand,
+					Name:        "status",
+					Description: "Show which channel signup activity is logged to",
+				},
+			},
+		},
+		{
 			Type:        discordgo.ApplicationCommandOptionSubCommand,
 			Name:        "help",
 			Description: "DM you a command reference, web app link, and where to report bugs",
@@ -369,6 +402,8 @@ func (b *bot) onCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		b.handleUnset(s, i)
 	case "permissions":
 		b.handlePermissions(s, i, sub)
+	case "actionlog":
+		b.handleActionLog(s, i, sub)
 	case "help":
 		b.handleHelp(s, i)
 	}
@@ -1076,6 +1111,17 @@ func (b *bot) handleRSVP(s *discordgo.Session, i *discordgo.InteractionCreate, s
 	// re-render with display names fully resolved over REST, editing the post
 	// again. Best effort — the fast pass already showed the presser's change.
 	b.renderPostUpdateFull(ctx, s, i)
+
+	b.logPostAction(ctx, s, i, "RSVP'd **"+rsvpLogLabel(status)+"**")
+}
+
+// rsvpLogLabel renders an RSVP status the way the buttons label it, for the
+// action log.
+func rsvpLogLabel(status string) string {
+	if status == models.RSVPNo {
+		return "Not coming"
+	}
+	return "Coming"
 }
 
 // displaceFillerForReturningPlayer handles a roster player marking themselves
@@ -1215,6 +1261,10 @@ func (b *bot) handlePostFill(s *discordgo.Session, i *discordgo.InteractionCreat
 		return
 	}
 
+	// What to record in the server's action log, set per branch below and
+	// written once the post has been refreshed.
+	action := ""
+
 	switch choice := values[0]; choice {
 	case postFillLeaveValue:
 		if err := b.discord.LeaveFill(ctx, i.Message.ID, user.ID); err != nil {
@@ -1222,6 +1272,7 @@ func (b *bot) handlePostFill(s *discordgo.Session, i *discordgo.InteractionCreat
 			ephemeral(s, i, "Something went wrong. Please try again.")
 			return
 		}
+		action = "removed their signup"
 	default:
 		// Both joining the fill list and filling an open slot are validated
 		// against the live roster, so load the team once for both.
@@ -1250,6 +1301,7 @@ func (b *bot) handlePostFill(s *discordgo.Session, i *discordgo.InteractionCreat
 				ephemeral(s, i, "Something went wrong. Please try again.")
 				return
 			}
+			action = "joined the fill list"
 			break
 		}
 
@@ -1280,6 +1332,7 @@ func (b *bot) handlePostFill(s *discordgo.Session, i *discordgo.InteractionCreat
 			ephemeral(s, i, "Something went wrong signing you up. Please try again.")
 			return
 		}
+		action = "signed up to fill " + slotLogLabel(team, slot)
 	}
 
 	// Re-render in place: a fast pass (cached names) acknowledges the interaction
@@ -1290,6 +1343,8 @@ func (b *bot) handlePostFill(s *discordgo.Session, i *discordgo.InteractionCreat
 		log.Printf("post fill: refresh post: %v", err)
 		ephemeral(s, i, "Saved your signup, but couldn't refresh the post.")
 	}
+
+	b.logPostAction(ctx, s, i, action)
 }
 
 // existingFooterText returns the footer text on a message's first embed (the
@@ -1302,6 +1357,16 @@ func existingFooterText(msg *discordgo.Message) string {
 		return f.Text
 	}
 	return ""
+}
+
+// existingEmbedTitle returns the title of a message's first embed (the post's
+// rendered heading), or "" when there is none. Used so an action log entry names
+// a post the same way the post itself does.
+func existingEmbedTitle(msg *discordgo.Message) string {
+	if msg == nil || len(msg.Embeds) == 0 {
+		return ""
+	}
+	return msg.Embeds[0].Title
 }
 
 // isFillableSlot reports whether a roster slot can be signed up for via the
@@ -1695,6 +1760,19 @@ func (b *bot) handlePermissionsList(ctx context.Context, s *discordgo.Session, i
 // roleOptionID returns the role ID picked for a named role option on a
 // subcommand, or "" when absent.
 func roleOptionID(sub *discordgo.ApplicationCommandInteractionDataOption, name string) string {
+	for _, o := range sub.Options {
+		if o.Name == name {
+			if id, ok := o.Value.(string); ok {
+				return id
+			}
+		}
+	}
+	return ""
+}
+
+// channelOptionID returns the channel ID picked for a named channel option on a
+// subcommand, or "" when absent.
+func channelOptionID(sub *discordgo.ApplicationCommandInteractionDataOption, name string) string {
 	for _, o := range sub.Options {
 		if o.Name == name {
 			if id, ok := o.Value.(string); ok {

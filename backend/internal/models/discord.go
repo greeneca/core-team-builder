@@ -235,6 +235,43 @@ func (s *DiscordStore) ListEditRoles(ctx context.Context, guildID string) ([]str
 	return roles, rows.Err()
 }
 
+// SetActionLogChannel designates the channel a guild mirrors signup activity to
+// (upsert on guild_id, so a server logs to exactly one channel).
+func (s *DiscordStore) SetActionLogChannel(ctx context.Context, guildID, channelID, setByDiscordUserID string) error {
+	const q = `
+		INSERT INTO discord_action_log_channels (guild_id, channel_id, set_by_discord_user_id, updated_at)
+		VALUES ($1, $2, $3, now())
+		ON CONFLICT (guild_id)
+		DO UPDATE SET channel_id = EXCLUDED.channel_id,
+		              set_by_discord_user_id = EXCLUDED.set_by_discord_user_id,
+		              updated_at = now()`
+	_, err := s.pool.Exec(ctx, q, guildID, channelID, setByDiscordUserID)
+	return err
+}
+
+// GetActionLogChannel returns the channel a guild logs signup activity to, or ""
+// when the guild hasn't designated one (logging off).
+func (s *DiscordStore) GetActionLogChannel(ctx context.Context, guildID string) (string, error) {
+	if guildID == "" {
+		return "", nil
+	}
+	var channelID string
+	err := s.pool.QueryRow(ctx, `SELECT channel_id FROM discord_action_log_channels WHERE guild_id = $1`, guildID).Scan(&channelID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return channelID, nil
+}
+
+// ClearActionLogChannel turns off action logging for a guild. It is idempotent.
+func (s *DiscordStore) ClearActionLogChannel(ctx context.Context, guildID string) error {
+	_, err := s.pool.Exec(ctx, `DELETE FROM discord_action_log_channels WHERE guild_id = $1`, guildID)
+	return err
+}
+
 // RSVP attendance statuses for a posted trial.
 const (
 	RSVPYes = "yes"

@@ -751,6 +751,12 @@ func (b *bot) signupClaimSlot(ctx context.Context, s *discordgo.Session, i *disc
 		b.promoteFreedSlot(ctx, s, run, team, priorSlot, priorRole)
 	}
 	b.renderPremadeUpdate(ctx, s, i, run)
+
+	action := "signed up for " + slotLogLabel(team, slot)
+	if hadPrior && priorSlot != slot {
+		action = "switched from " + slotLogLabel(team, priorSlot) + " to " + slotLogLabel(team, slot)
+	}
+	b.logRunAction(ctx, s, run, team, interactionDisplayName(i), action)
 }
 
 // signupByRole signs the user up for a role: it claims the first open slot for
@@ -805,6 +811,12 @@ func (b *bot) signupByRole(ctx context.Context, s *discordgo.Session, i *discord
 		}
 		b.compactSimpleSignups(ctx, run, team)
 		b.renderPremadeUpdate(ctx, s, i, run)
+
+		action := "signed up as **" + team.RoleLabel(role) + "**"
+		if hadPrior && priorRole != role {
+			action = "switched from **" + team.RoleLabel(priorRole) + "** to **" + team.RoleLabel(role) + "**"
+		}
+		b.logRunAction(ctx, s, run, team, interactionDisplayName(i), action)
 		return
 	}
 	ephemeral(s, i, "Couldn't grab a slot for that role — it just filled up. Try another role.")
@@ -832,6 +844,8 @@ func (b *bot) signupWaitlist(ctx context.Context, s *discordgo.Session, i *disco
 	}
 	b.renderPremadeUpdateWithNotice(ctx, s, i, run,
 		fmt.Sprintf("**%s** is full, so I've added you to its waitlist. You'll be moved in and DM'd if a slot opens up.", team.RoleLabel(role)))
+
+	b.logRunAction(ctx, s, run, team, interactionDisplayName(i), "joined the **"+team.RoleLabel(role)+"** waitlist")
 }
 
 // signupTentative marks the user as tentative ("maybe") for a role. Tentative
@@ -859,6 +873,8 @@ func (b *bot) signupTentative(ctx context.Context, s *discordgo.Session, i *disc
 		b.compactSimpleSignups(ctx, run, team)
 	}
 	b.renderPremadeUpdate(ctx, s, i, run)
+
+	b.logRunAction(ctx, s, run, team, interactionDisplayName(i), "marked themselves **tentative**")
 }
 
 // handlePremadeClaim locks a slot to the presser (releasing any prior claim). In
@@ -929,6 +945,12 @@ func (b *bot) handlePremadeClaim(s *discordgo.Session, i *discordgo.InteractionC
 		b.promoteFreedSlot(ctx, s, run, team, priorSlot, priorRole)
 	}
 	b.renderPremadeUpdate(ctx, s, i, run)
+
+	action := "signed up for " + slotLogLabel(team, slot)
+	if hadPrior && priorSlot != slot {
+		action = "switched from " + slotLogLabel(team, priorSlot) + " to " + slotLogLabel(team, slot)
+	}
+	b.logRunAction(ctx, s, run, team, interactionDisplayName(i), action)
 }
 
 // claimSimple claims the first open slot matching the chosen role, retrying when
@@ -976,6 +998,12 @@ func (b *bot) claimSimple(ctx context.Context, s *discordgo.Session, i *discordg
 		// Pack the freed prior role so empty slots stay at the bottom.
 		b.compactSimpleSignups(ctx, run, team)
 		b.renderPremadeUpdate(ctx, s, i, run)
+
+		action := "signed up as **" + team.RoleLabel(role) + "**"
+		if hadPrior && priorRole != role {
+			action = "switched from **" + team.RoleLabel(priorRole) + "** to **" + team.RoleLabel(role) + "**"
+		}
+		b.logRunAction(ctx, s, run, team, interactionDisplayName(i), action)
 		return
 	}
 	ephemeral(s, i, "Couldn't grab a slot for that role — it just filled up. Try another role.")
@@ -1137,6 +1165,12 @@ func (b *bot) handlePremadeLeave(s *discordgo.Session, i *discordgo.InteractionC
 	b.compactSimpleSignups(ctx, run, team)
 
 	b.renderPremadeUpdate(ctx, s, i, run)
+
+	action := "un-signed from the run"
+	if held {
+		action = "un-signed from " + slotLogLabel(team, freedSlot)
+	}
+	b.logRunAction(ctx, s, run, team, interactionDisplayName(i), action)
 }
 
 // handlePremadeWaitlist adds the presser to the run's waitlist for the chosen
@@ -1184,6 +1218,8 @@ func (b *bot) handlePremadeWaitlist(s *discordgo.Session, i *discordgo.Interacti
 		return
 	}
 	b.renderPremadeUpdate(ctx, s, i, run)
+
+	b.logRunAction(ctx, s, run, team, interactionDisplayName(i), "joined the **"+team.RoleLabel(role)+"** waitlist")
 }
 
 // roleForSlot returns the role of the given roster slot, or "" if not found.

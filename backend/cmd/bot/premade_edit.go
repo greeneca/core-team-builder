@@ -147,6 +147,14 @@ func (b *bot) handlePremadeDelete(s *discordgo.Session, i *discordgo.Interaction
 	if threadErr != nil {
 		warnThreadCleanupFailed(s, i)
 	}
+
+	// The post is gone, so the log entry carries no jump link.
+	b.logAction(ctx, s, run.GuildID, actionLogEntry{
+		Title:     runLogTitle(run, nil),
+		Action:    "deleted the run",
+		Actor:     interactionDisplayName(i),
+		ChannelID: run.ChannelID,
+	})
 }
 
 // warnThreadCleanupFailed sends an ephemeral follow-up after a run was deleted
@@ -312,6 +320,13 @@ func (b *bot) handlePremadeEditFieldSelect(s *discordgo.Session, i *discordgo.In
 			msg = "Deleted this run and its post, but I couldn't delete its discussion thread — I likely need the **Manage Threads** permission in that channel. Please remove the thread manually."
 		}
 		updateEphemeral(s, i, msg)
+		// The post is gone, so the log entry carries no jump link.
+		b.logAction(ctx, s, run.GuildID, actionLogEntry{
+			Title:     runLogTitle(run, nil),
+			Action:    "deleted the run",
+			Actor:     interactionDisplayName(i),
+			ChannelID: run.ChannelID,
+		})
 		return
 	default:
 		updateEphemeral(s, i, "That selection was invalid.")
@@ -634,6 +649,9 @@ func (b *bot) handlePremadeEditSignupSlot(s *discordgo.Session, i *discordgo.Int
 		log.Printf("premade edit: signup slot refresh post: %v", rerr)
 	}
 
+	b.logRunAction(ctx, s, run, team, interactionDisplayName(i),
+		fmt.Sprintf("signed up **%s** for %s", targetName, slotLogLabel(team, slot)))
+
 	confirm := fmt.Sprintf("Signed up **%s** for slot %d.", targetName, slot)
 	if team.SimpleSignup {
 		confirm = fmt.Sprintf("Signed up **%s**.", targetName)
@@ -858,6 +876,9 @@ func (b *bot) handlePremadeEditRemoveSignup(s *discordgo.Session, i *discordgo.I
 	if rerr := b.refreshPremadePostMessage(ctx, s, run); rerr != nil {
 		log.Printf("premade edit: remove slot refresh post: %v", rerr)
 	}
+
+	b.logRunAction(ctx, s, run, team, interactionDisplayName(i),
+		fmt.Sprintf("removed **%s** from %s", removedName, slotLogLabel(team, freedSlot)))
 
 	confirm := fmt.Sprintf("Removed **%s** from this run.", removedName)
 
