@@ -148,12 +148,11 @@ func (b *bot) handlePremadeDelete(s *discordgo.Session, i *discordgo.Interaction
 		warnThreadCleanupFailed(s, i)
 	}
 
-	// The post is gone, so the log entry carries no jump link.
+	// The post is gone, so the log entry's title can't link anywhere.
 	b.logAction(ctx, s, run.GuildID, actionLogEntry{
-		Title:     runLogTitle(run, nil),
-		Action:    "deleted the run",
-		Actor:     interactionDisplayName(i),
-		ChannelID: run.ChannelID,
+		Title:  runLogTitle(run, nil),
+		Action: "deleted the run",
+		Actor:  interactionDisplayName(i),
 	})
 }
 
@@ -320,12 +319,11 @@ func (b *bot) handlePremadeEditFieldSelect(s *discordgo.Session, i *discordgo.In
 			msg = "Deleted this run and its post, but I couldn't delete its discussion thread — I likely need the **Manage Threads** permission in that channel. Please remove the thread manually."
 		}
 		updateEphemeral(s, i, msg)
-		// The post is gone, so the log entry carries no jump link.
+		// The post is gone, so the log entry's title can't link anywhere.
 		b.logAction(ctx, s, run.GuildID, actionLogEntry{
-			Title:     runLogTitle(run, nil),
-			Action:    "deleted the run",
-			Actor:     interactionDisplayName(i),
-			ChannelID: run.ChannelID,
+			Title:  runLogTitle(run, nil),
+			Action: "deleted the run",
+			Actor:  interactionDisplayName(i),
 		})
 		return
 	default:

@@ -847,8 +847,8 @@ column; the `User` JSON model hides it (`json:"-"`).
   (no row = logging off; `DiscordStore.SetActionLogChannel`/
   `GetActionLogChannel`/`ClearActionLogChannel`). Everything lives in
   `backend/cmd/bot/actionlog.go`: `logAction` looks up the guild's channel and
-  posts an embed titled with the post (hyperlinked to it) over a
-  "**who** did what" line naming the source channel and a jump link;
+  posts an embed titled with the post — hyperlinked to it, which is the entry's
+  only link — over a single "**who** did what" line;
   `logRunAction` (pre-made runs, using the run's own guild/channel/message so it
   works from the DM edit flow too) and `logPostAction` (`/coreteam post`
   overviews, taking the title off the post's own embed) are the two wrappers
@@ -856,8 +856,8 @@ column; the `User` JSON model hides it (`json:"-"`).
   slot/role, un-signing, joining a waitlist, going tentative, both RSVP buttons,
   the overview's fill dropdown (fill a slot / join the fill list / remove a
   signup), and the editor actions behind **Edit run** (signing up another
-  player, removing a signup, deleting the run — the delete entries carry no jump
-  link, since the post is gone). Every call site logs **after** the interaction
+  player, removing a signup, deleting the run — the delete entries' titles
+  aren't linked, since the post is gone). Every call site logs **after** the interaction
   has been acknowledged and re-rendered, and every failure (lookup or delivery)
   is logged to stderr only — the action log must never delay or break the action
   it records.

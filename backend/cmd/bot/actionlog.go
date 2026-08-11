@@ -15,23 +15,22 @@ import (
 // set. Once set, every signup-related interaction on the bot's posts — signing
 // up, switching, un-signing, joining a waitlist, going tentative, RSVPing,
 // filling a slot, and the editor actions behind "Edit run" — is mirrored there
-// as a short entry naming the post, what happened, who did it, and a jump link
-// back to the post.
+// as a short entry naming the post (linked to it), what happened, and who did
+// it.
 //
 // Logging is best effort and always happens *after* the interaction has been
 // acknowledged, so a slow or failing log never delays (or breaks) the action
 // itself; failures are logged to stderr only.
 
 // actionLogEntry is one line of the action log: what was interacted with
-// (Title, in ChannelID, linked by URL), what happened (Action), and who did it
-// (Actor). Action reads as the predicate of a sentence starting with the actor,
-// e.g. "signed up as **Tank**".
+// (Title, hyperlinked by URL), what happened (Action), and who did it (Actor).
+// Action reads as the predicate of a sentence starting with the actor, e.g.
+// "signed up as **Tank**".
 type actionLogEntry struct {
-	Title     string
-	Action    string
-	Actor     string
-	ChannelID string
-	URL       string
+	Title  string
+	Action string
+	Actor  string
+	URL    string
 }
 
 // logAction mirrors an entry to the guild's action log channel, doing nothing
@@ -66,11 +65,10 @@ func (b *bot) logRunAction(ctx context.Context, s *discordgo.Session, run *model
 		return
 	}
 	b.logAction(ctx, s, run.GuildID, actionLogEntry{
-		Title:     runLogTitle(run, team),
-		Action:    action,
-		Actor:     actor,
-		ChannelID: run.ChannelID,
-		URL:       messageURL(run.GuildID, run.ChannelID, run.MessageID),
+		Title:  runLogTitle(run, team),
+		Action: action,
+		Actor:  actor,
+		URL:    messageURL(run.GuildID, run.ChannelID, run.MessageID),
 	})
 }
 
@@ -82,11 +80,10 @@ func (b *bot) logPostAction(ctx context.Context, s *discordgo.Session, i *discor
 		return
 	}
 	b.logAction(ctx, s, i.GuildID, actionLogEntry{
-		Title:     existingEmbedTitle(i.Message),
-		Action:    action,
-		Actor:     interactionDisplayName(i),
-		ChannelID: i.ChannelID,
-		URL:       messageURL(i.GuildID, i.ChannelID, i.Message.ID),
+		Title:  existingEmbedTitle(i.Message),
+		Action: action,
+		Actor:  interactionDisplayName(i),
+		URL:    messageURL(i.GuildID, i.ChannelID, i.Message.ID),
 	})
 }
 
@@ -116,8 +113,8 @@ func slotLogLabel(team *models.Team, slot int) string {
 	return label
 }
 
-// actionLogEmbed renders a log entry: the post's title (hyperlinked to it) over
-// a single "**who** did what" line noting the channel and a jump link.
+// actionLogEmbed renders a log entry: the post's title, hyperlinked to the post
+// itself, over a single "**who** did what" line.
 func actionLogEmbed(e actionLogEntry) *discordgo.MessageEmbed {
 	actor := strings.TrimSpace(e.Actor)
 	if actor == "" {
@@ -127,25 +124,10 @@ func actionLogEmbed(e actionLogEntry) *discordgo.MessageEmbed {
 	if title == "" {
 		title = "Trial run"
 	}
-
-	var sb strings.Builder
-	sb.WriteString("**" + actor + "** " + e.Action)
-	if e.ChannelID != "" {
-		sb.WriteString("\nin " + channelMention(e.ChannelID))
-	}
-	if e.URL != "" {
-		if e.ChannelID == "" {
-			sb.WriteString("\n")
-		} else {
-			sb.WriteString(" · ")
-		}
-		sb.WriteString("[jump to the post](" + e.URL + ")")
-	}
-
 	return &discordgo.MessageEmbed{
 		Title:       truncate(title, embedTitleLimit),
 		URL:         e.URL,
-		Description: truncate(sb.String(), embedDescriptionLimit),
+		Description: truncate("**"+actor+"** "+e.Action, embedDescriptionLimit),
 		Color:       embedColor,
 		Timestamp:   time.Now().UTC().Format(time.RFC3339),
 	}
