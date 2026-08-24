@@ -239,7 +239,7 @@ in `docs/AGENT_CONTEXT.md`):
 - `post_footer` / `dm_footer` are free-form text (≤2000 runes each, trailing
   whitespace trimmed; over-length returns `400`) the Discord bot appends to its
   output — `post_footer` to the `/coreteam post` overview, `dm_footer` to the
-  "Get My Build Details" DM.
+  "Build Details" DM.
 - `signup_post` is free-form text (same limits) the Discord bot posts as the body
   of its `/coreteam recruit` recruitment embed.
 - `players` is optional; omitted slots are left unchanged. Invalid slot/role/

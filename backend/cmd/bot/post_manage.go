@@ -106,7 +106,7 @@ func postManageActions(locked bool) []discordgo.SelectMenuOption {
 	rsvp := discordgo.SelectMenuOption{
 		Label:       "RSVP for a player",
 		Value:       postManageActionRSVP,
-		Description: "Answer Coming / Not coming on a roster player's behalf",
+		Description: "Answer Coming / Not Coming on a roster player's behalf",
 		Emoji:       &discordgo.ComponentEmoji{Name: "\U0001F4DD"}, // 📝
 	}
 	if locked {
@@ -200,7 +200,7 @@ func postManageRSVPOptions(team *models.Team, names map[int]string, marks map[in
 			break
 		}
 		opts = append(opts, discordgo.SelectMenuOption{
-			Label:       truncate(postManagePlayerName(p, names), 100),
+			Label:       truncate(rosterPlayerName(p, names), 100),
 			Value:       strconv.Itoa(p.Slot),
 			Description: truncate(slotOptionLabel(team, p)+" · "+postManageRSVPStatusLabel(marks[p.Slot]), 100),
 			Emoji:       &discordgo.ComponentEmoji{Name: team.RoleEmoji(p.Role)},
@@ -216,15 +216,17 @@ func postManageRSVPStatusLabel(status string) string {
 	case models.RSVPYes:
 		return "Currently: Coming"
 	case models.RSVPNo:
-		return "Currently: Not coming"
+		return "Currently: Not Coming"
 	default:
 		return "No response yet"
 	}
 }
 
-// postManagePlayerName names a roster player for the manage flow: their resolved
-// Discord display name, else the roster name, else the raw handle.
-func postManagePlayerName(p models.Player, names map[int]string) string {
+// rosterPlayerName names a roster player for a picker option: their resolved
+// Discord display name, else the roster name, else the raw handle. Returns ""
+// for a slot with none of the three (an open slot); callers decide how to label
+// that.
+func rosterPlayerName(p models.Player, names map[int]string) string {
 	if n := strings.TrimSpace(names[p.Slot]); n != "" {
 		return n
 	}
@@ -235,7 +237,7 @@ func postManagePlayerName(p models.Player, names map[int]string) string {
 }
 
 // handlePostManageRSVPPick confirms the chosen player and swaps the picker for
-// the Coming / Not coming buttons, which carry the post and slot forward.
+// the Coming / Not Coming buttons, which carry the post and slot forward.
 func (b *bot) handlePostManageRSVPPick(s *discordgo.Session, i *discordgo.InteractionCreate, messageID string) {
 	values := i.MessageComponentData().Values
 	if len(values) == 0 {
@@ -264,7 +266,7 @@ func (b *bot) handlePostManageRSVPPick(s *discordgo.Session, i *discordgo.Intera
 		updateEphemeral(s, i, "That slot is no longer on the roster. Press **Manage** again to start over.")
 		return
 	}
-	name := postManagePlayerName(player, b.rosterNamesFromCache(i.GuildID, team))
+	name := rosterPlayerName(player, b.rosterNamesFromCache(i.GuildID, team))
 
 	prefix := fmt.Sprintf("%s:%s:%d:", postManageRSVPSetID, messageID, slot)
 	err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
@@ -280,7 +282,7 @@ func (b *bot) handlePostManageRSVPPick(s *discordgo.Session, i *discordgo.Intera
 						CustomID: prefix + models.RSVPYes,
 					},
 					discordgo.Button{
-						Label:    "Not coming",
+						Label:    "Not Coming",
 						Emoji:    &discordgo.ComponentEmoji{Name: "❌"},
 						Style:    discordgo.DangerButton,
 						CustomID: prefix + models.RSVPNo,
@@ -340,7 +342,7 @@ func (b *bot) handlePostManageRSVPSet(s *discordgo.Session, i *discordgo.Interac
 
 	// Acknowledge before the post refresh and the DMs below, which are slow
 	// enough to risk Discord's 3-second deadline.
-	name := postManagePlayerName(player, b.rosterNamesFromCache(i.GuildID, team))
+	name := rosterPlayerName(player, b.rosterNamesFromCache(i.GuildID, team))
 	updateEphemeral(s, i, fmt.Sprintf("Marked **%s** as **%s**.", name, rsvpLogLabel(status)))
 
 	if rerr := b.refreshPostMessage(ctx, s, i.GuildID, i.ChannelID, messageID); rerr != nil {

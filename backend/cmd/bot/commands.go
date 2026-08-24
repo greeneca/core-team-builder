@@ -71,7 +71,7 @@ func postLocked(runAtUnix int64) bool {
 // initial post and every in-place update render the same controls.
 //
 // locked closes signups once the run time has passed (see postLocked): the RSVP
-// buttons and the signup dropdown are disabled, but "Get My Build Details" and
+// buttons and the signup dropdown are disabled, but "Build Details" and
 // "Manage" stay active — players can still pull their loadout for a run in
 // progress, and Manage's own menu marks the actions signups have closed for.
 func postComponents(team *models.Team, fills []models.PostFill, marks map[int]string, locked bool) []discordgo.MessageComponent {
@@ -85,14 +85,16 @@ func postComponents(team *models.Team, fills []models.PostFill, marks map[int]st
 				Disabled: locked,
 			},
 			discordgo.Button{
-				Label:    "Not coming",
+				Label:    "Not Coming",
 				Emoji:    &discordgo.ComponentEmoji{Name: "❌"},
 				Style:    discordgo.DangerButton,
 				CustomID: "rsvp_no",
 				Disabled: locked,
 			},
+			// The custom ID stays "get_my_details" from when the button only sent
+			// your own build, so buttons on already-posted messages keep routing.
 			discordgo.Button{
-				Label:    "Get My Build Details",
+				Label:    "Build Details",
 				Style:    discordgo.PrimaryButton,
 				CustomID: "get_my_details",
 			},
@@ -439,6 +441,12 @@ func (b *bot) onComponent(s *discordgo.Session, i *discordgo.InteractionCreate) 
 	// encode the post's message id (and the chosen slot) in their custom IDs.
 	if strings.HasPrefix(id, postManageID) {
 		b.onPostManageComponent(s, i)
+		return
+	}
+	// The build-details picker likewise runs from its own ephemeral, and encodes
+	// the presser's own roster slot so re-renders keep marking it.
+	if strings.HasPrefix(id, detailsPickID) {
+		b.handleDetailsPick(s, i)
 		return
 	}
 	switch id {
@@ -1049,7 +1057,7 @@ func signupComponents(teamID int64) []discordgo.MessageComponent {
 	}
 }
 
-// --- RSVP buttons (✅ Coming / ❌ Not coming) ---
+// --- RSVP buttons (✅ Coming / ❌ Not Coming) ---
 
 // postSignupsClosed reports whether a tracked post's signups are locked because
 // its run time has passed (see postLocked). A lookup failure is logged and
@@ -1065,7 +1073,7 @@ func (b *bot) postSignupsClosed(ctx context.Context, messageID string) bool {
 }
 
 // handleRSVP records the presser's attendance for the post they clicked, then
-// edits the post in place so everyone sees the updated Coming / Not coming
+// edits the post in place so everyone sees the updated Coming / Not Coming
 // tally. RSVPs are keyed to this specific message, so a fresh /coreteam post
 // starts a new tally.
 func (b *bot) handleRSVP(s *discordgo.Session, i *discordgo.InteractionCreate, status string) {
@@ -1135,7 +1143,7 @@ func (b *bot) handleRSVP(s *discordgo.Session, i *discordgo.InteractionCreate, s
 // action log.
 func rsvpLogLabel(status string) string {
 	if status == models.RSVPNo {
-		return "Not coming"
+		return "Not Coming"
 	}
 	return "Coming"
 }
@@ -1559,111 +1567,6 @@ func rsvpMarks(team *models.Team, rsvps []models.RSVP) map[int]string {
 		}
 	}
 	return marks
-}
-
-// --- Get my details button ---
-
-func (b *bot) handleGetMyDetails(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	user := invokingUser(i)
-	if user == nil {
-		ephemeral(s, i, "Could not identify your Discord account.")
-		return
-	}
-
-	ctx, cancel := handlerContext()
-	defer cancel()
-
-	teamID, err := b.discord.GetChannelTeam(ctx, i.ChannelID)
-	if errors.Is(err, models.ErrChannelNotBound) {
-		ephemeral(s, i, "This channel isn't bound to a team anymore.")
-		return
-	}
-	if err != nil {
-		log.Printf("details: get binding: %v", err)
-		ephemeral(s, i, "Something went wrong. Please try again.")
-		return
-	}
-
-	team, encs, _, gr, err := b.loadTeamData(ctx, teamID)
-	if err != nil {
-		log.Printf("details: load team: %v", err)
-		ephemeral(s, i, "Could not load the team. Please try again.")
-		return
-	}
-
-	player, ok := matchPlayer(team, user)
-	if !ok {
-		// A user who signed up to fill an open slot via the dropdown has no
-		// roster handle, so match them to the slot they filled instead. Someone
-		// on the general fill list isn't tied to a slot, so there's no build.
-		p, found, onFillList := b.fillSignupPlayer(ctx, i, team, user)
-		switch {
-		case found:
-			player, ok = p, true
-		case onFillList:
-			ephemeral(s, i, "You're on the fill list, which isn't tied to a specific slot — so there's no build to send yet. Sign up for an open slot to get its build details.")
-			return
-		}
-	}
-	if !ok {
-		ephemeral(s, i, "You're not on this trial — no roster slot matches your Discord handle, and you haven't signed up to fill an open slot. Ask your raid lead to set your handle to `"+displayName(user)+"`, or use the signup dropdown to fill an open slot.")
-		return
-	}
-
-	title, desc := discordfmt.PlayerDetail(team, player, encs, gr)
-	embed := &discordgo.MessageEmbed{
-		Title:       truncate(title, embedTitleLimit),
-		Description: truncate(desc, embedDescriptionLimit),
-		Color:       embedColor,
-	}
-	if dm, err := s.UserChannelCreate(user.ID); err == nil {
-		if _, err := s.ChannelMessageSendEmbed(dm.ID, embed); err == nil {
-			ephemeral(s, i, "Sent your trial details via DM.")
-			return
-		}
-	}
-	// DMs likely closed — fall back to an ephemeral reply (boxed embed) only the
-	// user sees.
-	err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{
-			Flags:   discordgo.MessageFlagsEphemeral,
-			Content: "I couldn't DM you (your DMs may be closed). Here are your details:",
-			Embeds:  []*discordgo.MessageEmbed{embed},
-		},
-	})
-	if err != nil {
-		log.Printf("details: ephemeral fallback: %v", err)
-	}
-}
-
-// fillSignupPlayer resolves the user's signup on this post (via the signup
-// dropdown). When they filled an open slot, it returns that slot's roster player
-// (found=true). When they're on the general fill list (no specific slot), it
-// returns onFillList=true so callers can explain there's no build to send.
-func (b *bot) fillSignupPlayer(ctx context.Context, i *discordgo.InteractionCreate, team *models.Team, user *discordgo.User) (player models.Player, found, onFillList bool) {
-	if i.Message == nil {
-		return models.Player{}, false, false
-	}
-	fills, err := b.discord.ListFills(ctx, i.Message.ID)
-	if err != nil {
-		log.Printf("details: list fills: %v", err)
-		return models.Player{}, false, false
-	}
-	for _, f := range fills {
-		if f.DiscordUserID != user.ID {
-			continue
-		}
-		if f.Slot == models.PostFillList {
-			return models.Player{}, false, true
-		}
-		for _, p := range team.Players {
-			if p.Slot == f.Slot {
-				return p, true, false
-			}
-		}
-	}
-	return models.Player{}, false, false
 }
 
 // --- /coreteam login ---

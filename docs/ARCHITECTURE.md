@@ -511,7 +511,7 @@ buttons on a posted overview — one row per `(message_id, discord_user_id)`:
 
 Both names are stored so the post's inline ✅/❌ marks can match a responder to a
 roster slot whose `discord_handle` is set to either their username or their
-display name (mirroring the live user the "Get My Build Details" button uses).
+display name (mirroring the live user the "Build Details" button uses).
 
 Managed via `DiscordStore`; the hourly sweep prunes expired/used link codes. See
 `docs/AGENT_CONTEXT.md` "Discord bot".

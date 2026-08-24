@@ -345,7 +345,7 @@ column; the `User` JSON model hides it (`json:"-"`).
 - **Discord bot footers** (`018_team_signup_note.sql`,
   `019_team_detailed_header.sql`, renamed by `029_team_bot_footers.sql`): each
   team carries `post_footer TEXT` (appended to the bot's `/coreteam post`
-  overview) and `dm_footer TEXT` (appended to the "Get My Build Details" DM),
+  overview) and `dm_footer TEXT` (appended to the "Build Details" DM),
   both free-form (default `''`, ≤2000 runes, validated in the team handler) and
   edited from the "Discord bot footers" controls on the team page. The footers
   are consumed by the bot only (`discordfmt.BuildPost` / `discordfmt.PlayerDetail`);
@@ -652,7 +652,7 @@ column; the `User` JSON model hides it (`json:"-"`).
     username (minus the `@`). A failed live lookup is logged and falls back to the
     raw handle.
     a **Fill list** section, and groupings. Carries a button row
-    (**✅ Coming**, **❌ Not coming** (RSVP), **Get My Build Details**, **🛡️
+    (**✅ Coming**, **❌ Not Coming** (RSVP), **Build Details**, **🛡️
     Manage**) plus a
     **signup dropdown** (`post_fill_select`) whenever the roster has any fillable
     slots (open slots, or slots whose assigned player marked themselves **not
@@ -661,7 +661,7 @@ column; the `User` JSON model hides it (`json:"-"`).
     locked)`. Once the locked run time has **passed** (`postLocked(runAtUnix)`,
     from the same locked `run_at`), signups **close**: the RSVP buttons and the
     signup dropdown render **disabled** (the dropdown's placeholder becomes
-    "Signups are closed — this run has started"), while **Get My Build Details**
+    "Signups are closed — this run has started"), while **Build Details**
     and **Manage** stay active (Manage is a generic entry point, so it opens
     regardless and marks the actions signups have closed for). The `handleRSVP` /
     `handlePostFill` / manage-RSVP handlers also re-check
@@ -715,13 +715,14 @@ column; the `User` JSON model hides it (`json:"-"`).
     every command, followed by a select menu (`help_select` → `handleHelpSelect`)
     that renders any command's full detail in place. Falls back to an ephemeral
     reply with the same guide when the user's DMs are closed (`handleHelp`).
-  - **Get My Build Details** button (`get_my_details`) → matches the presser to a
+  - **Build Details** button (`get_my_details` — the ID predates the rename from
+    "Get My Build Details", and is kept so already-posted buttons keep routing;
+    `backend/cmd/bot/post_details.go`) → matches the presser to a
     roster slot (by Discord ID/mention in `players.discord_handle`, else
     case-insensitive username/global name); if no handle matches, it falls back to
     the open slot the user signed up to fill on this post (`fillSignupPlayer` over
-    `discord_post_fills`), so fillers get their build too. Users on the general
-    fill list (no specific slot) get an ephemeral note that there's no build to
-    send yet. DMs them their build as a **boxed embed** (title + description) with underlined per-data-type headers
+    `discord_post_fills`), so fillers get their build too.
+    DMs them their build as a **boxed embed** (title + description) with underlined per-data-type headers
     (`discordfmt.PlayerDetail` returns `(title, description)`); falls back to an
     ephemeral embed if DMs are closed. Order: Player, Class & Race, Build, then one
     section per encounter (the encounter-name header is omitted when there's only
@@ -730,7 +731,22 @@ column; the `User` JSON model hides it (`json:"-"`).
     them group-wide, a **Self Buffs** list of the self-providable Major/Minor buffs
     each player must bring themselves (`BUFFS` entries flagged `selfBuff: true` in
     `data.js`).
-  - **✅ Coming / ❌ Not coming** buttons → record the presser's attendance for
+  - **Build-details picker** (`post_details_pick:<ownSlot>`, `handleDetailsPick`)
+    → the select attached to that reply, for looking up **any** slot's build.
+    Open to everyone who can see the post (which already lists the roster with
+    abbreviated gear), and it's the whole answer for a presser with no slot of
+    their own — no handle match, or on the general fill list — instead of the
+    dead-end note they used to get, so a prospective filler can read what an open
+    slot expects before signing up. `detailsSlotOptions` therefore lists **all**
+    slots, open ones included ("Open slot N"), capped at Discord's 25-option
+    limit and marking the presser's own slot. Each pick is delivered the same way
+    a user's own build is (DM, ephemeral embed when DMs are closed) and re-attaches
+    the picker, so several builds can be pulled without pressing the button again.
+    The picker rides on its own ephemeral — whose message is *not* the post, so
+    `fillSignupPlayer` can't be re-run there — hence the presser's own slot rides
+    in the custom ID (`0` = none) to stay marked across re-renders. Nothing here
+    touches signups, so unlike the RSVP/fill controls it has no `postLocked` gate.
+  - **✅ Coming / ❌ Not Coming** buttons → record the presser's attendance for
     that specific post (`discord_rsvps`, keyed by message ID), then edit the post
     in place. Re-rendering runs in **two passes** (`renderPostUpdate` =
     `renderPostUpdateFast` + `renderPostUpdateFull`) so the presser's change shows
@@ -810,7 +826,7 @@ column; the `User` JSON model hides it (`json:"-"`).
     (`DiscordStore.MoveFillToList`, slot → `PostFillList`) and DMs them that
     they've been bumped to backup (`dmFillerDisplaced`). Best-effort: failures are
     logged and never block the RSVP or post refresh.
-  - **Slot opens for backups**: when a roster player is marked **❌ Not coming**,
+  - **Slot opens for backups**: when a roster player is marked **❌ Not Coming**,
     `notifyFillListOfOpening` DMs everyone on the general fill list that their
     slot opened so they can sign up from the post (`dmFillListOpening`). Skipped
     when that player isn't on the roster or the slot already has a filler.
@@ -849,7 +865,7 @@ column; the `User` JSON model hides it (`json:"-"`).
   **global name** are captured (`discord_global_name` added in
   `050_discord_rsvp_global_name.sql`) so `rsvpMarks` can match an RSVP back to a
   roster slot whose `discord_handle` is set to either form — mirroring the live
-  user the "Get My Build Details" button sees. (Storing only the display name
+  user the "Build Details" button sees. (Storing only the display name
   meant a handle set to the username never got a ✅.) `discord_user_id` is
   normally a real snowflake, but an admin RSVPing for a roster handle that
   matches nobody in the server writes a synthetic `n:<name>` id (see "RSVP for a
