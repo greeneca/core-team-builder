@@ -198,20 +198,42 @@ func (b *bot) canPressRestricted(ctx context.Context, i *discordgo.InteractionCr
 			return true, nil
 		}
 	}
-	// A member holding a role designated for this guild.
-	if i.Member != nil && i.GuildID != "" && len(i.Member.Roles) > 0 {
-		editRoles, err := b.discord.ListEditRoles(ctx, i.GuildID)
-		if err != nil {
-			return false, err
-		}
-		designated := make(map[string]bool, len(editRoles))
-		for _, r := range editRoles {
-			designated[r] = true
-		}
-		for _, r := range i.Member.Roles {
-			if designated[r] {
-				return true, nil
-			}
+	return b.hasDesignatedEditRole(ctx, i)
+}
+
+// canActAsRunAdmin reports whether the interaction's invoker clears the
+// guild-level bar for restricted actions: a Discord server admin (Administrator
+// or Manage Server), or a member holding a role designated for the guild via
+// /coreteam permissions. This is canPressRestricted without its owner check, for
+// posts that record no poster to compare against — the /coreteam post overview
+// and its admin RSVP button.
+func (b *bot) canActAsRunAdmin(ctx context.Context, i *discordgo.InteractionCreate) (bool, error) {
+	if hasManageGuild(i) {
+		return true, nil
+	}
+	if invokingUser(i) == nil {
+		return false, nil
+	}
+	return b.hasDesignatedEditRole(ctx, i)
+}
+
+// hasDesignatedEditRole reports whether the invoking member holds a role the
+// guild designated with /coreteam permissions add.
+func (b *bot) hasDesignatedEditRole(ctx context.Context, i *discordgo.InteractionCreate) (bool, error) {
+	if i.Member == nil || i.GuildID == "" || len(i.Member.Roles) == 0 {
+		return false, nil
+	}
+	editRoles, err := b.discord.ListEditRoles(ctx, i.GuildID)
+	if err != nil {
+		return false, err
+	}
+	designated := make(map[string]bool, len(editRoles))
+	for _, r := range editRoles {
+		designated[r] = true
+	}
+	for _, r := range i.Member.Roles {
+		if designated[r] {
+			return true, nil
 		}
 	}
 	return false, nil

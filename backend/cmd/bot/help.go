@@ -45,7 +45,7 @@ var helpCommands = []helpCommand{
 	{
 		Name:    "post",
 		Summary: "Post this channel's trial overview.",
-		Detail:  "Posts the bound team's trial overview: the roster grouped by role, the schedule as a live timestamp, and any groupings. Includes Coming / Not coming RSVP buttons, a Get My Build Details button, and a dropdown to fill open slots. It also opens a discussion thread and pings attendees there about 15 minutes before the run.",
+		Detail:  "Posts the bound team's trial overview: the roster grouped by role, the schedule as a live timestamp, and any groupings. Includes Coming / Not coming RSVP buttons, a Get My Build Details button, and a dropdown to fill open slots. There's also a Manage button, usable by a designated role or a server admin, whose menu currently offers RSVPing on behalf of someone who can't press the buttons themselves. It also opens a discussion thread and pings attendees there about 15 minutes before the run.",
 	},
 	{
 		Name:    "recruit",
@@ -95,7 +95,7 @@ var helpCommands = []helpCommand{
 	{
 		Name:    "permissions",
 		Summary: "Choose which roles can edit/delete signup runs.",
-		Detail:  "Manages which Discord roles may use the Edit run and Delete run buttons on signup runs in this server. Use `/coreteam permissions add role:<role>`, `remove role:<role>`, or `list`. Regardless of this list, each run's original poster and server admins (Manage Server / Administrator) can always edit or delete it. Changing the list requires the Manage Server permission.",
+		Detail:  "Manages which Discord roles may use the Edit run and Delete run buttons on signup runs in this server, and the Manage button on trial overview posts. Use `/coreteam permissions add role:<role>`, `remove role:<role>`, or `list`. Regardless of this list, each run's original poster and server admins (Manage Server / Administrator) can always edit or delete it. Changing the list requires the Manage Server permission.",
 	},
 }
 

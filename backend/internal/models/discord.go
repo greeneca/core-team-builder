@@ -308,6 +308,18 @@ func (s *DiscordStore) SetRSVP(ctx context.Context, messageID, channelID, discor
 	return err
 }
 
+// DeleteRSVP removes a user's attendance response from a posted message. It is
+// idempotent. Used when an admin RSVPs on a roster player's behalf: the player
+// may already have a response recorded under a different Discord identity (e.g.
+// they pressed the buttons themselves, while the roster handle only resolves to
+// a name), and two rows matching the same slot would make the post's mark
+// depend on write order.
+func (s *DiscordStore) DeleteRSVP(ctx context.Context, messageID, discordUserID string) error {
+	const q = `DELETE FROM discord_rsvps WHERE message_id = $1 AND discord_user_id = $2`
+	_, err := s.pool.Exec(ctx, q, messageID, discordUserID)
+	return err
+}
+
 // ListRSVPs returns all attendance responses for a posted message, ordered by
 // when each was last set (so the displayed lists are stable).
 func (s *DiscordStore) ListRSVPs(ctx context.Context, messageID string) ([]RSVP, error) {

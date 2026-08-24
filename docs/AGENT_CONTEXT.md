@@ -652,7 +652,8 @@ column; the `User` JSON model hides it (`json:"-"`).
     username (minus the `@`). A failed live lookup is logged and falls back to the
     raw handle.
     a **Fill list** section, and groupings. Carries a button row
-    (**✅ Coming**, **❌ Not coming** (RSVP), **Get My Build Details**) plus a
+    (**✅ Coming**, **❌ Not coming** (RSVP), **Get My Build Details**, **🛡️
+    Manage**) plus a
     **signup dropdown** (`post_fill_select`) whenever the roster has any fillable
     slots (open slots, or slots whose assigned player marked themselves **not
     coming**). Built by `discordfmt.BuildPost`; the bot wraps the parts in the
@@ -661,7 +662,9 @@ column; the `User` JSON model hides it (`json:"-"`).
     from the same locked `run_at`), signups **close**: the RSVP buttons and the
     signup dropdown render **disabled** (the dropdown's placeholder becomes
     "Signups are closed — this run has started"), while **Get My Build Details**
-    stays active. The `handleRSVP` / `handlePostFill` handlers also re-check
+    and **Manage** stay active (Manage is a generic entry point, so it opens
+    regardless and marks the actions signups have closed for). The `handleRSVP` /
+    `handlePostFill` / manage-RSVP handlers also re-check
     `postSignupsClosed` server-side, so a stale client that still shows enabled
     controls can't record a late signup — the interaction just re-renders the
     post into its locked state.
@@ -692,8 +695,10 @@ column; the `User` JSON model hides it (`json:"-"`).
   - `status` / `unset` — show / remove the channel's team binding.
   - `permissions add|remove|list` — (Manage Server) manages the per-guild set of
     Discord roles allowed to use a signup run's restricted buttons (**Edit run** /
-    **Delete run**). Stored in `discord_edit_roles` (keyed by `guild_id`,
-    `role_id`); read by `canPressRestricted`. A subcommand **group** dispatched in
+    **Delete run**) and the overview post's **Manage** button. Stored
+    in `discord_edit_roles` (keyed by `guild_id`,
+    `role_id`); read by `hasDesignatedEditRole`, via `canPressRestricted` (runs)
+    and `canActAsRunAdmin` (posts). A subcommand **group** dispatched in
     `onCommand` to `handlePermissions`. Regardless of the list, each run's
     original poster and server admins can always edit/delete.
   - `actionlog set|off|status` — (Manage Server) designates the channel this
@@ -767,17 +772,51 @@ column; the `User` JSON model hides it (`json:"-"`).
     most one signup per post, so each choice replaces the prior one; the post is
     re-rendered in place via `renderPostUpdate` (shared with the RSVP buttons). No
     account link is required (like RSVPs).
-  - **Returning player reclaims their slot**: when a roster player presses **✅
+  - **Manage** button (`post_manage`, `backend/cmd/bot/post_manage.go`)
+    → the run admin's entry point for acting on the post rather than on their own
+    attendance. Access is `canActAsRunAdmin` — `canPressRestricted` minus its
+    owner check, since a `/coreteam post` overview records no poster: a Discord
+    server admin (Manage Server / Administrator) or a member holding a role
+    designated via `/coreteam permissions`. The button is shown to everyone
+    (Discord can't hide a button per-user) and unauthorized pressers get an
+    ephemeral rejection, matching **Edit run**. Pressing it opens an ephemeral
+    **action menu** (`postManageActions`, `post_manage_action`); **adding a manage
+    action means adding an option there plus a case in
+    `handlePostManageAction`** — the button, the permission gate (re-checked at
+    every step, so a revoked role takes effect mid-flow) and the routing don't
+    change. Discord can't disable an individual select option, so an action that
+    isn't currently available stays listed with a description saying why and its
+    handler rejects it too.
+  - **RSVP for a player** (the one manage action today) → lets an admin answer
+    for someone who can't (or didn't) press the buttons themselves. Two more
+    ephemeral steps: a picker of the roster players **with a `discord_handle`
+    set** (each option showing its current response), then **Coming** / **Not
+    coming**. Because the flow acts from its own ephemeral — the interaction's
+    message is *that*, not the post — the post's message id and the chosen slot
+    ride along in the follow-up controls' custom IDs, and the post is refreshed by
+    editing it directly (`refreshPostMessage`) rather than through the interaction
+    response.
+    `postRSVPTarget` resolves the slot's handle to the identity to record under
+    (mirroring `matchPlayer` in reverse, so the row always maps back to the slot);
+    a text handle matching nobody in the server falls back to a synthetic
+    `n:<name>` id (the premade convention), which `clearRivalSlotRSVPs` keeps from
+    coexisting with the player's own row and `pingPostAttendees` skips as
+    non-mentionable. The result is otherwise indistinguishable from a self-press:
+    same `discord_rsvps` row, same ✅/❌ mark, same side effects below, and the
+    player can override it by pressing the buttons themselves.
+  - **Returning player reclaims their slot**: when a roster player is marked **✅
     Coming** and someone had signed up to fill their slot while they were out,
     `displaceFillerForReturningPlayer` moves that filler to the fill list
     (`DiscordStore.MoveFillToList`, slot → `PostFillList`) and DMs them that
     they've been bumped to backup (`dmFillerDisplaced`). Best-effort: failures are
     logged and never block the RSVP or post refresh.
-  - **Slot opens for backups**: when a roster player presses **❌ Not coming**,
+  - **Slot opens for backups**: when a roster player is marked **❌ Not coming**,
     `notifyFillListOfOpening` DMs everyone on the general fill list that their
     slot opened so they can sign up from the post (`dmFillListOpening`). Skipped
-    when the presser isn't a roster player or the slot already has a filler.
-    Best-effort (logged only).
+    when that player isn't on the roster or the slot already has a filler.
+    Best-effort (logged only). Both side effects are keyed to the player the RSVP
+    is *for*, so they behave the same whether the player pressed the button or an
+    admin did it for them.
   - **Post links in DMs**: notification DMs (`dmFillerDisplaced`,
     `dmFillListOpening`, premade `dmPromoted`) and the premade `/coreteam signup`
     final confirmation DM append a Discord jump link back to the post via
@@ -805,12 +844,17 @@ column; the `User` JSON model hides it (`json:"-"`).
   `DiscordStore.BindChannel`/`GetChannelTeam`/`UnbindChannel`).
 - **RSVPs**: `discord_rsvps` (`028_discord_rsvps.sql`) stores one row per
   `(message_id, discord_user_id)` with a `'yes'`/`'no'` status
-  (`DiscordStore.SetRSVP`/`ListRSVPs`). Both the responder's **username** and
+  (`DiscordStore.SetRSVP`/`ListRSVPs`/`DeleteRSVP`). Both the responder's
+  **username** and
   **global name** are captured (`discord_global_name` added in
   `050_discord_rsvp_global_name.sql`) so `rsvpMarks` can match an RSVP back to a
   roster slot whose `discord_handle` is set to either form — mirroring the live
   user the "Get My Build Details" button sees. (Storing only the display name
-  meant a handle set to the username never got a ✅.)
+  meant a handle set to the username never got a ✅.) `discord_user_id` is
+  normally a real snowflake, but an admin RSVPing for a roster handle that
+  matches nobody in the server writes a synthetic `n:<name>` id (see "RSVP for a
+  player" above) — treat the column as an opaque identity key, not a mentionable
+  user id.
 - **Post fill signups**: `discord_post_fills` (`046_discord_post_fills.sql`)
   stores one row per `(message_id, discord_user_id)` with a `slot` (`0` =
   `models.PostFillList` general fill list; `> 0` = a specific open roster slot,
@@ -854,8 +898,9 @@ column; the `User` JSON model hides it (`json:"-"`).
   overviews, taking the title off the post's own embed) are the two wrappers
   call sites use. Logged actions: signing up for a slot or role, switching
   slot/role, un-signing, joining a waitlist, going tentative, both RSVP buttons,
-  the overview's fill dropdown (fill a slot / join the fill list / remove a
-  signup), and the editor actions behind **Edit run** (signing up another
+  an admin RSVPing on a player's behalf ("RSVP'd **Coming** on behalf of
+  **…**"), the overview's fill dropdown (fill a slot / join the fill list /
+  remove a signup), and the editor actions behind **Edit run** (signing up another
   player, removing a signup, deleting the run — the delete entries' titles
   aren't linked, since the post is gone). Every call site logs **after** the interaction
   has been acknowledged and re-rendered, and every failure (lookup or delivery)

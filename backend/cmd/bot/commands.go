@@ -63,16 +63,17 @@ func postLocked(runAtUnix int64) bool {
 }
 
 // postComponents are the controls attached to a posted trial overview: a button
-// row (the two RSVP buttons + the per-player details button) and a signup
-// dropdown so players can fill a slot or join the general fill list (the
-// dropdown is always shown so people can volunteer as backups even when no slot
-// is open). marks is the slot -> RSVP status map (so slots whose assigned player
-// declined become fillable). Defined once so the initial post and every in-place
-// update render the same controls.
+// row (the two RSVP buttons, the per-player details button, and the admin
+// Manage button) and a signup dropdown so players can fill a slot or join the
+// general fill list (the dropdown is always shown so people can volunteer as
+// backups even when no slot is open). marks is the slot -> RSVP status map (so
+// slots whose assigned player declined become fillable). Defined once so the
+// initial post and every in-place update render the same controls.
 //
 // locked closes signups once the run time has passed (see postLocked): the RSVP
-// buttons and the signup dropdown are disabled, but "Get My Build Details" stays
-// active so players can still pull their loadout for a run in progress.
+// buttons and the signup dropdown are disabled, but "Get My Build Details" and
+// "Manage" stay active — players can still pull their loadout for a run in
+// progress, and Manage's own menu marks the actions signups have closed for.
 func postComponents(team *models.Team, fills []models.PostFill, marks map[int]string, locked bool) []discordgo.MessageComponent {
 	rows := []discordgo.MessageComponent{
 		discordgo.ActionsRow{Components: []discordgo.MessageComponent{
@@ -94,6 +95,15 @@ func postComponents(team *models.Team, fills []models.PostFill, marks map[int]st
 				Label:    "Get My Build Details",
 				Style:    discordgo.PrimaryButton,
 				CustomID: "get_my_details",
+			},
+			// Shown to everyone because Discord can't hide a button per-user;
+			// unauthorized pressers get an ephemeral rejection instead (the same
+			// approach as the premade run's "Edit run" button).
+			discordgo.Button{
+				Label:    "Manage",
+				Emoji:    &discordgo.ComponentEmoji{Name: "\U0001F6E1\uFE0F"}, // 🛡️
+				Style:    discordgo.SecondaryButton,
+				CustomID: postManageID,
 			},
 		}},
 	}
@@ -423,6 +433,12 @@ func (b *bot) onComponent(s *discordgo.Session, i *discordgo.InteractionCreate) 
 	}
 	if strings.HasPrefix(id, rollRerollPrefix) {
 		b.handleRollReroll(s, i)
+		return
+	}
+	// The Manage flow runs from its own ephemeral, so its follow-up controls
+	// encode the post's message id (and the chosen slot) in their custom IDs.
+	if strings.HasPrefix(id, postManageID) {
+		b.onPostManageComponent(s, i)
 		return
 	}
 	switch id {
@@ -1101,10 +1117,10 @@ func (b *bot) handleRSVP(s *discordgo.Session, i *discordgo.InteractionCreate, s
 	// acknowledgement (they can DM, which is slow), and the full pass below picks
 	// up any resulting change.
 	if status == models.RSVPYes {
-		b.displaceFillerForReturningPlayer(ctx, s, i, user)
+		b.displaceFillerForReturningPlayer(ctx, s, i.GuildID, i.ChannelID, i.Message.ID, user)
 	}
 	if status == models.RSVPNo {
-		b.notifyFillListOfOpening(ctx, s, i, user)
+		b.notifyFillListOfOpening(ctx, s, i.GuildID, i.ChannelID, i.Message.ID, user)
 	}
 
 	// Full pass: re-read the roster/fills (reflecting any displacement above) and
@@ -1124,13 +1140,15 @@ func rsvpLogLabel(status string) string {
 	return "Coming"
 }
 
-// displaceFillerForReturningPlayer handles a roster player marking themselves
-// "coming" again. If a filler signed up to cover their slot while they were out,
-// the slot is theirs again, so the filler is moved to the general fill list (as a
-// backup) and DM'd about the change. Best-effort: any failure is logged only,
-// since the RSVP and post refresh should still succeed.
-func (b *bot) displaceFillerForReturningPlayer(ctx context.Context, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User) {
-	teamID, err := b.discord.GetChannelTeam(ctx, i.ChannelID)
+// displaceFillerForReturningPlayer handles a roster player being marked "coming"
+// again. If a filler signed up to cover their slot while they were out, the slot
+// is theirs again, so the filler is moved to the general fill list (as a backup)
+// and DM'd about the change. user is the returning player, who is not
+// necessarily whoever pressed the button — an admin can RSVP on their behalf.
+// Best-effort: any failure is logged only, since the RSVP and post refresh
+// should still succeed.
+func (b *bot) displaceFillerForReturningPlayer(ctx context.Context, s *discordgo.Session, guildID, channelID, messageID string, user *discordgo.User) {
+	teamID, err := b.discord.GetChannelTeam(ctx, channelID)
 	if err != nil {
 		return
 	}
@@ -1143,7 +1161,7 @@ func (b *bot) displaceFillerForReturningPlayer(ctx context.Context, s *discordgo
 	if !ok {
 		return // not a roster player, so no slot to reclaim
 	}
-	moved, found, err := b.discord.MoveFillToList(ctx, i.Message.ID, p.Slot)
+	moved, found, err := b.discord.MoveFillToList(ctx, messageID, p.Slot)
 	if err != nil {
 		log.Printf("rsvp: move filler to list: %v", err)
 		return
@@ -1151,7 +1169,7 @@ func (b *bot) displaceFillerForReturningPlayer(ctx context.Context, s *discordgo
 	if !found {
 		return
 	}
-	b.dmFillerDisplaced(s, moved.DiscordUserID, team.Name, displayName(user), messageURL(i.GuildID, i.ChannelID, i.Message.ID))
+	b.dmFillerDisplaced(s, moved.DiscordUserID, team.Name, displayName(user), messageURL(guildID, channelID, messageID))
 }
 
 // dmFillerDisplaced notifies a filler (by Discord user ID) that the slot they
@@ -1172,12 +1190,14 @@ func (b *bot) dmFillerDisplaced(s *discordgo.Session, fillerUserID, teamName, re
 }
 
 // notifyFillListOfOpening DMs everyone currently on the general fill list that a
-// roster slot just opened — its assigned player (the RSVP presser) marked
-// themselves not coming — so backups can grab it from the post. It does nothing
-// when the presser isn't a roster player (a non-roster decline opens nothing) or
-// when the slot already has a filler. Best-effort: failures are logged only.
-func (b *bot) notifyFillListOfOpening(ctx context.Context, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User) {
-	teamID, err := b.discord.GetChannelTeam(ctx, i.ChannelID)
+// roster slot just opened — its assigned player was marked not coming — so
+// backups can grab it from the post. user is the declining player, who is not
+// necessarily whoever pressed the button (an admin can RSVP on their behalf). It
+// does nothing when that user isn't a roster player (a non-roster decline opens
+// nothing) or when the slot already has a filler. Best-effort: failures are
+// logged only.
+func (b *bot) notifyFillListOfOpening(ctx context.Context, s *discordgo.Session, guildID, channelID, messageID string, user *discordgo.User) {
+	teamID, err := b.discord.GetChannelTeam(ctx, channelID)
 	if err != nil {
 		return
 	}
@@ -1190,7 +1210,7 @@ func (b *bot) notifyFillListOfOpening(ctx context.Context, s *discordgo.Session,
 	if !ok {
 		return // a non-roster decline doesn't open a slot
 	}
-	fills, err := b.discord.ListFills(ctx, i.Message.ID)
+	fills, err := b.discord.ListFills(ctx, messageID)
 	if err != nil {
 		log.Printf("rsvp: list fills for notify: %v", err)
 		return
@@ -1205,7 +1225,7 @@ func (b *bot) notifyFillListOfOpening(ctx context.Context, s *discordgo.Session,
 		}
 	}
 	role := team.RoleLabel(p.Role)
-	postURL := messageURL(i.GuildID, i.ChannelID, i.Message.ID)
+	postURL := messageURL(guildID, channelID, messageID)
 	for _, f := range backups {
 		b.dmFillListOpening(s, f.DiscordUserID, team.Name, displayName(user), role, postURL)
 	}
@@ -1400,8 +1420,8 @@ type postRenderData struct {
 // local queries (no Discord REST), so it's safe on the interaction hot path. A
 // missing/NULL locked run date yields runAtUnix 0 (logged, not fatal), matching
 // the pre-lock fallback in buildPostEmbed.
-func (b *bot) loadPostRenderData(ctx context.Context, i *discordgo.InteractionCreate) (*postRenderData, error) {
-	teamID, err := b.discord.GetChannelTeam(ctx, i.ChannelID)
+func (b *bot) loadPostRenderData(ctx context.Context, channelID, messageID string) (*postRenderData, error) {
+	teamID, err := b.discord.GetChannelTeam(ctx, channelID)
 	if err != nil {
 		return nil, err
 	}
@@ -1409,17 +1429,17 @@ func (b *bot) loadPostRenderData(ctx context.Context, i *discordgo.InteractionCr
 	if err != nil {
 		return nil, err
 	}
-	rsvps, err := b.discord.ListRSVPs(ctx, i.Message.ID)
+	rsvps, err := b.discord.ListRSVPs(ctx, messageID)
 	if err != nil {
 		return nil, err
 	}
-	fills, err := b.discord.ListFills(ctx, i.Message.ID)
+	fills, err := b.discord.ListFills(ctx, messageID)
 	if err != nil {
 		return nil, err
 	}
-	runAtUnix, err := b.discord.GetPostRunAt(ctx, i.Message.ID)
+	runAtUnix, err := b.discord.GetPostRunAt(ctx, messageID)
 	if err != nil {
-		log.Printf("post: get locked run_at (%s): %v", i.Message.ID, err)
+		log.Printf("post: get locked run_at (%s): %v", messageID, err)
 	}
 	return &postRenderData{team: team, primary: primary, groupings: gr, rsvps: rsvps, fills: fills, runAtUnix: runAtUnix}, nil
 }
@@ -1449,7 +1469,7 @@ func (b *bot) renderPostUpdate(ctx context.Context, s *discordgo.Session, i *dis
 // from DB state (interaction not yet acknowledged, so the caller can fall back to
 // an ephemeral notice); the Discord update call's own error is logged.
 func (b *bot) renderPostUpdateFast(ctx context.Context, s *discordgo.Session, i *discordgo.InteractionCreate) error {
-	d, err := b.loadPostRenderData(ctx, i)
+	d, err := b.loadPostRenderData(ctx, i.ChannelID, i.Message.ID)
 	if err != nil {
 		return err
 	}
@@ -1475,7 +1495,7 @@ func (b *bot) renderPostUpdateFast(ctx context.Context, s *discordgo.Session, i 
 // response via the webhook edit. Best effort: build and delivery failures are
 // logged and swallowed, since the fast pass already updated the post.
 func (b *bot) renderPostUpdateFull(ctx context.Context, s *discordgo.Session, i *discordgo.InteractionCreate) {
-	d, err := b.loadPostRenderData(ctx, i)
+	d, err := b.loadPostRenderData(ctx, i.ChannelID, i.Message.ID)
 	if err != nil {
 		log.Printf("post: full update load: %v", err)
 		return
@@ -1490,6 +1510,35 @@ func (b *bot) renderPostUpdateFull(ctx context.Context, s *discordgo.Session, i 
 	}); err != nil {
 		log.Printf("post: full update edit: %v", err)
 	}
+}
+
+// refreshPostMessage re-renders a posted trial overview by editing the message
+// directly, for changes made from somewhere other than the post itself (the
+// admin RSVP flow acts from its own ephemeral, so the interaction's message is
+// that ephemeral, not the post). Names are resolved over REST — there's no
+// 3-second deadline here since the interaction was acknowledged separately — and
+// the original "Posted by …" footer is carried over from the live message.
+func (b *bot) refreshPostMessage(ctx context.Context, s *discordgo.Session, guildID, channelID, messageID string) error {
+	d, err := b.loadPostRenderData(ctx, channelID, messageID)
+	if err != nil {
+		return err
+	}
+	footer := ""
+	if msg, merr := s.ChannelMessage(channelID, messageID); merr == nil {
+		footer = existingFooterText(msg)
+	} else {
+		log.Printf("post: fetch message for refresh (%s): %v", messageID, merr)
+	}
+	names := b.resolveRosterNames(s, guildID, d.team)
+	embeds := []*discordgo.MessageEmbed{buildPostEmbed(d.team, d.primary, d.groupings, d.rsvps, d.fills, names, footer, d.runAtUnix)}
+	components := postComponents(d.team, d.fills, rsvpMarks(d.team, d.rsvps), postLocked(d.runAtUnix))
+	_, err = s.ChannelMessageEditComplex(&discordgo.MessageEdit{
+		Channel:    channelID,
+		ID:         messageID,
+		Embeds:     &embeds,
+		Components: &components,
+	})
+	return err
 }
 
 // rsvpMarks matches each RSVP to a roster slot (by Discord ID/handle) and

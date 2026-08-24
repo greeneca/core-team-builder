@@ -160,7 +160,10 @@ func (b *bot) pingPostAttendees(ctx context.Context, session *discordgo.Session,
 	seen := map[string]bool{}
 	var mentions []string
 	add := func(id string) {
-		if id == "" || seen[id] {
+		// An admin RSVPing for a roster player whose handle matches nobody in the
+		// server records a synthetic "n:<name>" id (see postRSVPTarget). It isn't
+		// a real snowflake, so mentioning it would render as literal "<@n:…>".
+		if id == "" || seen[id] || !isAllDigits(id) {
 			return
 		}
 		seen[id] = true
