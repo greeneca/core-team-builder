@@ -30,6 +30,9 @@ type bot struct {
 	// repoURL is the public source-repository URL (REPO_URL), shown by
 	// /coreteam help for browsing the code and reporting bugs.
 	repoURL string
+	// botInviteURL is the Discord authorization link that installs this bot in
+	// another server (BOT_INVITE_URL), shown by /coreteam help.
+	botInviteURL string
 	// nameCache memoizes resolved Discord display names (by guild+user) so
 	// re-rendering a post on every RSVP/fill press doesn't re-hit the API.
 	nameCache *handleNameCache

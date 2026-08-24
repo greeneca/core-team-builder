@@ -8,9 +8,10 @@ import (
 )
 
 // The /coreteam help subcommand opens a DM with the invoking user containing a
-// command reference, a link to the web app, and a link to the source repository
-// for browsing the code and reporting bugs. The DM carries a select menu so the
-// user can drill into any command's details without leaving the conversation.
+// command reference, a link to the web app, a link that installs the bot in
+// another server, and a link to the source repository for browsing the code and
+// reporting bugs. The DM carries a select menu so the user can drill into any
+// command's details without leaving the conversation.
 //
 // helpSelectID is the menu's custom ID; the chosen option's value is the command
 // name, which handleHelpSelect renders in place.
@@ -30,7 +31,7 @@ var helpCommands = []helpCommand{
 	{
 		Name:    "help",
 		Summary: "Open this help guide in a DM.",
-		Detail:  "Sends you this guide: a reference for every command, a link to the web app, and where to browse the code and report bugs. Pick a command from the menu below for details.",
+		Detail:  "Sends you this guide: a reference for every command, a link to the web app, a link for adding me to another server, and where to browse the code and report bugs. Pick a command from the menu below for details.",
 	},
 	{
 		Name:    "link",
@@ -112,9 +113,10 @@ func findHelpCommand(name string) *helpCommand {
 // --- /coreteam help ---
 
 // handleHelp opens a DM with the invoking user and posts the help guide there:
-// an overview embed (intro, web app + repo links, command summaries) followed by
-// a message with a select menu for drilling into each command. The slash command
-// itself gets an ephemeral acknowledgement (or the guide inline if DMs fail).
+// an overview embed (intro, web app + invite + repo links, command summaries)
+// followed by a message with a select menu for drilling into each command. The
+// slash command itself gets an ephemeral acknowledgement (or the guide inline
+// if DMs fail).
 func (b *bot) handleHelp(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	user := invokingUser(i)
 	if user == nil {
@@ -185,14 +187,18 @@ func (b *bot) handleHelpSelect(s *discordgo.Session, i *discordgo.InteractionCre
 	}
 }
 
-// helpOverviewEmbed builds the guide's overview embed: an intro, the web app and
-// source-repository links, and a one-line summary of every command.
+// helpOverviewEmbed builds the guide's overview embed: an intro, the web app,
+// bot install, and source-repository links, and a one-line summary of every
+// command.
 func (b *bot) helpOverviewEmbed() *discordgo.MessageEmbed {
 	var sb strings.Builder
 	sb.WriteString("Here's everything I can do. Run any command as `/coreteam <name>`, or use `/post` and `/signup` directly.\n")
 
 	if url := strings.TrimSpace(b.appBaseURL); url != "" {
 		sb.WriteString("\n\U0001F310 **Web app:** " + url) // 🌐
+	}
+	if invite := strings.TrimSpace(b.botInviteURL); invite != "" {
+		sb.WriteString("\n\u2795 **Add me to your server:** " + invite) // ➕
 	}
 	if repo := strings.TrimSpace(b.repoURL); repo != "" {
 		repo = strings.TrimRight(repo, "/")

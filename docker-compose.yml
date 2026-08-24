@@ -139,7 +139,6 @@ services:
   # `docker compose up` (the bot requires DISCORD_BOT_TOKEN, which most local
   # setups won't have). Start it with:  docker compose --profile bot up
   bot:
-    profiles: ["bot"]
     build: ./backend
     image: ctb-backend
     # Rebuild on every `docker compose up` (see db service for rationale).
@@ -156,6 +155,10 @@ services:
       DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN}
       DISCORD_APP_ID: ${DISCORD_APP_ID}
       DISCORD_GUILD_ID: ${DISCORD_GUILD_ID}
+      # Links shown by /coreteam help. Both fall back to the project defaults
+      # when empty; override BOT_INVITE_URL when running your own Discord app.
+      REPO_URL: ${REPO_URL}
+      BOT_INVITE_URL: ${BOT_INVITE_URL}
     depends_on:
       db:
         condition: service_healthy

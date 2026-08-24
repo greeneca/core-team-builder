@@ -40,6 +40,12 @@ type Config struct {
 	// /coreteam help so users can browse the code and report bugs.
 	RepoURL string
 
+	// BotInviteURL is the Discord authorization link that installs this bot in
+	// another server, shown by the bot's /coreteam help. Its client id
+	// identifies a specific Discord application, so a separate deployment must
+	// override the default with its own.
+	BotInviteURL string
+
 	// PasswordResetTTL is how long an issued password-reset token remains valid.
 	PasswordResetTTL time.Duration
 
@@ -129,6 +135,11 @@ const defaultPasswordResetTTL = time.Hour
 // "browse the code" and "report a bug" links when REPO_URL is unset.
 const defaultRepoURL = "https://github.com/greeneca/core-team-builder"
 
+// defaultBotInviteURL installs the public Core Team Builder bot, used by
+// /coreteam help when BOT_INVITE_URL is unset. A deployment running its own
+// Discord application must set BOT_INVITE_URL, since this one names ours.
+const defaultBotInviteURL = "https://discord.com/oauth2/authorize?client_id=1516144508813709334"
+
 // Load reads configuration from the environment, applying sane defaults for
 // local development. It returns an error when a required production value is
 // missing.
@@ -159,8 +170,9 @@ func Load() (*Config, error) {
 	// APP_BASE_URL is not set explicitly.
 	cfg.AppBaseURL = getEnv("APP_BASE_URL", cfg.CORSOrigin)
 
-	// Public source repo for /coreteam help links.
+	// Public source repo and bot install link for /coreteam help.
 	cfg.RepoURL = getEnv("REPO_URL", defaultRepoURL)
+	cfg.BotInviteURL = getEnv("BOT_INVITE_URL", defaultBotInviteURL)
 
 	// Discord sign-in (OAuth2). The redirect URL defaults to the API callback
 	// under the public app base URL, but can be overridden when the API is hosted

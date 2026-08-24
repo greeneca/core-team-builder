@@ -57,6 +57,7 @@ func run() error {
 		rosterImages: models.NewRosterImageStore(pool),
 		appBaseURL:   cfg.AppBaseURL,
 		repoURL:      cfg.RepoURL,
+		botInviteURL: cfg.BotInviteURL,
 		nameCache:    newHandleNameCache(),
 	}
 

@@ -714,8 +714,10 @@ column; the `User` JSON model hides it (`json:"-"`).
     then posts a confirmation in the chosen channel — that post doubles as a
     permission check, and a failure warns the runner the log would be silent.
   - `help` — DMs the runner a **command guide** (`backend/cmd/bot/help.go`): an
-    overview embed (intro, the web app link from `APP_BASE_URL`, plus
-    "report a bug"/"source code" links built from `REPO_URL`, default
+    overview embed (intro, the web app link from `APP_BASE_URL`, an "add me to
+    your server" link from `BOT_INVITE_URL` — the Discord authorization URL for
+    the bot's own application — plus "report a bug"/"source code" links built
+    from `REPO_URL`, default
     `https://github.com/greeneca/core-team-builder`) and a one-line summary of
     every command, followed by a select menu (`help_select` → `handleHelpSelect`)
     that renders any command's full detail in place. Falls back to an ephemeral
