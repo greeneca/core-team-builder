@@ -720,6 +720,22 @@ column; the `User` JSON model hides it (`json:"-"`).
     every command, followed by a select menu (`help_select` → `handleHelpSelect`)
     that renders any command's full detail in place. Falls back to an ephemeral
     reply with the same guide when the user's DMs are closed (`handleHelp`).
+  - **Flows in DMs** (`backend/cmd/bot/post_dm.go`) — the post's two multi-step
+    buttons, **Build Details** and **Manage**, run in the presser's DMs rather
+    than in an ephemeral reply, so the conversation persists and browsing a roster
+    doesn't litter the trial channel. Discord still needs the press answered
+    within 3s and a DM isn't an interaction response, so `openFlowInDM`
+    acknowledges with a **deferred message update** — invisible, and safe only
+    because these flows never edit the post *through* the interaction (they call
+    `refreshPostMessage` instead) — then sends the DM. A user with DMs closed
+    can't be reached, so the same step goes out as an **ephemeral follow-up** and
+    the flow continues there; from step two on the paths are identical, since
+    `updateFlowStep` just rewrites whichever message the control sits on. One-shot
+    **rejections and load errors stay ephemeral** rather than becoming DMs.
+    A DM interaction carries no guild and its channel is the DM, so the post's
+    guild/channel/message travel in the follow-up custom IDs as a `postOrigin`
+    (`encode`/`parsePostOrigin`); three snowflakes plus a prefix and arguments fit
+    inside Discord's 100-character custom-ID limit.
   - **Build Details** button (`get_my_details` — the ID predates the rename from
     "Get My Build Details", and is kept so already-posted buttons keep routing;
     `backend/cmd/bot/post_details.go`) → matches the presser to a
@@ -728,29 +744,31 @@ column; the `User` JSON model hides it (`json:"-"`).
     the open slot the user signed up to fill on this post (`fillSignupPlayer` over
     `discord_post_fills`), so fillers get their build too.
     DMs them their build as a **boxed embed** (title + description) with underlined per-data-type headers
-    (`discordfmt.PlayerDetail` returns `(title, description)`); falls back to an
-    ephemeral embed if DMs are closed. Order: Player, Class & Race, Build, then one
+    (`discordfmt.PlayerDetail` returns `(title, description)`), with the picker
+    below attached to that same DM (see "Flows in DMs"). Order: Player, Class & Race, Build, then one
     section per encounter (the encounter-name header is omitted when there's only
     one), and finally a **Requirements** section holding **Self-Required (after
     group buffs)** (penetration + crit damage) and, when the team doesn't cover
     them group-wide, a **Self Buffs** list of the self-providable Major/Minor buffs
     each player must bring themselves (`BUFFS` entries flagged `selfBuff: true` in
     `data.js`).
-  - **Build-details picker** (`post_details_pick:<ownSlot>`, `handleDetailsPick`)
-    → the select attached to that reply, for looking up **any** slot's build.
+  - **Build-details picker**
+    (`post_details_pick:<guildID>:<channelID>:<messageID>:<ownSlot>`,
+    `handleDetailsPick`) → the select attached to that DM, for looking up **any**
+    slot's build.
     Open to everyone who can see the post (which already lists the roster with
     abbreviated gear), and it's the whole answer for a presser with no slot of
     their own — no handle match, or on the general fill list — instead of the
     dead-end note they used to get, so a prospective filler can read what an open
     slot expects before signing up. `detailsSlotOptions` therefore lists **all**
     slots, open ones included ("Open slot N"), capped at Discord's 25-option
-    limit and marking the presser's own slot. Each pick is delivered the same way
-    a user's own build is (DM, ephemeral embed when DMs are closed) and re-attaches
-    the picker, so several builds can be pulled without pressing the button again.
-    The picker rides on its own ephemeral — whose message is *not* the post, so
-    `fillSignupPlayer` can't be re-run there — hence the presser's own slot rides
-    in the custom ID (`0` = none) to stay marked across re-renders. Nothing here
-    touches signups, so unlike the RSVP/fill controls it has no `postLocked` gate.
+    limit and marking the presser's own slot. Each pick **rewrites the same DM**
+    in place (embed + picker), so looking through several players doesn't fill the
+    conversation with copies; the trade-off is that only the most recent build
+    stays on screen. The presser's own slot rides in the custom ID (`0` = none) to
+    stay marked across re-renders — the DM isn't the post, so `fillSignupPlayer`
+    can't be re-run to re-derive it. Nothing here touches signups, so unlike the
+    RSVP/fill controls it has no `postLocked` gate.
   - **✅ Coming / ❌ Not Coming** buttons → record the presser's attendance for
     that specific post (`discord_rsvps`, keyed by message ID), then edit the post
     in place. Re-rendering runs in **two passes** (`renderPostUpdate` =
@@ -800,23 +818,33 @@ column; the `User` JSON model hides it (`json:"-"`).
     server admin (Manage Server / Administrator) or a member holding a role
     designated via `/coreteam permissions`. The button is shown to everyone
     (Discord can't hide a button per-user) and unauthorized pressers get an
-    ephemeral rejection, matching **Edit run**. Pressing it opens an ephemeral
+    ephemeral rejection, matching **Edit run** — rejections stay in the channel
+    rather than becoming a DM, since they're one-shot answers. Pressing it DMs an
     **action menu** (`postManageActions`, `post_manage_action`); **adding a manage
     action means adding an option there plus a case in
-    `handlePostManageAction`** — the button, the permission gate (re-checked at
-    every step, so a revoked role takes effect mid-flow) and the routing don't
-    change. Discord can't disable an individual select option, so an action that
-    isn't currently available stays listed with a description saying why and its
-    handler rejects it too.
+    `handlePostManageAction`** — the button, the permission gate and the routing
+    don't change. Discord can't disable an individual select option, so an action
+    that isn't currently available stays listed with a description saying why and
+    its handler rejects it too. The gate is re-checked at **every** step, so a
+    revoked role takes effect mid-flow; that matters more here than it would for
+    an ephemeral, because a Manage DM sticks around and its buttons keep working
+    until something says otherwise. The button press reads the interaction's
+    member (`canActAsRunAdmin`); the DM steps have no member, so they re-derive
+    the same bar over REST (`canActAsRunAdminInGuild`:
+    `Session.UserChannelPermissions` against the post's channel for
+    Administrator/Manage Server, then `GuildMember` roles against
+    `discord_edit_roles`).
   - **RSVP for a player** (the one manage action today) → lets an admin answer
     for someone who can't (or didn't) press the buttons themselves. Two more
-    ephemeral steps: a picker of the roster players **with a `discord_handle`
-    set** (each option showing its current response), then **Coming** / **Not
-    coming**. Because the flow acts from its own ephemeral — the interaction's
-    message is *that*, not the post — the post's message id and the chosen slot
-    ride along in the follow-up controls' custom IDs, and the post is refreshed by
-    editing it directly (`refreshPostMessage`) rather than through the interaction
-    response.
+    steps in the same DM: a picker of the roster players **with a
+    `discord_handle` set** (each option showing its current response), then
+    **Coming** / **Not Coming**. Because the flow acts from its own DM — the
+    interaction's message is *that*, not the post — the `postOrigin` and the
+    chosen slot ride along in the follow-up controls' custom IDs, and the post is
+    refreshed by editing it directly (`refreshPostMessage`) rather than through
+    the interaction response. The action-log actor comes from
+    `postManageActor` (a REST nickname lookup) rather than
+    `interactionDisplayName`, which has no member to read in a DM.
     `postRSVPTarget` resolves the slot's handle to the identity to record under
     (mirroring `matchPlayer` in reverse, so the row always maps back to the slot);
     a text handle matching nobody in the server falls back to a synthetic

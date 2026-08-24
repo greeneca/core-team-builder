@@ -217,6 +217,50 @@ func (b *bot) canActAsRunAdmin(ctx context.Context, i *discordgo.InteractionCrea
 	return b.hasDesignatedEditRole(ctx, i)
 }
 
+// canActAsRunAdminInGuild is canActAsRunAdmin for an interaction that arrives
+// without guild context. The Manage flow's later steps come from the user's
+// DMs, where Discord sends no member object and no guild id, so the two facts
+// canActAsRunAdmin reads off the interaction have to be re-derived over REST:
+// whether the user is a server admin (Administrator or Manage Server, computed
+// against the post's own channel) and whether they hold a role designated with
+// /coreteam permissions.
+//
+// A failed permission lookup is logged and treated as "not an admin" rather
+// than an error, so the designated-role check below still gets its say.
+func (b *bot) canActAsRunAdminInGuild(ctx context.Context, s *discordgo.Session, guildID, channelID, userID string) (bool, error) {
+	if guildID == "" || userID == "" {
+		return false, nil
+	}
+	if perms, err := s.UserChannelPermissions(userID, channelID); err != nil {
+		log.Printf("run admin: channel permissions (%s): %v", channelID, err)
+	} else if perms&discordgo.PermissionManageGuild != 0 || perms&discordgo.PermissionAdministrator != 0 {
+		return true, nil
+	}
+	editRoles, err := b.discord.ListEditRoles(ctx, guildID)
+	if err != nil {
+		return false, err
+	}
+	if len(editRoles) == 0 {
+		return false, nil
+	}
+	member, err := s.GuildMember(guildID, userID)
+	if err != nil {
+		// They may simply have left the server since starting the flow.
+		log.Printf("run admin: guild member (%s/%s): %v", guildID, userID, err)
+		return false, nil
+	}
+	designated := make(map[string]bool, len(editRoles))
+	for _, r := range editRoles {
+		designated[r] = true
+	}
+	for _, r := range member.Roles {
+		if designated[r] {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // hasDesignatedEditRole reports whether the invoking member holds a role the
 // guild designated with /coreteam permissions add.
 func (b *bot) hasDesignatedEditRole(ctx context.Context, i *discordgo.InteractionCreate) (bool, error) {

@@ -45,7 +45,7 @@ var helpCommands = []helpCommand{
 	{
 		Name:    "post",
 		Summary: "Post this channel's trial overview.",
-		Detail:  "Posts the bound team's trial overview: the roster grouped by role, the schedule as a live timestamp, and any groupings. Includes Coming / Not Coming RSVP buttons, a Build Details button, and a dropdown to fill open slots. Build Details DMs you the build for your own slot and then offers a dropdown for looking up any other slot's build — which is also what you get if you're not on the roster yet. There's also a Manage button, usable by a designated role or a server admin, whose menu currently offers RSVPing on behalf of someone who can't press the buttons themselves. It also opens a discussion thread and pings attendees there about 15 minutes before the run.",
+		Detail:  "Posts the bound team's trial overview: the roster grouped by role, the schedule as a live timestamp, and any groupings. Includes Coming / Not Coming RSVP buttons, a Build Details button, and a dropdown to fill open slots. Build Details DMs you the build for your own slot with a dropdown for looking up any other slot's build — which is also what you get if you're not on the roster yet. There's also a Manage button, usable by a designated role or a server admin, which DMs you a menu that currently offers RSVPing on behalf of someone who can't press the buttons themselves. Both of those buttons work in your DMs, so turn on direct messages from server members; if yours are off, the bot falls back to a private reply in the channel. It also opens a discussion thread and pings attendees there about 15 minutes before the run.",
 	},
 	{
 		Name:    "recruit",
