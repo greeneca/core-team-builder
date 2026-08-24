@@ -87,7 +87,7 @@ func BuildPost(team *models.Team, primary *models.Encounter, groupings []models.
 		L = append(L, fl...)
 	}
 
-	if gl := formatGroupings(team, groupings, fillBySlot, names); len(gl) > 0 {
+	if gl := formatGroupings(team, groupings, fillBySlot, names, false); len(gl) > 0 {
 		L = append(L, "")
 		L = append(L, gl...)
 	}
@@ -145,7 +145,7 @@ func BuildPremadePost(team *models.Team, title, postOverride string, scheduledUn
 	// Groupings appear only on advanced (specific) signup runs; simple
 	// (role-only) runs hide per-slot detail. Members track each slot's claimant.
 	if !team.SimpleSignup {
-		if gl := formatGroupings(team, groupings, premadeClaimNames(claimants), nil); len(gl) > 0 {
+		if gl := formatGroupings(team, groupings, premadeClaimNames(claimants), nil, true); len(gl) > 0 {
 			L = append(L, "")
 			L = append(L, gl...)
 		}
@@ -367,8 +367,13 @@ func roleCountSuffix(filled, total int) string {
 // rosterLines renders the roster grouped by role (the team's own roles in their
 // defined order, then any "Other" for unset roles) as Markdown lines. Each
 // player is one line prefixed by an RSVP icon (✅ coming / ❌ not coming / 🟡 no
-// response yet) followed by slot, name, class, and abbreviated gear from the primary
+// response yet) followed by name, class, and abbreviated gear from the primary
 // encounter. Returns nil when there are no players.
+//
+// Slots are listed in slot order but their numbers aren't shown: players
+// identify themselves by name, and the role headers already carry the counts.
+// A slot with neither a player nor a handle still falls back to its "Slot N"
+// name (see who), so it isn't a nameless line.
 //
 // A slot is fillable in two cases: it has no Discord handle (an "open" slot), or
 // its assigned player marked themselves "not coming" (RSVP ❌, an "absent"
@@ -416,7 +421,6 @@ func rosterLines(team *models.Team, primary *models.Encounter, marks map[int]str
 			icon = "\u2705" // ✅ — signing up to fill is an implicit "coming".
 		}
 		parts := []string{
-			fmt.Sprintf("%d.", p.Slot),
 			name,
 			classOrDash(p.Class),
 		}
@@ -816,7 +820,11 @@ func groupingSlotName(team *models.Team, slot int, fillBySlot, names map[int]str
 // and names) so they stay in sync with the roster above. Groupings with no
 // assigned members are skipped, and the whole section is omitted (returns nil)
 // when there are no groupings — or none with any members.
-func formatGroupings(team *models.Team, groupings []models.Grouping, fillBySlot, names map[int]string) []string {
+//
+// showSlotNumbers prefixes each member with its slot number. The pre-made run
+// post sets it, matching the numbered roster it renders above; the trial
+// overview doesn't number its roster, so it leaves members as bare names.
+func formatGroupings(team *models.Team, groupings []models.Grouping, fillBySlot, names map[int]string, showSlotNumbers bool) []string {
 	if len(groupings) == 0 {
 		return nil
 	}
@@ -834,7 +842,11 @@ func formatGroupings(team *models.Team, groupings []models.Grouping, fillBySlot,
 			sort.Ints(slots)
 			members := make([]string, 0, len(slots))
 			for _, s := range slots {
-				members = append(members, fmt.Sprintf("%d. %s", s, groupingSlotName(team, s, fillBySlot, names)))
+				member := groupingSlotName(team, s, fillBySlot, names)
+				if showSlotNumbers {
+					member = fmt.Sprintf("%d. %s", s, member)
+				}
+				members = append(members, member)
 			}
 			line := "—"
 			if len(members) > 0 {

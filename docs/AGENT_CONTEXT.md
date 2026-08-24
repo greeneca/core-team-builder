@@ -643,7 +643,12 @@ column; the `User` JSON model hides it (`json:"-"`).
     each role header shows a `(filled/total)` count, where a slot is "filled" when
     someone is covering it — an assigned player who hasn't declined, or any slot a
     filler took; an open slot, or an assigned player who marked "not coming" with
-    no filler yet, still needs a signup). Each
+    no filler yet, still needs a signup). Lines are in slot order but **don't show
+    slot numbers** — players go by name, and the role headers carry the counts.
+    (The pre-made run post still numbers its roster, so `formatGroupings` takes a
+    `showSlotNumbers` flag: `BuildPost` passes `false`, `BuildPremadePost` `true`.)
+    A slot with neither a player nor a handle still falls back to its `Slot N`
+    *name* (`who` / `exportSlotName`), so it isn't a nameless line. Each
     player's name is the **resolved Discord display name** for their handle:
     ID/mention handles — `<@id>`, `<@!id>`, a bare numeric id, or an `@id` (an
     `@` before a numeric id) — are looked up live (guild nick → global name →
