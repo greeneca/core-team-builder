@@ -155,10 +155,12 @@ services:
       DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN}
       DISCORD_APP_ID: ${DISCORD_APP_ID}
       DISCORD_GUILD_ID: ${DISCORD_GUILD_ID}
-      # Links shown by /coreteam help. Both fall back to the project defaults
-      # when empty; override BOT_INVITE_URL when running your own Discord app.
+      # Links shown by /coreteam help. All fall back to the project defaults
+      # when empty; override BOT_INVITE_URL and SUPPORT_DISCORD_URL when running
+      # your own Discord app and server.
       REPO_URL: ${REPO_URL}
       BOT_INVITE_URL: ${BOT_INVITE_URL}
+      SUPPORT_DISCORD_URL: ${SUPPORT_DISCORD_URL}
     depends_on:
       db:
         condition: service_healthy

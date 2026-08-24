@@ -46,6 +46,10 @@ type Config struct {
 	// override the default with its own.
 	BotInviteURL string
 
+	// SupportDiscordURL is the invite to the project's own Discord server, shown
+	// by the bot's /coreteam help so users can ask questions and give feedback.
+	SupportDiscordURL string
+
 	// PasswordResetTTL is how long an issued password-reset token remains valid.
 	PasswordResetTTL time.Duration
 
@@ -140,6 +144,10 @@ const defaultRepoURL = "https://github.com/greeneca/core-team-builder"
 // Discord application must set BOT_INVITE_URL, since this one names ours.
 const defaultBotInviteURL = "https://discord.com/oauth2/authorize?client_id=1516144508813709334"
 
+// defaultSupportDiscordURL is the project's own Discord server, used by
+// /coreteam help when SUPPORT_DISCORD_URL is unset.
+const defaultSupportDiscordURL = "https://discord.gg/6CtKAUjkTZ"
+
 // Load reads configuration from the environment, applying sane defaults for
 // local development. It returns an error when a required production value is
 // missing.
@@ -170,9 +178,10 @@ func Load() (*Config, error) {
 	// APP_BASE_URL is not set explicitly.
 	cfg.AppBaseURL = getEnv("APP_BASE_URL", cfg.CORSOrigin)
 
-	// Public source repo and bot install link for /coreteam help.
+	// Public source repo, bot install link, and support server for /coreteam help.
 	cfg.RepoURL = getEnv("REPO_URL", defaultRepoURL)
 	cfg.BotInviteURL = getEnv("BOT_INVITE_URL", defaultBotInviteURL)
+	cfg.SupportDiscordURL = getEnv("SUPPORT_DISCORD_URL", defaultSupportDiscordURL)
 
 	// Discord sign-in (OAuth2). The redirect URL defaults to the API callback
 	// under the public app base URL, but can be overridden when the API is hosted

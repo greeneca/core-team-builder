@@ -716,8 +716,9 @@ column; the `User` JSON model hides it (`json:"-"`).
   - `help` — DMs the runner a **command guide** (`backend/cmd/bot/help.go`): an
     overview embed (intro, the web app link from `APP_BASE_URL`, an "add me to
     your server" link from `BOT_INVITE_URL` — the Discord authorization URL for
-    the bot's own application — plus "report a bug"/"source code" links built
-    from `REPO_URL`, default
+    the bot's own application — a "questions or feedback" invite to the
+    project's Discord from `SUPPORT_DISCORD_URL`, plus "report a
+    bug"/"source code" links built from `REPO_URL`, default
     `https://github.com/greeneca/core-team-builder`) and a one-line summary of
     every command, followed by a select menu (`help_select` → `handleHelpSelect`)
     that renders any command's full detail in place. Falls back to an ephemeral

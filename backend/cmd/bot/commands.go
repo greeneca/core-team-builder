@@ -33,6 +33,9 @@ type bot struct {
 	// botInviteURL is the Discord authorization link that installs this bot in
 	// another server (BOT_INVITE_URL), shown by /coreteam help.
 	botInviteURL string
+	// supportDiscordURL invites users to the project's own Discord server
+	// (SUPPORT_DISCORD_URL), shown by /coreteam help.
+	supportDiscordURL string
 	// nameCache memoizes resolved Discord display names (by guild+user) so
 	// re-rendering a post on every RSVP/fill press doesn't re-hit the API.
 	nameCache *handleNameCache

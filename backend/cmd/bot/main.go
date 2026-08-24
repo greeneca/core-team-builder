@@ -48,17 +48,18 @@ func run() error {
 	defer pool.Close()
 
 	b := &bot{
-		teams:        models.NewTeamStore(pool),
-		encounters:   models.NewEncounterStore(pool),
-		groupings:    models.NewGroupingStore(pool),
-		members:      models.NewMemberStore(pool),
-		discord:      models.NewDiscordStore(pool),
-		premade:      models.NewPremadeStore(pool),
-		rosterImages: models.NewRosterImageStore(pool),
-		appBaseURL:   cfg.AppBaseURL,
-		repoURL:      cfg.RepoURL,
-		botInviteURL: cfg.BotInviteURL,
-		nameCache:    newHandleNameCache(),
+		teams:             models.NewTeamStore(pool),
+		encounters:        models.NewEncounterStore(pool),
+		groupings:         models.NewGroupingStore(pool),
+		members:           models.NewMemberStore(pool),
+		discord:           models.NewDiscordStore(pool),
+		premade:           models.NewPremadeStore(pool),
+		rosterImages:      models.NewRosterImageStore(pool),
+		appBaseURL:        cfg.AppBaseURL,
+		repoURL:           cfg.RepoURL,
+		botInviteURL:      cfg.BotInviteURL,
+		supportDiscordURL: cfg.SupportDiscordURL,
+		nameCache:         newHandleNameCache(),
 	}
 
 	session, err := discordgo.New("Bot " + cfg.Discord.BotToken)
