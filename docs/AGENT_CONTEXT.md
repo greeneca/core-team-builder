@@ -1106,12 +1106,19 @@ the `pre_made` flag on (see "Pre-made trial run" under Teams). Tables in
   simple signups if needed, refreshes the post, and loops back to the field menu.
   **Remove a signup** (`promptRemoveSignup` → `premade_edit_remove` →
   `handlePremadeEditRemoveSignup`) lists the run's current claimants (by name +
-  slot/role); picking one releases that slot via `LeaveSlot` (keyed by the
-  signup's `discord_user_id`, including the synthetic `"n:<name>"`), clears any
-  waitlist entry, promotes a waitlister into the freed slot when enabled
-  (`promoteFreedSlot`), compacts simple signups, refreshes the post, and loops
-  back to the field menu — mirroring a player's own **Un-Sign**. With no signups
-  it says so and re-shows the menu.
+  slot/role) followed by its tentative ("maybe") entries. Option values are
+  prefixed (`premadeEditRemoveSlotPrefix` / `premadeEditRemoveTentPrefix`) so the
+  handler knows which list a pick came from; an unprefixed value is treated as a
+  claimant so pickers sent before maybes were removable still work, and the list
+  is capped at Discord's 25 options. Picking a claimant (`removeSlotClaim`)
+  releases that slot via `LeaveSlot` (keyed by the signup's `discord_user_id`,
+  including the synthetic `"n:<name>"`), clears any waitlist entry, promotes a
+  waitlister into the freed slot when enabled (`promoteFreedSlot`), and compacts
+  simple signups — mirroring a player's own **Un-Sign**. Picking a maybe
+  (`removeTentativeEntry`) just drops the row via `LeaveTentative`, since
+  tentative entries hold no slot. Either way the post is refreshed, the action is
+  logged, and the flow loops back to the field menu. With nothing to remove it
+  says so and re-shows the menu.
 - **Delete** (`premade_delete` → `handlePremadeDelete`, `cmd/bot/premade_edit.go`):
   kept for backward compatibility with posts made before the "Delete run" option
   moved into the Edit DM menu. Gated by `canPressRestricted` (poster / designated

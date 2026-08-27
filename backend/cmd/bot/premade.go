@@ -59,8 +59,19 @@ const (
 	// Edit-flow "sign up a player" sub-conversation (DM components).
 	premadeEditSignupPickID = "premade_edit_signup_pick"
 	premadeEditSignupSlotID = "premade_edit_signup_slot"
-	// Edit-flow "remove a signup" picker (DM component; value = discord_user_id).
+	// Edit-flow "remove a signup" picker (DM component; value = a prefixed
+	// discord_user_id — see the premadeEditRemove*Prefix constants).
 	premadeEditRemoveID = "premade_edit_remove"
+)
+
+// "Remove a signup" picker option-value prefixes. The one menu mixes slot
+// claimants and tentative ("maybe") entries; the prefix tells
+// handlePremadeEditRemoveSignup which kind of entry to release. A value with no
+// prefix is a slot claimant, so pickers sent before the tentative option existed
+// still work.
+const (
+	premadeEditRemoveSlotPrefix = "slot:"
+	premadeEditRemoveTentPrefix = "tent:"
 )
 
 // Consolidated signup dropdown (premade_signup) option-value prefixes. The one

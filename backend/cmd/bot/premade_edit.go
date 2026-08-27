@@ -33,7 +33,8 @@ const (
 	premadeStepEditSignupPick = "edit_signup_pick"
 	premadeStepEditSignupSlot = "edit_signup_slot"
 
-	// "Remove a signup" sub-conversation: pick which current claimant to release.
+	// "Remove a signup" sub-conversation: pick which current claimant or
+	// tentative ("maybe") entry to release.
 	premadeStepEditRemovePick = "edit_remove_pick"
 )
 
@@ -308,7 +309,7 @@ func (b *bot) sendEditFieldMenu(s *discordgo.Session, dmChannelID string, run *m
 		{Label: "Date & time", Value: "when", Description: "Reschedule the run"},
 		{Label: "Description", Value: "body", Description: "Change or clear the post body"},
 		{Label: "Sign up a player", Value: "signup", Description: "Add someone else to a slot"},
-		{Label: "Remove a signup", Value: "remove", Description: "Release a claimed slot"},
+		{Label: "Remove a signup", Value: "remove", Description: "Release a claimed slot or a maybe"},
 		{Label: "Delete run", Value: "delete", Description: "Delete this run and its post"},
 		{Label: "Done", Value: "done", Description: "Finish editing"},
 	}
@@ -824,8 +825,14 @@ func (b *bot) promptRemoveSignup(ctx context.Context, s *discordgo.Session, i *d
 		updateEphemeral(s, i, "Something went wrong. Please try again.")
 		return
 	}
+	tentative, err := b.premade.ListTentative(ctx, run.ID)
+	if err != nil {
+		log.Printf("premade edit: remove list tentative: %v", err)
+		updateEphemeral(s, i, "Something went wrong. Please try again.")
+		return
+	}
 
-	opts := removeSignupOptions(team, signups)
+	opts := removeSignupOptions(team, signups, tentative)
 	if len(opts) == 0 {
 		// Nothing to remove — update the menu message and re-show the field menu
 		// so the conversation keeps going.
@@ -858,9 +865,11 @@ func (b *bot) promptRemoveSignup(ctx context.Context, s *discordgo.Session, i *d
 	}
 }
 
-// handlePremadeEditRemoveSignup releases the chosen claimant's slot, promotes a
-// waitlister into it when enabled, compacts simple-signup claimants, refreshes
-// the post, and returns to the field menu — mirroring a player's own "Leave".
+// handlePremadeEditRemoveSignup releases the chosen entry. For a slot claimant
+// it frees the slot, promotes a waitlister into it when enabled, and compacts
+// simple-signup claimants — mirroring a player's own "Leave"; for a tentative
+// ("maybe") entry it just drops that entry. Either way it refreshes the post and
+// returns to the field menu.
 func (b *bot) handlePremadeEditRemoveSignup(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	user := invokingUser(i)
 	if user == nil {
@@ -901,48 +910,32 @@ func (b *bot) handlePremadeEditRemoveSignup(s *discordgo.Session, i *discordgo.I
 		return
 	}
 
-	targetID := values[0]
+	target := values[0]
+	tentativePick := strings.HasPrefix(target, premadeEditRemoveTentPrefix)
+	targetID := strings.TrimPrefix(strings.TrimPrefix(target, premadeEditRemoveTentPrefix), premadeEditRemoveSlotPrefix)
 
-	// Find the slot/role being freed (for waitlist promotion) and a display name
-	// for the confirmation, before releasing the claim.
-	freedSlot, freedRole, removedName, held := 0, "", "", false
-	signups, err := b.premade.ListSignups(ctx, run.ID)
-	if err != nil {
-		log.Printf("premade edit: remove slot list signups: %v", err)
-		updateEphemeral(s, i, "Something went wrong. Please try again.")
-		return
-	}
-	for _, sg := range signups {
-		if sg.DiscordUserID == targetID {
-			freedSlot, freedRole, held = sg.Slot, roleForSlot(team, sg.Slot), true
-			removedName = removeSignupName(sg)
-			break
+	var removedName, logAction string
+	if tentativePick {
+		name, ok := b.removeTentativeEntry(ctx, s, i, run, targetID)
+		if !ok {
+			return
 		}
+		removedName = name
+		logAction = fmt.Sprintf("removed **%s** from the tentative list", removedName)
+	} else {
+		name, freedSlot, ok := b.removeSlotClaim(ctx, s, i, run, team, targetID)
+		if !ok {
+			return
+		}
+		removedName = name
+		logAction = fmt.Sprintf("removed **%s** from %s", removedName, slotLogLabel(team, freedSlot))
 	}
-	if !held {
-		updateEphemeral(s, i, "That signup was already removed. Go back and pick another.")
-		return
-	}
-
-	if err := b.premade.LeaveSlot(ctx, run.ID, targetID); err != nil {
-		log.Printf("premade edit: remove slot leave: %v", err)
-		updateEphemeral(s, i, "Something went wrong removing that signup. Please try again.")
-		return
-	}
-	// Clear any waitlist entry the same person held (harmless no-op otherwise).
-	if err := b.premade.LeaveWaitlist(ctx, run.ID, targetID); err != nil {
-		log.Printf("premade edit: remove slot leave waitlist: %v", err)
-	}
-
-	b.promoteFreedSlot(ctx, s, run, team, freedSlot, freedRole)
-	b.compactSimpleSignups(ctx, run, team)
 
 	if rerr := b.refreshPremadePostMessage(ctx, s, run); rerr != nil {
 		log.Printf("premade edit: remove slot refresh post: %v", rerr)
 	}
 
-	b.logRunAction(ctx, s, run, team, interactionDisplayName(i),
-		fmt.Sprintf("removed **%s** from %s", removedName, slotLogLabel(team, freedSlot)))
+	b.logRunAction(ctx, s, run, team, interactionDisplayName(i), logAction)
 
 	confirm := fmt.Sprintf("Removed **%s** from this run.", removedName)
 
@@ -972,31 +965,119 @@ func (b *bot) handlePremadeEditRemoveSignup(s *discordgo.Session, i *discordgo.I
 	}
 }
 
-// removeSignupOptions builds the picker of current claimants for removal: one
-// option per signed-up slot, labeled with the claimant and their slot/role.
-func removeSignupOptions(team *models.Team, signups []models.PremadeSignup) []discordgo.SelectMenuOption {
-	opts := make([]discordgo.SelectMenuOption, 0, len(signups))
+// removeSlotClaim releases targetID's roster slot, clears any waitlist entry the
+// same person held, promotes a waitlister into the freed slot when enabled, and
+// compacts simple signups. It returns the removed claimant's display name and
+// the freed slot; ok is false when it already replied to the interaction.
+func (b *bot) removeSlotClaim(ctx context.Context, s *discordgo.Session, i *discordgo.InteractionCreate, run *models.PremadeRun, team *models.Team, targetID string) (name string, freedSlot int, ok bool) {
+	// Find the slot/role being freed (for waitlist promotion) and a display name
+	// for the confirmation, before releasing the claim.
+	freedRole, held := "", false
+	signups, err := b.premade.ListSignups(ctx, run.ID)
+	if err != nil {
+		log.Printf("premade edit: remove slot list signups: %v", err)
+		updateEphemeral(s, i, "Something went wrong. Please try again.")
+		return "", 0, false
+	}
+	for _, sg := range signups {
+		if sg.DiscordUserID == targetID {
+			freedSlot, freedRole, held = sg.Slot, roleForSlot(team, sg.Slot), true
+			name = removeSignupName(sg.DiscordUsername, sg.DiscordUserID)
+			break
+		}
+	}
+	if !held {
+		updateEphemeral(s, i, "That signup was already removed. Go back and pick another.")
+		return "", 0, false
+	}
+
+	if err := b.premade.LeaveSlot(ctx, run.ID, targetID); err != nil {
+		log.Printf("premade edit: remove slot leave: %v", err)
+		updateEphemeral(s, i, "Something went wrong removing that signup. Please try again.")
+		return "", 0, false
+	}
+	// Clear any waitlist entry the same person held (harmless no-op otherwise).
+	if err := b.premade.LeaveWaitlist(ctx, run.ID, targetID); err != nil {
+		log.Printf("premade edit: remove slot leave waitlist: %v", err)
+	}
+
+	b.promoteFreedSlot(ctx, s, run, team, freedSlot, freedRole)
+	b.compactSimpleSignups(ctx, run, team)
+
+	return name, freedSlot, true
+}
+
+// removeTentativeEntry drops targetID's tentative ("maybe") entry and returns
+// their display name; ok is false when it already replied to the interaction.
+// Tentative entries hold no slot, so nothing needs promoting or compacting.
+func (b *bot) removeTentativeEntry(ctx context.Context, s *discordgo.Session, i *discordgo.InteractionCreate, run *models.PremadeRun, targetID string) (name string, ok bool) {
+	tentative, err := b.premade.ListTentative(ctx, run.ID)
+	if err != nil {
+		log.Printf("premade edit: remove tentative list: %v", err)
+		updateEphemeral(s, i, "Something went wrong. Please try again.")
+		return "", false
+	}
+	for _, t := range tentative {
+		if t.DiscordUserID == targetID {
+			name = removeSignupName(t.DiscordUsername, t.DiscordUserID)
+			break
+		}
+	}
+	if name == "" {
+		updateEphemeral(s, i, "That signup was already removed. Go back and pick another.")
+		return "", false
+	}
+	if err := b.premade.LeaveTentative(ctx, run.ID, targetID); err != nil {
+		log.Printf("premade edit: remove tentative leave: %v", err)
+		updateEphemeral(s, i, "Something went wrong removing that signup. Please try again.")
+		return "", false
+	}
+	return name, true
+}
+
+// removeSignupOptions builds the removal picker: one option per signed-up slot
+// labeled with the claimant and their slot/role, followed by one per tentative
+// ("maybe") entry. Values are prefixed so handlePremadeEditRemoveSignup knows
+// which list the pick came from. Discord caps a select at 25 options.
+func removeSignupOptions(team *models.Team, signups []models.PremadeSignup, tentative []models.PremadeTentativeEntry) []discordgo.SelectMenuOption {
+	opts := make([]discordgo.SelectMenuOption, 0, len(signups)+len(tentative))
 	for _, sg := range signups {
 		roleKey := roleForSlot(team, sg.Slot)
 		role := team.RoleLabel(roleKey)
 		if role == "" {
 			role = "—"
 		}
-		label := fmt.Sprintf("%s · Slot %d · %s", removeSignupName(sg), sg.Slot, role)
+		label := fmt.Sprintf("%s · Slot %d · %s", removeSignupName(sg.DiscordUsername, sg.DiscordUserID), sg.Slot, role)
 		opts = append(opts, discordgo.SelectMenuOption{
 			Label: truncate(label, 100),
-			Value: sg.DiscordUserID,
+			Value: premadeEditRemoveSlotPrefix + sg.DiscordUserID,
 			Emoji: &discordgo.ComponentEmoji{Name: team.RoleEmoji(roleKey)},
 		})
+	}
+	for _, t := range tentative {
+		// Tentative entries aren't always tied to a role (the simple "buttons"
+		// style's Maybe button records none), so only name one when there is one.
+		label := fmt.Sprintf("%s · Maybe", removeSignupName(t.DiscordUsername, t.DiscordUserID))
+		if t.Role != "" {
+			label += " · " + team.RoleLabel(t.Role)
+		}
+		opts = append(opts, discordgo.SelectMenuOption{
+			Label: truncate(label, 100),
+			Value: premadeEditRemoveTentPrefix + t.DiscordUserID,
+			Emoji: &discordgo.ComponentEmoji{Name: "\U0001F914"}, // 🤔
+		})
+	}
+	if len(opts) > 25 {
+		opts = opts[:25]
 	}
 	return opts
 }
 
-// removeSignupName is the display name for a claimant in the removal picker and
+// removeSignupName is the display name for an entry in the removal picker and
 // its confirmation: the stored username, or the raw id when it's blank.
-func removeSignupName(sg models.PremadeSignup) string {
-	if n := strings.TrimSpace(sg.DiscordUsername); n != "" {
+func removeSignupName(username, userID string) string {
+	if n := strings.TrimSpace(username); n != "" {
 		return n
 	}
-	return sg.DiscordUserID
+	return userID
 }
