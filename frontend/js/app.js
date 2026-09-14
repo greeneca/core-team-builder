@@ -2644,9 +2644,7 @@
       slot.dataset.role = roleBase(player.role);
       const copyControl = editable
         ? `<div class="slot-actions" data-copy>
-            <select class="input slot-copy" data-copy-select aria-label="Copy another player's build and loadout into this slot">
-              <option value="">Copy from…</option>
-            </select>
+            <button type="button" class="btn btn--ghost btn--sm slot-copy" data-copy-btn aria-label="Copy another player's build and loadout into this slot">Copy from…</button>
             <button type="button" class="btn btn--ghost btn--sm slot-clear" data-clear-slot aria-label="Clear this player's build and loadout">Clear</button>
           </div>`
         : "";
@@ -2888,24 +2886,14 @@
         });
       }
 
-      // "Copy from…" pulls another player's build + loadout INTO this slot
-      // (everything except name and discord handle). Options are rebuilt from
-      // the live roster on open so slot names stay current.
-      const copySel = slot.querySelector("[data-copy-select]");
-      if (copySel) {
-        copySel.addEventListener("mousedown", () =>
-          populateCopyOptions(copySel, Number(slot.dataset.slot))
+      // "Copy from…" opens the picker dialog, which pulls another player's
+      // build + loadout INTO this slot (everything except name and discord
+      // handle). The source can live on another roster or encounter.
+      const copyBtn = slot.querySelector("[data-copy-btn]");
+      if (copyBtn) {
+        copyBtn.addEventListener("click", () =>
+          openCopySlotDialog(Number(slot.dataset.slot))
         );
-        copySel.addEventListener("focus", () =>
-          populateCopyOptions(copySel, Number(slot.dataset.slot))
-        );
-        copySel.addEventListener("change", () => {
-          const source = Number(copySel.value);
-          copySel.value = "";
-          if (!source) return;
-          const src = el("roster").querySelector(`.player-slot[data-slot="${source}"]`);
-          if (src) copyPlayerToSlot(src, slot);
-        });
       }
 
       // "Clear" wipes this player's class/race/build, loadout, and crit/pen
@@ -2986,80 +2974,73 @@
       });
   }
 
-  // Rebuild a slot's "Copy from…" options from the live roster (every slot except
-  // its own), labelled with the current name when present.
-  function populateCopyOptions(selectEl, ownSlot) {
-    const opts = ['<option value="">Copy from…</option>'];
-    el("roster")
-      .querySelectorAll(".player-slot")
-      .forEach((s) => {
-        const num = Number(s.dataset.slot);
-        if (num === ownSlot) return;
-        const nameEl = s.querySelector('[data-field="name"]');
-        const name = nameEl && nameEl.value.trim() ? ` — ${nameEl.value.trim()}` : "";
-        opts.push(`<option value="${num}">Slot ${num}${escapeAttr(name)}</option>`);
-      });
-    selectEl.innerHTML = opts.join("");
-    selectEl.value = "";
-  }
-
-  // Copy everything from one roster slot to another EXCEPT name + discord handle:
-  // role/class/race/subclass + the active build (skill lines or masteries) and
-  // the full per-encounter loadout (gear/skills/potions/CP/crit dmg/pen sources,
-  // mundus, armor counts). Operates on the live DOM (so unsaved edits are
-  // included), then persists both the team and the encounter.
-  function copyPlayerToSlot(srcSlot, dstSlot) {
-    const field = (slotEl, f) => {
-      const e = slotEl.querySelector(`[data-field="${f}"]`);
-      return e ? e.value : "";
-    };
+  // Copy a source player into a roster slot, taking everything EXCEPT name and
+  // discord handle: role/class/race/subclass/werewolf + the active build (skill
+  // lines or masteries) and the loadout (gear/skills/potions/CP/crit dmg/pen
+  // sources, mundus, armor counts, …). `player` and `loadout` are plain objects
+  // in the API's shape, so the source can equally be a live roster slot (see
+  // slotPlayerData/slotLoadoutData, which include unsaved edits) or another
+  // roster/encounter fetched for the "Copy from…" dialog. Writes into the live
+  // DOM, then persists both the team and the current encounter.
+  function copyIntoSlot(dstSlot, player, loadout) {
+    const p = player || {};
+    const lo = loadout || {};
 
     ["role", "class", "race"].forEach((f) => {
-      const s = srcSlot.querySelector(`[data-field="${f}"]`);
       const d = dstSlot.querySelector(`[data-field="${f}"]`);
-      if (s && d) d.value = s.value;
+      if (d) d.value = p[f] || "";
     });
-    dstSlot.dataset.role = roleBase(field(dstSlot, "role"));
+    const roleEl = dstSlot.querySelector('[data-field="role"]');
+    dstSlot.dataset.role = roleBase(roleEl ? roleEl.value : "");
 
-    const srcSub = srcSlot.querySelector('[data-field="subclassed"]');
     const dstSub = dstSlot.querySelector('[data-field="subclassed"]');
-    if (srcSub && dstSub) dstSub.checked = srcSub.checked;
+    if (dstSub) dstSub.checked = p.subclassed === true;
 
     // Werewolf flag follows the source (its skills come along via the chip copy).
-    const srcWW = srcSlot.querySelector('[data-field="werewolf"]');
     const dstWW = dstSlot.querySelector('[data-field="werewolf"]');
-    if (srcWW && dstWW) dstWW.checked = srcWW.checked;
+    if (dstWW) dstWW.checked = p.werewolf === true;
 
     // Re-render the target's conditional build with the source's selections.
     renderBuild(dstSlot, {
-      skill_line_1: field(srcSlot, "skill_line_1"),
-      skill_line_2: field(srcSlot, "skill_line_2"),
-      skill_line_3: field(srcSlot, "skill_line_3"),
-      mastery_1: field(srcSlot, "mastery_1"),
-      mastery_2: field(srcSlot, "mastery_2"),
+      skill_line_1: p.skill_line_1 || "",
+      skill_line_2: p.skill_line_2 || "",
+      skill_line_3: p.skill_line_3 || "",
+      mastery_1: p.mastery_1 || "",
+      mastery_2: p.mastery_2 || "",
     });
 
-    // Loadout chip columns: clear the target list and copy the source's chips.
+    // Loadout chip columns: clear the target list and refill it from the source.
+    // Stackable items repeat their key once per stack, which addChip re-stacks.
     dstSlot.querySelectorAll("[data-loadout] .loadout-col").forEach((dstCol) => {
       const type = dstCol.dataset.type;
       const dstList = dstCol.querySelector("[data-list]");
       if (!dstList) return;
       dstList.innerHTML = "";
-      const srcChips = srcSlot.querySelectorAll(
-        `[data-loadout] .loadout-col[data-type="${type}"] .chip`
-      );
-      srcChips.forEach((chip) =>
-        addChip(dstList, type, chip.dataset.value, true, Number(chip.dataset.count) || 1)
-      );
+      (lo[type] || []).forEach((key) => addChip(dstList, type, key, true));
     });
 
     // Crit/pen setup fields (mundus + armor counts + catalyst element count + weapon damage).
-    ["mundus", "armor_heavy", "armor_medium", "armor_light", "catalyst_elements", "weapon_damage", "splintered_secrets_skills", "force_of_nature_status", "banner_bearer_focus"].forEach((f) => {
-      const s = srcSlot.querySelector(`[data-crit-field="${f}"]`);
-      const d = dstSlot.querySelector(`[data-crit-field="${f}"]`);
-      if (s && d) d.value = s.value;
-    });
+    const critEl = dstSlot.querySelector("[data-crit]");
+    if (critEl) {
+      const set = (f, value) => {
+        const field = critEl.querySelector(`[data-crit-field="${f}"]`);
+        if (field) field.value = value;
+      };
+      set("mundus", lo.mundus || "");
+      ["armor_heavy", "armor_medium", "armor_light", "weapon_damage"].forEach((f) =>
+        set(f, Number(lo[f]) || 0)
+      );
+      set("catalyst_elements", String(clampCatalystElements(lo.catalyst_elements)));
+      set(
+        "splintered_secrets_skills",
+        String(clampSplinteredSecretsSkills(lo.splintered_secrets_skills))
+      );
+      set("force_of_nature_status", String(clampForceOfNatureStatus(lo.force_of_nature_status)));
+      set("banner_bearer_focus", lo.banner_bearer_focus || "");
+    }
 
+    updateSlotSummary(dstSlot);
+    renderPlayerNav();
     refreshBuffCoverage();
     refreshCritCoverage();
     refreshPenCoverage();
@@ -3077,6 +3058,207 @@
     // reconcile a no-op (see reconcileWerewolfSkillsTx / flushAutosave).
     Promise.resolve(saveLoadouts()).then(() => saveAll());
   }
+
+  // The live (possibly unsaved) build / loadout of one slot in the open roster,
+  // in the same shape the API returns, so either can feed copyIntoSlot.
+  function slotPlayerData(slotNumber) {
+    return collectPlayers().find((p) => p.slot === slotNumber) || null;
+  }
+
+  function slotLoadoutData(slotNumber) {
+    return collectLoadouts().find((l) => l.slot === slotNumber) || null;
+  }
+
+  // --- "Copy from…" picker dialog ---
+  //
+  // A slot's source player can be on any of the team's rosters and any of that
+  // roster's encounters, and only the open roster/encounter is in the page — so
+  // the dialog fetches the picked roster's lineup + encounters (and the picked
+  // encounter's loadouts) on demand. Fetches are cached for as long as the
+  // dialog stays open; the open roster + encounter are read from the live DOM
+  // instead, so unsaved edits still copy.
+
+  // The roster slot the dialog will write into; null while it is closed.
+  let copyTargetSlot = null;
+  // rosterId → { players, encounters }, filled while the dialog is open.
+  const copyRosterCache = new Map();
+  // encounterId → encounter (with loadouts), filled while the dialog is open.
+  const copyEncounterCache = new Map();
+
+  async function copyRosterSource(rosterId) {
+    if (!copyRosterCache.has(rosterId)) {
+      const [roster, { encounters }] = await Promise.all([
+        api.getRoster(currentTeam.id, rosterId),
+        api.listEncounters(currentTeam.id, rosterId),
+      ]);
+      copyRosterCache.set(rosterId, {
+        players: roster.players || [],
+        encounters: encounters || [],
+      });
+    }
+    return copyRosterCache.get(rosterId);
+  }
+
+  async function copyEncounterSource(encounterId) {
+    if (!copyEncounterCache.has(encounterId)) {
+      copyEncounterCache.set(
+        encounterId,
+        await api.getEncounter(currentTeam.id, encounterId)
+      );
+    }
+    return copyEncounterCache.get(encounterId);
+  }
+
+  async function openCopySlotDialog(slotNumber) {
+    if (!currentTeam || !canEdit()) return;
+    copyTargetSlot = slotNumber;
+    copyRosterCache.clear();
+    copyEncounterCache.clear();
+
+    const rosters = (currentTeam.rosters || []).slice();
+    const rosterSel = el("copy-slot-roster");
+    rosterSel.innerHTML = rosters
+      .map((r) => `<option value="${r.id}">${escapeAttr(r.name)}</option>`)
+      .join("");
+    rosterSel.value = String(currentRosterId || (rosters[0] && rosters[0].id) || "");
+    // Templates are locked to their single active roster, so don't offer others.
+    el("copy-slot-roster-group").classList.toggle(
+      "is-hidden",
+      preMade() || rosters.length < 2
+    );
+
+    const nameEl = el("roster").querySelector(
+      `.player-slot[data-slot="${slotNumber}"] [data-field="name"]`
+    );
+    const who = nameEl && nameEl.value.trim() ? nameEl.value.trim() : `Slot ${slotNumber}`;
+    el("copy-slot-sub").textContent = `Copy a build and loadout into ${who}. Their name and Discord handle are kept.`;
+
+    el("copy-slot-modal").classList.remove("is-hidden");
+    await refreshCopySlotEncounters();
+  }
+
+  function closeCopySlotDialog() {
+    copyTargetSlot = null;
+    copyRosterCache.clear();
+    copyEncounterCache.clear();
+    el("copy-slot-modal").classList.add("is-hidden");
+  }
+
+  // The roster the dialog is copying from. Falls back to the open roster, which
+  // is also what a hidden (single-choice) roster picker means.
+  function copySlotRosterId() {
+    return Number(el("copy-slot-roster").value) || currentRosterId;
+  }
+
+  // Fill the encounter picker for the selected source roster (then its players).
+  // The picker is hidden when encounters are off for the team or the roster has
+  // only one — the sole encounter is still used as the loadout source.
+  async function refreshCopySlotEncounters() {
+    const rosterId = copySlotRosterId();
+    const encounterSel = el("copy-slot-encounter");
+    let encounters = currentEncounters;
+    try {
+      if (rosterId !== currentRosterId) {
+        encounters = (await copyRosterSource(rosterId)).encounters;
+      }
+    } catch (err) {
+      handleError(err);
+      return;
+    }
+    encounterSel.innerHTML = encounters
+      .map((enc) => `<option value="${enc.id}">${escapeAttr(enc.name)}</option>`)
+      .join("");
+    const selected =
+      rosterId === currentRosterId && currentEncounter ? currentEncounter.id : null;
+    encounterSel.value = String(
+      selected || (encounters[0] && encounters[0].id) || ""
+    );
+    el("copy-slot-encounter-group").classList.toggle(
+      "is-hidden",
+      !encountersEnabled() || encounters.length < 2
+    );
+    await refreshCopySlotPlayers();
+  }
+
+  // True when the picked source is the very slot the dialog writes into — the
+  // same slot on another encounter is still a valid source (its loadout differs).
+  function isCopySlotSelf(rosterId, slotNumber) {
+    if (rosterId !== currentRosterId || slotNumber !== copyTargetSlot) return false;
+    const encounterId = Number(el("copy-slot-encounter").value);
+    return !currentEncounter || encounterId === currentEncounter.id;
+  }
+
+  // Fill the player picker with the selected source roster's 12 slots, labelled
+  // with each player's name. A slot can't copy from itself, but it can copy its
+  // own loadout from one of the roster's other encounters.
+  async function refreshCopySlotPlayers() {
+    const rosterId = copySlotRosterId();
+    const playerSel = el("copy-slot-player");
+    let players;
+    try {
+      players =
+        rosterId === currentRosterId
+          ? collectPlayers()
+          : (await copyRosterSource(rosterId)).players;
+    } catch (err) {
+      handleError(err);
+      return;
+    }
+    playerSel.innerHTML = players
+      .filter((p) => !isCopySlotSelf(rosterId, p.slot))
+      .map((p) => {
+        const name = (p.name || "").trim();
+        return `<option value="${p.slot}">Slot ${p.slot}${
+          name ? escapeAttr(` — ${name}`) : ""
+        }</option>`;
+      })
+      .join("");
+    el("copy-slot-submit").disabled = !playerSel.options.length;
+  }
+
+  async function runCopySlotDialog() {
+    if (copyTargetSlot === null || !currentTeam || !canEdit()) return;
+    const dstSlot = el("roster").querySelector(
+      `.player-slot[data-slot="${copyTargetSlot}"]`
+    );
+    const srcSlotNumber = Number(el("copy-slot-player").value);
+    if (!dstSlot || !srcSlotNumber) return;
+
+    const rosterId = copySlotRosterId();
+    const encounterId = Number(el("copy-slot-encounter").value);
+    // The open roster + encounter are already on screen, and their fields may
+    // hold edits that haven't been saved yet, so read those from the DOM.
+    const live =
+      rosterId === currentRosterId && currentEncounter && encounterId === currentEncounter.id;
+    try {
+      const player = live
+        ? slotPlayerData(srcSlotNumber)
+        : (await copyRosterSource(rosterId)).players.find((p) => p.slot === srcSlotNumber);
+      const loadout = live
+        ? slotLoadoutData(srcSlotNumber)
+        : ((await copyEncounterSource(encounterId)).loadouts || []).find(
+            (l) => l.slot === srcSlotNumber
+          );
+      closeCopySlotDialog();
+      copyIntoSlot(dstSlot, player, loadout);
+    } catch (err) {
+      handleError(err);
+    }
+  }
+
+  el("copy-slot-roster").addEventListener("change", refreshCopySlotEncounters);
+  el("copy-slot-encounter").addEventListener("change", refreshCopySlotPlayers);
+  el("copy-slot-submit").addEventListener("click", runCopySlotDialog);
+  el("copy-slot-cancel").addEventListener("click", closeCopySlotDialog);
+  el("copy-slot-close").addEventListener("click", closeCopySlotDialog);
+  el("copy-slot-modal").addEventListener("click", (e) => {
+    if (e.target === el("copy-slot-modal")) closeCopySlotDialog();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !el("copy-slot-modal").classList.contains("is-hidden")) {
+      closeCopySlotDialog();
+    }
+  });
 
   // Reset a roster slot to an empty build: clears name, Discord handle,
   // class/race/subclass + build, the full per-encounter loadout

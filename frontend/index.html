@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Dashboard — Core Team Builder</title>
   <link rel="icon" type="image/png" href="favicon.png" />
-  <link rel="stylesheet" href="css/styles.css?v=119" />
+  <link rel="stylesheet" href="css/styles.css?v=120" />
 </head>
 <body>
   <div id="message" class="toast is-hidden" role="alert" aria-live="assertive"></div>
@@ -475,6 +475,36 @@
       </div>
     </div>
 
+    <!-- "Copy from…" picker: choose the source player's roster, encounter, and
+         slot, then copy that build + loadout into the slot the dialog was
+         opened from. The roster/encounter pickers are hidden when there is only
+         one choice. -->
+    <div id="copy-slot-modal" class="modal-overlay is-hidden" role="dialog" aria-modal="true" aria-labelledby="copy-slot-modal-title">
+      <div class="modal modal--narrow">
+        <div class="modal-head">
+          <h2 id="copy-slot-modal-title" style="margin: 0;">Copy from…</h2>
+          <button id="copy-slot-close" class="btn btn--ghost btn--sm" type="button" aria-label="Close">✕</button>
+        </div>
+        <p id="copy-slot-sub" class="text-muted" style="margin: var(--space-2) 0 0;"></p>
+        <div class="form-group mt-4 is-hidden" id="copy-slot-roster-group">
+          <label for="copy-slot-roster">Roster</label>
+          <select id="copy-slot-roster" class="input"></select>
+        </div>
+        <div class="form-group mt-4 is-hidden" id="copy-slot-encounter-group">
+          <label for="copy-slot-encounter">Encounter</label>
+          <select id="copy-slot-encounter" class="input"></select>
+        </div>
+        <div class="form-group mt-4">
+          <label for="copy-slot-player">Player</label>
+          <select id="copy-slot-player" class="input"></select>
+        </div>
+        <div class="form-actions mt-4">
+          <button id="copy-slot-submit" class="btn btn--primary" type="button">Copy</button>
+          <button id="copy-slot-cancel" class="btn btn--ghost" type="button">Cancel</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Admin: user management modal (admins only) -->
     <div id="admin-modal" class="modal-overlay is-hidden" role="dialog" aria-modal="true" aria-labelledby="admin-modal-title">
       <div class="modal">
@@ -644,6 +674,6 @@
   <script src="js/gear-skills.js?v=103"></script>
   <script src="js/data.js?v=110"></script>
   <script src="js/components.js?v=102"></script>
-  <script src="js/app.js?v=130"></script>
+  <script src="js/app.js?v=131"></script>
 </body>
 </html>

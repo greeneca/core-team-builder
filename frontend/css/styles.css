@@ -898,14 +898,6 @@ a.brand--home:hover {
   gap: var(--space-2);
   margin-bottom: calc(-1 * var(--space-2));
 }
-.slot-actions .slot-copy {
-  width: auto;
-  max-width: 220px;
-  font-size: var(--font-size-sm);
-  padding-top: var(--space-1);
-  padding-bottom: var(--space-1);
-  color: var(--color-text-muted);
-}
 .player-fields {
   display: grid;
   grid-template-columns: 2fr 2fr 1.3fr 1.5fr;
@@ -1528,6 +1520,9 @@ a.brand--home:hover {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow);
+}
+.modal--narrow {
+  max-width: 420px;
 }
 .modal-head {
   display: flex;

@@ -220,13 +220,21 @@ column; the `User` JSON model hides it (`json:"-"`).
     and the `.player-slot[data-role="…"]` CSS applies a tinted background + left
     accent bar using the `--role-*` tokens in `styles.css`. The player jump-nav
     and the role-chip editor are colored the same way.
-  - **Copy from slot**: each slot (editors only) has a **"Copy from…"** dropdown
-    that pulls another slot's build + per-encounter loadout **into** this slot —
-    everything **except** name and discord handle (role/class/race/subclass +
-    active build + gear/skills/potions/CP/crit dmg/pen sources/mundus/armor). It
-    reads the live DOM (so unsaved edits copy too) and saves the team + the
-    current encounter (`copyPlayerToSlot` in `app.js`). Loadout copies only the
-    selected encounter.
+  - **Copy from slot**: each slot (editors only) has a **"Copy from…"** button
+    that opens the `#copy-slot-modal` picker (roster → encounter → player) and
+    pulls that player's build + loadout **into** this slot — everything
+    **except** name and discord handle (role/class/race/subclass/werewolf +
+    active build + gear/skills/potions/CP/crit dmg/pen sources/mundus/armor).
+    The source may live on **another roster or encounter** of the same team, not
+    just the open one; the dialog defaults to the current roster + encounter and
+    hides a picker when there's only one choice (the roster picker is also
+    hidden for templates, which are locked to their active roster). The open
+    roster/encounter is read from the **live DOM** (so unsaved edits copy too);
+    other sources are fetched via `getRoster`/`listEncounters`/`getEncounter`
+    and cached for as long as the dialog stays open (`openCopySlotDialog` /
+    `runCopySlotDialog` / `copyIntoSlot` in `app.js`). Only the target's
+    **currently selected** encounter is written, and both the team and that
+    encounter are saved.
 - **Floating jump nav** (desktop only, `≥1280px`): `#player-nav` is fixed to the
   left edge with quick links to the top, the Group Buffs card, and each player
   slot (name + role, role-colored). Built by `renderPlayerNav()` from the live
