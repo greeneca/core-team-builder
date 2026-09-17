@@ -47,12 +47,12 @@ var helpCommands = []helpCommand{
 	{
 		Name:    "post",
 		Summary: "Post this channel's trial overview.",
-		Detail:  "Posts the bound team's trial overview: the roster grouped by role, the schedule as a live timestamp, and any groupings. Includes Coming / Not Coming RSVP buttons, a Build Details button, and a dropdown to fill open slots. Build Details DMs you the build for your own slot with a dropdown for looking up any other slot's build — which is also what you get if you're not on the roster yet. There's also a Manage button, usable by a designated role or a server admin, which DMs you a menu that currently offers RSVPing on behalf of someone who can't press the buttons themselves. Both of those buttons work in your DMs, so turn on direct messages from server members; if yours are off, the bot falls back to a private reply in the channel. It also opens a discussion thread and pings attendees there about 15 minutes before the run.",
+		Detail:  "Requires the Manage Channels permission, a designated role, or server admin. Posts the bound team's trial overview: the roster grouped by role, the schedule as a live timestamp, and any groupings. Includes Coming / Not Coming RSVP buttons, a Build Details button, and a dropdown to fill open slots. Build Details DMs you the build for your own slot with a dropdown for looking up any other slot's build — which is also what you get if you're not on the roster yet. There's also a Manage button, usable by a designated role or a server admin, which DMs you a menu that currently offers RSVPing on behalf of someone who can't press the buttons themselves. Both of those buttons work in your DMs, so turn on direct messages from server members; if yours are off, the bot falls back to a private reply in the channel. It also opens a discussion thread and pings attendees there about 15 minutes before the run.",
 	},
 	{
 		Name:    "recruit",
 		Summary: "Post a recruitment message with DM intake.",
-		Detail:  "Posts a recruitment message with an \"I'm Interested\" button. Pressing it starts a DM questionnaire that records availability, roles, and classes into the team's member pool. If the channel isn't bound to a team, you'll be asked which of your teams to recruit for.",
+		Detail:  "Posts a recruitment message with an \"I'm Interested\" button. Pressing it starts a DM questionnaire that records availability, roles, and classes into the team's member pool. In a bound channel this requires the Manage Channels permission, a designated role, or server admin. If the channel isn't bound to a team, you'll be asked which of your teams to recruit for.",
 	},
 	{
 		Name:    "signup",

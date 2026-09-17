@@ -635,7 +635,9 @@ column; the `User` JSON model hides it (`json:"-"`).
   - `setup` — (Manage Channels) binds the current channel to one of the linked
     user's teams, or creates a new team. Shows a select menu; "Create a new team"
     opens a modal for the name.
-  - `post` — posts the team's **overview** as a boxed embed: title (team name),
+  - `post` — (Manage Channels, a `/coreteam permissions` role, or server admin —
+    `canPostTeamContent`, since the bound team belongs to whoever ran `setup`,
+    not to every server member) posts the team's **overview** as a boxed embed: title (team name),
     a single dynamic schedule timestamp (`<t:unix:F>`/`<t:unix:R>`, shown in each
     viewer's own timezone — no more per-tz list). The **run date is locked at
     first post time**: `handlePost` computes the next-run instant once, shows it,
@@ -686,7 +688,8 @@ column; the `User` JSON model hides it (`json:"-"`).
     Interested** button. Pressing it starts an interactive **DM intake flow**
     (see Member pool below). Built by `handleSignupPost` / `signupComponents`.
     Does **not** require the channel to be bound: if this channel is bound to a
-    team it recruits for that team; otherwise it shows the runner an ephemeral
+    team it recruits for that team (gated by `canPostTeamContent`, same bar as
+    `post`); otherwise it shows the runner an ephemeral
     picker of their (non-premade) teams (`recruit_select` → `handleRecruitSelect`)
     and posts for the chosen one. The team id is encoded on the button
     (`signup_join:<teamID>`) so the intake works in unbound channels;

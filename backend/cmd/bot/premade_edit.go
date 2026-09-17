@@ -218,6 +218,22 @@ func (b *bot) canActAsRunAdmin(ctx context.Context, i *discordgo.InteractionCrea
 	return b.hasDesignatedEditRole(ctx, i)
 }
 
+// postDenyMsg is the ephemeral shown when someone without the bar below tries
+// to publish a bound team's content into a channel.
+const postDenyMsg = "You need the Manage Channels permission, a designated role, or server admin to post this channel's team. A server admin can grant a role access with `/coreteam permissions add`."
+
+// canPostTeamContent reports whether the invoker may publish the channel's bound
+// team into it (/coreteam post, /coreteam recruit). The bar is Discord-native so
+// a server can delegate posting without every runner holding a linked web
+// account: Manage Channels (the permission that bound the channel in the first
+// place), a server admin, or a role designated via /coreteam permissions.
+func (b *bot) canPostTeamContent(ctx context.Context, i *discordgo.InteractionCreate) (bool, error) {
+	if hasManageChannels(i) {
+		return true, nil
+	}
+	return b.canActAsRunAdmin(ctx, i)
+}
+
 // canActAsRunAdminInGuild is canActAsRunAdmin for an interaction that arrives
 // without guild context. The Manage flow's later steps come from the user's
 // DMs, where Discord sends no member object and no guild id, so the two facts

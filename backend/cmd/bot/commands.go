@@ -670,6 +670,13 @@ func (b *bot) handleSetupSelect(s *discordgo.Session, i *discordgo.InteractionCr
 }
 
 func (b *bot) handleSetupCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	// Re-check the permission the select menu already gated on: a modal submit is
+	// a separate interaction, so the grant could have been revoked since the
+	// modal was opened.
+	if !hasManageChannels(i) {
+		ephemeral(s, i, "You need the Manage Channels permission to bind a channel.")
+		return
+	}
 	user := invokingUser(i)
 	if user == nil {
 		ephemeral(s, i, "Could not identify your Discord account.")
@@ -723,6 +730,17 @@ func (b *bot) handlePost(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	if err != nil {
 		log.Printf("post: get binding: %v", err)
 		ephemeral(s, i, "Something went wrong. Please try again.")
+		return
+	}
+
+	allowed, err := b.canPostTeamContent(ctx, i)
+	if err != nil {
+		log.Printf("post: permission check: %v", err)
+		ephemeral(s, i, "Something went wrong. Please try again.")
+		return
+	}
+	if !allowed {
+		ephemeral(s, i, postDenyMsg)
 		return
 	}
 
@@ -884,6 +902,21 @@ func (b *bot) handleSignupPost(s *discordgo.Session, i *discordgo.InteractionCre
 		ephemeral(s, i, "Something went wrong. Please try again.")
 		return
 	}
+
+	// The unbound path below prompts for one of the invoker's own teams, so it
+	// carries its own check. A bound channel names someone else's team, so gate
+	// it the same way /coreteam post is gated.
+	allowed, err := b.canPostTeamContent(ctx, i)
+	if err != nil {
+		log.Printf("recruit: permission check: %v", err)
+		ephemeral(s, i, "Something went wrong. Please try again.")
+		return
+	}
+	if !allowed {
+		ephemeral(s, i, postDenyMsg)
+		return
+	}
+
 	team, err := b.teams.Get(ctx, teamID)
 	if err != nil {
 		ephemeral(s, i, "Could not load the team. It may have been deleted; re-run /coreteam setup.")

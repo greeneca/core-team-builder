@@ -163,7 +163,13 @@ func (b *bot) handleTimezoneSelect(s *discordgo.Session, i *discordgo.Interactio
 	if len(values) == 0 {
 		return
 	}
+	// The select's values arrive from the client, so only accept a zone the bot
+	// actually offered rather than persisting arbitrary text.
 	tz := values[0]
+	if !isOfferedTimezone(tz) {
+		updateEphemeral(s, i, "That selection was invalid.")
+		return
+	}
 
 	ctx, cancel := handlerContext()
 	defer cancel()
@@ -197,6 +203,10 @@ func (b *bot) handlePremadeDMTimezone(s *discordgo.Session, i *discordgo.Interac
 		return
 	}
 	tz := values[0]
+	if !isOfferedTimezone(tz) {
+		updateEphemeral(s, i, "That selection was invalid.")
+		return
+	}
 
 	ctx, cancel := handlerContext()
 	defer cancel()

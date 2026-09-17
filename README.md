@@ -132,6 +132,37 @@ core-team-builder/
 - Team access is role-based (owner/editor/viewer); user-management routes
   (`/api/admin/*`) are admin-only and re-checked server-side.
 
+## TODO
+
+Known gaps from the last security/maintainability review, in rough priority
+order. Each needs a product or deployment decision, which is why it wasn't
+fixed in the review pass.
+
+- **Reset tokens are logged when SMTP is unconfigured.** `email.LogMailer`
+  writes the whole message body, reset link included, and the server starts
+  happily with no SMTP set. It's a deliberate dev affordance that logs a
+  warning, but it fails open on account recovery: one misconfigured deploy puts
+  account-takeover tokens in the log aggregator. Gate it behind an explicit
+  opt-in env flag instead of "SMTP happens to be unset".
+- **Pre-made run signups never close.** `run.ScheduledAt` is only rendered, never
+  compared against the clock, so players can still claim slots after a run has
+  started — until the scheduler's cleanup pass removes the post. `/coreteam post`
+  already does this correctly via `postLocked`; `cmd/bot/premade.go` needs the
+  equivalent, once the grace period is decided.
+- **The pre-made edit DM re-checks permission only at entry.**
+  `handlePremadeEdit` calls `canPressRestricted` when the button is pressed, but
+  the follow-up DM menu — including **Delete run** — trusts the stored session
+  alone, so a revoked role keeps working until the session expires. The Manage
+  flow does this right with `canActAsRunAdminInGuild` on every step; mirror it.
+- **`backup` / `restore` run as root.** Both one-shot services use
+  `postgres:16-alpine` with no `user:`, unlike the hardened long-running
+  services. Adding one risks breaking writes to the bind-mounted `./backups`, so
+  it needs testing against a real dump/restore cycle.
+- **`set_real_ip_from` trusts all RFC1918 ranges.** Fine when the upstream TLS
+  proxy is the only ingress, but anything on those networks can spoof
+  `X-Forwarded-For` and bypass the per-IP auth rate limits. Narrow it to the
+  proxy's actual address/CIDR in `frontend/nginx.conf` at deploy time.
+
 ## License
 
 Released under the [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0).

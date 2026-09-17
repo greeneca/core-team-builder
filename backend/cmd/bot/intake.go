@@ -49,6 +49,17 @@ var signupTimezones = []string{
 	"Asia/Shanghai", "Asia/Tokyo", "Australia/Sydney", "Pacific/Auckland",
 }
 
+// isOfferedTimezone reports whether a zone picked from a select menu is one the
+// bot actually put in that menu.
+func isOfferedTimezone(tz string) bool {
+	for _, z := range signupTimezones {
+		if z == tz {
+			return true
+		}
+	}
+	return false
+}
+
 // onSignupComponent dispatches every signup_* component interaction.
 func (b *bot) onSignupComponent(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	id := i.MessageComponentData().CustomID
@@ -67,11 +78,22 @@ func (b *bot) onSignupComponent(s *discordgo.Session, i *discordgo.InteractionCr
 	if err != nil {
 		return
 	}
+	user := invokingUser(i)
+	if user == nil {
+		return
+	}
+
 	ctx, cancel := handlerContext()
 	defer cancel()
 
 	member, err := b.members.GetByID(ctx, memberID)
 	if err != nil {
+		ephemeral(s, i, "I couldn't find your signup. Press \"I'm Interested\" again to restart.")
+		return
+	}
+	// The member id is read off a client-supplied custom ID, so confirm the row
+	// is the presser's own draft before writing their answers into it.
+	if member.DiscordUserID != user.ID {
 		ephemeral(s, i, "I couldn't find your signup. Press \"I'm Interested\" again to restart.")
 		return
 	}
@@ -166,7 +188,7 @@ func (b *bot) signupSaveDays(s *discordgo.Session, i *discordgo.InteractionCreat
 }
 
 func (b *bot) signupSaveTimezone(s *discordgo.Session, i *discordgo.InteractionCreate, m *models.RosterMember, values []string) {
-	if len(values) > 0 {
+	if len(values) > 0 && isOfferedTimezone(values[0]) {
 		m.Timezone = values[0]
 	}
 	// Begin the per-day hour questions on the first chosen day.

@@ -380,6 +380,10 @@ func (b *bot) postPositioningImages(ctx context.Context, session *discordgo.Sess
 		}
 		if caption := strings.TrimSpace(img.Caption); caption != "" {
 			send.Content = "📍 " + caption
+			// Captions are team-authored free text, so an @everyone or role
+			// mention in one would otherwise ping the whole server with the
+			// bot's permissions.
+			send.AllowedMentions = &discordgo.MessageAllowedMentions{}
 		}
 		if _, err := session.ChannelMessageSendComplex(threadID, send); err != nil {
 			log.Printf("premade: post positioning image %d (%s): %v", img.ID, logLabel, err)
