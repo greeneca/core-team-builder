@@ -10,6 +10,9 @@
 *.test
 *.out
 
+# Local Compose overrides (per-machine service tweaks)
+docker-compose.override.yml
+
 # OS / editor
 .DS_Store
 *.swp
