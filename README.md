@@ -1,5 +1,11 @@
 # Core Team Builder
 
+[![CI](https://github.com/greeneca/core-team-builder/actions/workflows/ci.yml/badge.svg)](https://github.com/greeneca/core-team-builder/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fgreeneca%2Fcore-team-builder%2Fbadges%2Fcoverage.json)](https://github.com/greeneca/core-team-builder/actions/workflows/ci.yml)
+[![Go](https://img.shields.io/github/go-mod/go-version/greeneca/core-team-builder?filename=backend%2Fgo.mod&logo=go)](backend/go.mod)
+[![License](https://img.shields.io/github/license/greeneca/core-team-builder)](LICENSE)
+[![Last commit](https://img.shields.io/github/last-commit/greeneca/core-team-builder)](https://github.com/greeneca/core-team-builder/commits/main)
+
 A tool to help design and organize a **trial core team** for *The Elder Scrolls
 Online (ESO)*: build rosters, plan per-encounter loadouts and groupings, recruit
 members, and post schedules and signups to Discord.

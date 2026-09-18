@@ -1544,6 +1544,12 @@ streaming response on the same path, proxied with buffering off.
   (what CI runs). **CI**: `.github/workflows/ci.yml` runs `gofmt -l`,
   `go build`, `go vet`, and `go test -race` on every push/PR, with a PostgreSQL
   service container.
+- **Coverage** (~10% module-wide, uneven: `internal/auth` >90%, `cmd/bot` ~2%
+  but nearly half the statements). CI measures it with
+  `-coverpkg=./... -count=1 -covermode=atomic` and publishes the number to a
+  `badges` branch that the README badge reads; the per-package breakdown goes
+  to the job summary. See the Coverage section in `docs/DEVELOPMENT.md` for why
+  each flag matters. No coverage gate — it is a trend line, not a test.
 - **Stdlib only** — no assertion or mocking library. Fakes implement the
   consumer-side store interfaces above (see `fakeDiscordStore` in
   `cmd/bot/permissions_test.go`, which embeds the interface so an unexpected

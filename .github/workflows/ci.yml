@@ -10,6 +10,11 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Read-only by default. Only the badge job below widens this, and only for
+# itself, so the job that runs the test code can never write to the repo.
+permissions:
+  contents: read
+
 jobs:
   backend:
     name: Backend
@@ -61,7 +66,129 @@ jobs:
 
       # TEST_DATABASE_URL opts the handler integration tests in; without it they
       # skip and only the unit tests run. See internal/handlers/testdb_test.go.
+      #
+      # -coverpkg=./... credits a package for code its tests actually execute in
+      # other packages, which is the only way the handler integration tests get
+      # credit for the store and SQL layers they drive. -covermode=atomic is
+      # required alongside -race.
+      #
+      # -count=1 is load-bearing, not habit: a cached result is replayed with
+      # the coverage profile it was recorded with, so without it a rerun could
+      # publish a badge from a run where the integration tests skipped.
       - name: Test
-        run: go test -race ./...
+        run: go test -race -count=1 -covermode=atomic -coverpkg=./... -coverprofile=coverage.out ./...
         env:
           TEST_DATABASE_URL: postgres://ctb:ctb@localhost:5432/ctb_test?sslmode=disable
+
+      - name: Coverage report
+        id: coverage
+        run: |
+          set -euo pipefail
+
+          # go tool cover is authoritative for the headline number: it merges
+          # the duplicate blocks that -coverpkg produces (one copy per test
+          # binary), which naive summing over the profile would double-count.
+          total=$(go tool cover -func=coverage.out | awk '/^total:/ {print $3}')
+          echo "total=${total%\%}" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "## Coverage: $total"
+            echo
+            echo "| Package | Statements | Covered |"
+            echo "|---------|-----------:|--------:|"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # Per-package breakdown, so the summary shows where the gaps are.
+          # Blocks are de-duplicated by key first (same reason as above) and
+          # weighted by statement count — averaging per-function percentages
+          # would let a one-line helper outweigh a 200-statement handler.
+          tail -n +2 coverage.out | awk '
+            { stmts[$1] = $2; count[$1] += $3 }
+            END {
+              for (key in stmts) {
+                file = key; sub(/:.*$/, "", file)
+                sub(/^github\.com\/core-team-builder\/backend\//, "", file)
+                n = split(file, parts, "/"); pkg = parts[1]
+                for (i = 2; i < n; i++) pkg = pkg "/" parts[i]
+                pkgStmts[pkg] += stmts[key]
+                if (count[key] > 0) pkgCovered[pkg] += stmts[key]
+              }
+              for (p in pkgStmts)
+                printf "| `%s` | %d | %.1f%% |\n", p, pkgStmts[p], 100 * pkgCovered[p] / pkgStmts[p]
+            }' | sort >> "$GITHUB_STEP_SUMMARY"
+
+      # Hand the number to the badge job. Only the number travels, not the
+      # profile, so nothing about the source leaves this job.
+      - name: Save coverage total
+        run: echo "${{ steps.coverage.outputs.total }}" > coverage-total.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage-total
+          path: backend/coverage-total.txt
+          retention-days: 7
+
+  # Publishes the coverage number as a shields.io endpoint badge. It lives on an
+  # orphan `badges` branch so the README can point at a value that updates
+  # without adding a commit to main's history for every run — and so no
+  # third-party coverage service ever receives the code.
+  #
+  # Push-to-main only: a pull request (especially from a fork) gets a read-only
+  # token, and a PR's coverage should not overwrite the published number anyway.
+  coverage-badge:
+    name: Coverage badge
+    runs-on: ubuntu-latest
+    needs: backend
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: coverage-total
+
+      - name: Publish badge
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          total=$(cat coverage-total.txt)
+
+          # Thresholds are deliberately forgiving at the low end: this repo is
+          # early in building coverage up and a permanently red badge stops
+          # carrying information.
+          colour=$(awk -v t="$total" 'BEGIN {
+            if      (t >= 85) print "brightgreen"
+            else if (t >= 70) print "green"
+            else if (t >= 50) print "yellowgreen"
+            else if (t >= 25) print "yellow"
+            else if (t >= 10) print "orange"
+            else              print "red"
+          }')
+
+          work=$(mktemp -d)
+          cd "$work"
+          git init -q
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add origin \
+            "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+
+          if git fetch -q --depth=1 origin badges 2>/dev/null; then
+            git checkout -q -b badges FETCH_HEAD
+          else
+            git checkout -q --orphan badges
+          fi
+
+          printf '{"schemaVersion":1,"label":"coverage","message":"%s%%","color":"%s"}\n' \
+            "$total" "$colour" > coverage.json
+
+          git add coverage.json
+          if git diff --cached --quiet; then
+            echo "Coverage unchanged at ${total}%; nothing to publish."
+            exit 0
+          fi
+          git commit -q -m "Update coverage badge to ${total}%"
+          git push -q origin badges
+          echo "Published coverage badge at ${total}% (${colour})."

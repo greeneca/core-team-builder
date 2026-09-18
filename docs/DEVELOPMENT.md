@@ -148,6 +148,39 @@ CI (`.github/workflows/ci.yml`) runs `gofmt -l`, `go build`, `go vet`, and
 `go test -race` on every push and pull request, with a PostgreSQL service
 container so the integration tests run there too.
 
+## Coverage
+
+The README coverage badge is the whole-module statement coverage CI measures:
+
+```bash
+cd backend
+TEST_DATABASE_URL='postgres://test:test@localhost:55432/ctb_test?sslmode=disable' \
+  go test -count=1 -covermode=atomic -coverpkg=./... -coverprofile=coverage.out ./...
+go tool cover -func=coverage.out | tail -1   # headline number
+go tool cover -html=coverage.out             # annotated source
+```
+
+Three flags matter, and dropping any of them changes the number:
+
+- **`-coverpkg=./...`** credits a package for code its tests execute *anywhere*
+  in the module. Without it the handler integration tests get no credit for the
+  store and SQL layers they actually drive, and the total drops by a third.
+- **`-count=1`** defeats the test cache. A cached result replays the coverage
+  profile it was recorded with, so a rerun can otherwise report a stale number
+  — including one from a run where the integration tests skipped for want of
+  `TEST_DATABASE_URL`.
+- **`-covermode=atomic`** is required alongside `-race`.
+
+Read the headline number with `go tool cover`, not by summing the profile:
+`-coverpkg` makes every test binary emit its own copy of each block, and
+`go tool cover` merges those duplicates where naive summing double-counts them.
+
+Coverage is currently low in absolute terms and uneven by design — `internal/auth`
+is above 90% while the Discord command surface in `cmd/bot` is near zero, and
+`cmd/bot` is over 3800 of the module's ~8100 statements, so it dominates the
+total. The CI job summary prints the per-package breakdown for each run. There is
+deliberately no minimum-coverage gate; the badge is a trend line, not a test.
+
 ## API reference
 
 Base path: `/api`. All bodies are JSON.
