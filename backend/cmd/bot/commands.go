@@ -15,15 +15,17 @@ import (
 	"github.com/core-team-builder/backend/internal/models"
 )
 
-// bot bundles the data stores the interaction handlers need.
+// bot bundles the data stores the interaction handlers need. The fields are
+// the narrow interfaces declared in stores.go rather than the concrete
+// *models.*Store types, so a test can supply a fake without a database.
 type bot struct {
-	teams        *models.TeamStore
-	encounters   *models.EncounterStore
-	groupings    *models.GroupingStore
-	members      *models.MemberStore
-	discord      *models.DiscordStore
-	premade      *models.PremadeStore
-	rosterImages *models.RosterImageStore
+	teams        teamStore
+	encounters   encounterStore
+	groupings    groupingStore
+	members      memberStore
+	discord      discordStore
+	premade      premadeStore
+	rosterImages rosterImageStore
 	// appBaseURL is the public base URL of the web app (APP_BASE_URL), used to
 	// build sign-in links the bot sends to users. Empty when unconfigured.
 	appBaseURL string

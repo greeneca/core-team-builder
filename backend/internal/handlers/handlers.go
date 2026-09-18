@@ -55,19 +55,21 @@ const (
 	maxRoleLabelLen = 40
 )
 
-// Server holds the dependencies shared across HTTP handlers.
+// Server holds the dependencies shared across HTTP handlers. The store fields
+// are the narrow interfaces declared in stores.go rather than the concrete
+// *models.*Store types, so a test can supply a fake without a database.
 type Server struct {
-	users            *models.UserStore
-	teams            *models.TeamStore
-	rosters          *models.RosterStore
-	rosterImages     *models.RosterImageStore
-	encounters       *models.EncounterStore
-	groupings        *models.GroupingStore
-	members          *models.MemberStore
-	settings         *models.SettingsStore
-	refreshTokens    *models.RefreshTokenStore
-	passwordResets   *models.PasswordResetStore
-	discord          *models.DiscordStore
+	users            userStore
+	teams            teamStore
+	rosters          rosterStore
+	rosterImages     rosterImageStore
+	encounters       encounterStore
+	groupings        groupingStore
+	members          memberStore
+	settings         settingsStore
+	refreshTokens    refreshTokenStore
+	passwordResets   passwordResetStore
+	discord          discordStore
 	tokens           *auth.TokenManager
 	mailer           email.Mailer
 	realtime         *realtime.Hub
@@ -79,17 +81,17 @@ type Server struct {
 
 // Config bundles the values needed to construct a Server.
 type Config struct {
-	Users            *models.UserStore
-	Teams            *models.TeamStore
-	Rosters          *models.RosterStore
-	RosterImages     *models.RosterImageStore
-	Encounters       *models.EncounterStore
-	Groupings        *models.GroupingStore
-	Members          *models.MemberStore
-	Settings         *models.SettingsStore
-	RefreshTokens    *models.RefreshTokenStore
-	PasswordResets   *models.PasswordResetStore
-	Discord          *models.DiscordStore
+	Users            userStore
+	Teams            teamStore
+	Rosters          rosterStore
+	RosterImages     rosterImageStore
+	Encounters       encounterStore
+	Groupings        groupingStore
+	Members          memberStore
+	Settings         settingsStore
+	RefreshTokens    refreshTokenStore
+	PasswordResets   passwordResetStore
+	Discord          discordStore
 	Tokens           *auth.TokenManager
 	Mailer           email.Mailer
 	Realtime         *realtime.Hub
@@ -274,6 +276,14 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+// timingDummyHash is compared against when a login names an account that does
+// not exist, so a miss costs the same bcrypt work as a wrong password and the
+// response time does not reveal which it was. Its embedded work factor must
+// stay equal to auth.DefaultBcryptCost for the timings to match — a real hash
+// is never generated here because that would cost a bcrypt round per request,
+// which is the DoS the constant avoids.
+const timingDummyHash = "$2a$12$invalidinvalidinvalidinvalidinvalidinvalidinvalidinv"
+
 type credentials struct {
 	Username string `json:"username"`
 	Email    string `json:"email"`
@@ -376,7 +386,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	// Always run a comparison to keep timing uniform whether or not the user
 	// exists, then return the same generic error for any failure.
 	if errors.Is(err, models.ErrUserNotFound) {
-		auth.CheckPassword("$2a$12$invalidinvalidinvalidinvalidinvalidinvalidinvalidinv", creds.Password)
+		auth.CheckPassword(timingDummyHash, creds.Password)
 		writeError(w, http.StatusUnauthorized, "invalid credentials")
 		return
 	}

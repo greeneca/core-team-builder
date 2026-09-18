@@ -18,8 +18,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"path/filepath"
-	"sort"
 
 	"github.com/core-team-builder/backend/internal/auth"
 	"github.com/core-team-builder/backend/internal/db"
@@ -54,32 +52,26 @@ func run() error {
 }
 
 func applyMigrations(ctx context.Context, pool *pgxpool.Pool) error {
-	dir := getEnv("MIGRATIONS_DIR", "/migrations")
-	entries, err := os.ReadDir(dir)
+	applied, err := db.Migrate(ctx, pool, getEnv("MIGRATIONS_DIR", "/migrations"))
 	if err != nil {
 		return err
 	}
-
-	var files []string
-	for _, e := range entries {
-		if !e.IsDir() && filepath.Ext(e.Name()) == ".sql" {
-			files = append(files, e.Name())
-		}
-	}
-	sort.Strings(files)
-
-	for _, name := range files {
-		path := filepath.Join(dir, name)
-		sqlBytes, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		log.Printf("applying migration %s", name)
-		if _, err := pool.Exec(ctx, string(sqlBytes)); err != nil {
-			return err
-		}
-	}
+	log.Printf("applied %d migrations (%s … %s)", len(applied), first(applied), last(applied))
 	return nil
+}
+
+func first(names []string) string {
+	if len(names) == 0 {
+		return "none"
+	}
+	return names[0]
+}
+
+func last(names []string) string {
+	if len(names) == 0 {
+		return "none"
+	}
+	return names[len(names)-1]
 }
 
 func ensureTestUser(ctx context.Context, pool *pgxpool.Pool) error {

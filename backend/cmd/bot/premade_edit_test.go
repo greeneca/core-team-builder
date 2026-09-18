@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -56,11 +57,11 @@ func TestRemoveSignupOptionsCapsAtDiscordLimit(t *testing.T) {
 	team := &models.Team{}
 	signups := make([]models.PremadeSignup, 0, 20)
 	for n := 1; n <= 20; n++ {
-		signups = append(signups, models.PremadeSignup{Slot: n, DiscordUserID: string(rune('a' + n))})
+		signups = append(signups, models.PremadeSignup{Slot: n, DiscordUserID: fmt.Sprintf("slot%d", n)})
 	}
 	tentative := make([]models.PremadeTentativeEntry, 0, 10)
 	for n := 1; n <= 10; n++ {
-		tentative = append(tentative, models.PremadeTentativeEntry{DiscordUserID: string(rune('A' + n))})
+		tentative = append(tentative, models.PremadeTentativeEntry{DiscordUserID: fmt.Sprintf("tent%d", n)})
 	}
 
 	if got := len(removeSignupOptions(team, signups, tentative)); got != 25 {

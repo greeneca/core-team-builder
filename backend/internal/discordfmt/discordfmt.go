@@ -953,6 +953,12 @@ func NextRunUnix(days []string, hhmm string) (int64, bool) {
 // match within the coming week is used. The emitted Discord timestamp then
 // renders in each viewer's own timezone.
 func nextRunUnix(days []string, hhmm string) (int64, bool) {
+	return nextRunUnixAt(days, hhmm, time.Now())
+}
+
+// nextRunUnixAt is nextRunUnix with the current instant passed in, so the
+// weekday arithmetic can be exercised against a fixed clock.
+func nextRunUnixAt(days []string, hhmm string, now time.Time) (int64, bool) {
 	if len(days) == 0 || hhmm == "" {
 		return 0, false
 	}
@@ -969,7 +975,7 @@ func nextRunUnix(days []string, hhmm string) (int64, bool) {
 	if len(want) == 0 {
 		return 0, false
 	}
-	now := time.Now().UTC()
+	now = now.UTC()
 	base := time.Date(now.Year(), now.Month(), now.Day(), t.Hour(), t.Minute(), 0, 0, time.UTC)
 	for offset := 0; offset < 8; offset++ {
 		cand := base.AddDate(0, 0, offset)

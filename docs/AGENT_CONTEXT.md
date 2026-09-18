@@ -91,7 +91,13 @@ UI autosaves changes (no Save buttons).
    `frontend/js/discord.js` stores the session and continues into the app. Errors
    come back as `login.html?discord_error=<code>`.
 
-Passwords: bcrypt cost 12, min length 8. Hashes only ever leave via `password_hash`
+Passwords: bcrypt `auth.DefaultBcryptCost` (12), length 12–72 bytes
+(`auth.MinPasswordLength` / `MaxPasswordLength`; the cap is bcrypt's own limit,
+past which it silently ignores input, so oversized passwords are rejected rather
+than truncated). The work factor is lowerable **only from a test binary** via
+`auth.SetBcryptCostForTests` (guarded by `testing.Testing()`, so it panics in
+the server/bot/seed binaries) — there is deliberately no env var or config field
+for it. Hashes only ever leave via `password_hash`
 column; the `User` JSON model hides it (`json:"-"`).
 
 ## Admin & user management (current)
@@ -1524,6 +1530,49 @@ streaming response on the same path, proxied with buffering off.
   password is never logged.
 - Secrets/credentials come from the environment only; never hardcode. `.env` is
   git-ignored.
+- **Stores are injected as interfaces.** `cmd/bot/stores.go` and
+  `internal/handlers/stores.go` declare the slice of `internal/models` each
+  consumer actually calls; `bot` and `handlers.Server`/`Config` hold those
+  interfaces, and `main()` passes the concrete `*models.*Store`. Add a method to
+  an interface only when a handler needs it, and keep the `var _ iface =
+  (*models.XStore)(nil)` assertions at the bottom of each file — they turn a
+  signature drift in `internal/models` into a clear compile error.
+
+## Testing (current)
+
+- **Run**: `cd backend && go test ./...` (unit only) or `go test -race ./...`
+  (what CI runs). **CI**: `.github/workflows/ci.yml` runs `gofmt -l`,
+  `go build`, `go vet`, and `go test -race` on every push/PR, with a PostgreSQL
+  service container.
+- **Stdlib only** — no assertion or mocking library. Fakes implement the
+  consumer-side store interfaces above (see `fakeDiscordStore` in
+  `cmd/bot/permissions_test.go`, which embeds the interface so an unexpected
+  call panics instead of silently passing).
+- **bcrypt cost in tests**: `internal/auth` and `internal/handlers` each have a
+  `TestMain` calling `auth.SetBcryptCostForTests(bcrypt.MinCost)`, which cuts
+  the `-race` suite from ~100s to ~8s. The setter panics outside a test binary,
+  so it cannot weaken production. `TestDefaultBcryptCost` restores the real
+  factor and asserts `HashPassword` bakes it into the hash, so the production
+  strength is still covered; `TestTimingDummyHashMatchesTheProductionCost`
+  (handlers) pins the login timing-uniformity constant to the same value.
+- **Unit tests**: `internal/auth` (password policy/bcrypt, JWT issue/parse
+  including expiry, foreign secret, and algorithm-confusion rejection, bearer
+  middleware), `internal/discordfmt` (`nextRunUnixAt` — the weekly schedule
+  arithmetic, with the clock injected so `NextRunUnix` stays testable),
+  `cmd/bot` (help/command sync, the post permission gate, signup pickers).
+- **Integration tests**: `internal/handlers/*_integration_test.go` drive the
+  real routes over HTTP (`httptest`) against a live PostgreSQL — auth flows
+  (register/login/refresh rotation/logout/password reset) and the team
+  permission matrix (owner/editor/viewer, 404-not-403 for inaccessible teams).
+  They are **opt-in** via `TEST_DATABASE_URL` and skip when it is unset. The
+  harness (`internal/handlers/testdb_test.go`) drops and rebuilds the schema
+  from `database/migrations` via `db.Migrate` (the same function `cmd/seed`
+  uses; override the directory with `TEST_MIGRATIONS_DIR`) and truncates every
+  table between tests, so **point it only at a throwaway database**.
+- **Self-maintaining invariants** — prefer these over example-based tests where
+  the repo has two things that must stay in sync. `TestHelpCoversEverySubcommand`
+  (cmd/bot) cross-checks `coreTeamCommand.Options` against `helpCommands` in both
+  directions, so adding a command without a help entry fails the build.
 
 ## Common commands
 
@@ -1533,8 +1582,13 @@ docker compose --profile bot up    # also run the Discord bot (needs DISCORD_BOT
 docker compose run --rm seed       # (re)apply migrations + ensure test user
 cd backend && go build ./...       # compile backend (server + seed + bot)
 cd backend && go vet ./...         # static checks
+cd backend && go test ./...        # unit tests (DB integration tests skip)
+cd backend && go test -race ./...  # what CI runs
 node tools/gen-esoref/gen.js       # regenerate Go label data from frontend JS
 ```
+
+Run the handler integration tests by pointing `TEST_DATABASE_URL` at a
+throwaway PostgreSQL (see `docs/DEVELOPMENT.md` → Tests).
 
 ## Status / TODO ideas
 
@@ -1550,5 +1604,12 @@ node tools/gen-esoref/gen.js       # regenerate Go label data from frontend JS
 - [x] Discord bot: `/coreteam` post overview + DM per-player details, account
       linking, channel→team binding, per-team post/DM footers (`backend/cmd/bot`).
 - [x] Rate limiting on auth endpoints (at the nginx edge; see `docs/DEPLOYMENT.md`).
+- [x] CI (`gofmt`/build/vet/`go test -race` on every push and PR).
+- [x] Tests: `internal/auth` + `internal/discordfmt` unit tests, and HTTP
+      integration tests for the auth flows and team permission matrix against a
+      live PostgreSQL (see "Testing" above).
 - [ ] Expand the gear-set/skill/boss seed data to full ESO coverage.
-- [ ] Tests (handlers, auth, models).
+- [ ] Extend the integration tests to the roster/encounter/grouping/image
+      endpoints; add store-level tests in `internal/models`.
+- [ ] Drift check that `internal/esoref/data_gen.go` matches the frontend data
+      it is generated from.

@@ -102,14 +102,18 @@ method-aware patterns, Go 1.22+). Layout:
   and DB; opens only an outbound gateway connection (no inbound port). Run via
   the `bot` compose profile. See `docs/AGENT_CONTEXT.md` "Discord bot".
 - `internal/config` — environment configuration (12-factor).
-- `internal/db` — pgx pool with startup retry.
+- `internal/db` — pgx pool with startup retry, plus `Migrate` (applies the
+  `*.sql` files in a directory in filename order), shared by `cmd/seed` and the
+  handler integration tests.
 - `internal/models` — domain types + data access (`UserStore`, `TeamStore`,
   `EncounterStore`, `GroupingStore`, `MemberStore` (the member pool /
   recruitment roster), `RefreshTokenStore`, `PasswordResetStore`,
   `DiscordStore` (link codes + channel bindings + RSVPs), and `SettingsStore`
   for the `app_settings` key/value store). ESO game reference data and the
   player-build validators live in `eso.go`, kept separate from the persistence
-  stores.
+  stores. Consumers depend on these through narrow interfaces they declare
+  themselves (`internal/handlers/stores.go`, `cmd/bot/stores.go`), so a test can
+  substitute a fake without a database.
 - `internal/esoref` — code-generated ESO labels/abbreviations
   (`data_gen.go`, produced by `tools/gen-esoref/gen.js` from the frontend's
   `gear-skills.js`/`data.js`) so the bot renders the same names as the web UI.

@@ -89,6 +89,65 @@ go build ./...
 go vet ./...
 ```
 
+## Tests
+
+```bash
+cd backend
+go test ./...          # unit tests only (the database tests skip)
+go test -race ./...    # what CI runs
+```
+
+Tests come in two layers.
+
+**Unit tests** need nothing installed and always run: the token/password/
+middleware tests in `internal/auth`, the schedule arithmetic in
+`internal/discordfmt`, and the command/permission tests in `cmd/bot`.
+
+**Integration tests** (`internal/handlers/*_integration_test.go`) exercise the
+real routing, middleware, handler, store, and SQL stack over HTTP against a
+live PostgreSQL. They are opt-in via `TEST_DATABASE_URL` and skip when it is
+unset, so the default `go test ./...` still works with nothing running. Point it
+at a database the tests may **freely destroy** — they drop and rebuild the
+schema on the first test and truncate every table between tests:
+
+```bash
+docker run -d --name ctb-test-pg -p 55432:5432 \
+  -e POSTGRES_USER=test -e POSTGRES_PASSWORD=test -e POSTGRES_DB=ctb_test \
+  postgres:16-alpine
+
+cd backend
+TEST_DATABASE_URL='postgres://test:test@localhost:55432/ctb_test?sslmode=disable' \
+  go test ./internal/handlers/
+```
+
+The schema is built from `database/migrations` (override with
+`TEST_MIGRATIONS_DIR`) through the same `db.Migrate` the `seed` command uses, so
+a migration that breaks the schema fails the tests. The harness lives in
+`internal/handlers/testdb_test.go`; `newTestAPI(t)` returns a running server with
+helpers for registering users, creating teams, and issuing authenticated
+requests.
+
+Tests are written with the standard library only — no assertion or mocking
+framework. Where a test needs to stand in for a data store, it implements the
+narrow interface the consumer declares (`cmd/bot/stores.go`,
+`internal/handlers/stores.go`) rather than reaching for a mock generator.
+
+**bcrypt cost.** Hashing at the production work factor (`auth.DefaultBcryptCost`,
+12) costs ~250ms per call and several times that under `-race`, and the
+integration tests register users over HTTP. So `internal/auth` and
+`internal/handlers` each have a `TestMain` that calls
+`auth.SetBcryptCostForTests(bcrypt.MinCost)`, taking the `-race` suite from
+about 100s to about 8s. The setter is guarded by `testing.Testing()` and panics
+outside a test binary, so there is no way to weaken hashing in the server, bot,
+or seed binaries — and deliberately no env var or config field for the cost.
+`TestDefaultBcryptCost` restores the production factor and asserts it is what
+`HashPassword` actually bakes into a hash, so the real setting stays covered.
+If you add a test package that hashes passwords, give it the same `TestMain`.
+
+CI (`.github/workflows/ci.yml`) runs `gofmt -l`, `go build`, `go vet`, and
+`go test -race` on every push and pull request, with a PostgreSQL service
+container so the integration tests run there too.
+
 ## API reference
 
 Base path: `/api`. All bodies are JSON.

@@ -15,6 +15,12 @@ Other key docs:
 Ground rules:
 
 - Follow `docs/STYLE_GUIDE.md` for Go, SQL, CSS, JS, and HTML conventions.
+- Run `cd backend && gofmt -l . && go build ./... && go vet ./... && go test ./...`
+  before finishing; CI runs the same checks plus `-race` and the database
+  integration tests. See `docs/DEVELOPMENT.md` → Tests.
+- Tests use the standard library only. Fake a data store by implementing the
+  consumer-side interface in `cmd/bot/stores.go` or
+  `internal/handlers/stores.go`, not with a mocking framework.
 - Keep SQL migrations idempotent.
 - Never hardcode secrets; configuration is environment-based.
 - Never store or log plaintext passwords.

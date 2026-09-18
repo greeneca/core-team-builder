@@ -12,9 +12,18 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-// bcryptCost controls the work factor. 12 is a sensible 2020s default that
-// balances security and login latency. Raise as hardware improves.
-const bcryptCost = 12
+// DefaultBcryptCost is the work factor used in production. 12 is a sensible
+// 2020s default that balances security and login latency. Raise as hardware
+// improves.
+const DefaultBcryptCost = 12
+
+// bcryptCost is the work factor HashPassword actually applies. It is a var
+// rather than a const solely so a test binary can lower it — see
+// SetBcryptCostForTests. Nothing on the production path writes it, and there is
+// deliberately **no** environment variable or config field for it: a knob that
+// can weaken password hashing is worth more to an attacker (or a
+// copy-pasted .env) than it is to us.
+var bcryptCost = DefaultBcryptCost
 
 // MinPasswordLength is the minimum acceptable password length. Length is the
 // primary strength factor (NIST SP 800-63B), so we favor a longer minimum over
