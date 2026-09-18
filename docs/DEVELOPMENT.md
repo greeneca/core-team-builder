@@ -181,6 +181,26 @@ is above 90% while the Discord command surface in `cmd/bot` is near zero, and
 total. The CI job summary prints the per-package breakdown for each run. There is
 deliberately no minimum-coverage gate; the badge is a trend line, not a test.
 
+**The badge.** CI publishes the number as `coverage.json` on an orphan `badges`
+branch, and the README renders it through shields.io's `endpoint` badge. Nothing
+leaves the repo: no third-party coverage service is involved and the job needs no
+secret beyond the built-in `GITHUB_TOKEN`.
+
+The badge URL ends in `coverage.json?v=1`. The query string is a cache-buster and
+is load-bearing: shields.io caches upstream *failures* against the exact URL, so
+fetching the badge once before the `badges` branch existed pins it to "resource
+not found" for far longer than its 300s `max-age`, and no amount of browser
+reloading helps because the staleness is server-side at shields. If the badge
+ever sticks on an error that the raw URL does not reproduce:
+
+```bash
+# Is the published JSON actually fine? (expect 200 + the schema below)
+curl -i https://raw.githubusercontent.com/greeneca/core-team-builder/badges/coverage.json
+```
+
+If that is healthy, bump `?v=1` to `?v=2` in the README to move shields to a
+fresh cache key. GitHub ignores the query string when serving the raw file.
+
 ## API reference
 
 Base path: `/api`. All bodies are JSON.
