@@ -204,6 +204,7 @@ func newTestAPI(t *testing.T) *testAPI {
 type response struct {
 	t      *testing.T
 	status int
+	header http.Header
 	body   []byte
 }
 
@@ -242,7 +243,34 @@ func (a *testAPI) do(method, path, token string, body any) *response {
 	if err != nil {
 		a.t.Fatalf("read %s %s response: %v", method, path, err)
 	}
-	return &response{t: a.t, status: resp.StatusCode, body: raw}
+	return &response{t: a.t, status: resp.StatusCode, header: resp.Header, body: raw}
+}
+
+// doRaw issues a request with a caller-built body and Content-Type, for the
+// routes that take something other than JSON (the multipart image upload).
+func (a *testAPI) doRaw(method, path, token, contentType string, body []byte) *response {
+	a.t.Helper()
+
+	req, err := http.NewRequest(method, a.server.URL+path, bytes.NewReader(body))
+	if err != nil {
+		a.t.Fatalf("build request: %v", err)
+	}
+	req.Header.Set("Content-Type", contentType)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+
+	resp, err := a.server.Client().Do(req)
+	if err != nil {
+		a.t.Fatalf("%s %s: %v", method, path, err)
+	}
+	defer resp.Body.Close()
+
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		a.t.Fatalf("read %s %s response: %v", method, path, err)
+	}
+	return &response{t: a.t, status: resp.StatusCode, header: resp.Header, body: raw}
 }
 
 // expect asserts the status code and returns the response for further checks.

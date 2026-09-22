@@ -168,6 +168,16 @@ fixed in the review pass.
   proxy is the only ingress, but anything on those networks can spoof
   `X-Forwarded-For` and bypass the per-IP auth rate limits. Narrow it to the
   proxy's actual address/CIDR in `frontend/nginx.conf` at deploy time.
+- **The `@` military-time anchor never fires.** `normalizeMilitaryTime`
+  (`cmd/bot/premade_dm.go`) rewrites "Friday at 2100" to "21:00" so the run
+  scheduler's date parser can read it, but every `@` spelling reaches the parser
+  unconverted: the `\b` in `\b(at|@)\s+(\d{3,4})\b` sits before the alternation,
+  and `ReplaceAllStringFunc` then re-matches the isolated substring where that
+  boundary no longer exists. Moving it inside — `(\bat|@)` — fixes both halves,
+  but it changes how typed run times are interpreted, so it wants a deliberate
+  change plus a check against the `when` parser rather than a drive-by edit.
+  `TestNormalizeMilitaryTimeAtSignAnchorIsDead` pins the current behaviour and
+  fails once it's fixed.
 
 ## License
 

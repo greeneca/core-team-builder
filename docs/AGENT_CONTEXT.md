@@ -1544,8 +1544,10 @@ streaming response on the same path, proxied with buffering off.
   (what CI runs). **CI**: `.github/workflows/ci.yml` runs `gofmt -l`,
   `go build`, `go vet`, and `go test -race` on every push/PR, with a PostgreSQL
   service container.
-- **Coverage** (~10% module-wide, uneven: `internal/auth` >90%, `cmd/bot` ~2%
-  but nearly half the statements). CI measures it with
+- **Coverage** (~36% module-wide, uneven: `internal/config`, `internal/esoref`,
+  `internal/discordfmt`, and `internal/auth` are all above 90%, the handler and
+  model layers sit near half, and `cmd/bot` is ~11% while holding nearly half
+  the statements, so it dominates the total). CI measures it with
   `-coverpkg=./... -count=1 -covermode=atomic` and publishes the number to a
   `badges` branch that the README badge reads; the per-package breakdown goes
   to the job summary. See the Coverage section in `docs/DEVELOPMENT.md` for why

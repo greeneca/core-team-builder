@@ -100,8 +100,12 @@ go test -race ./...    # what CI runs
 Tests come in two layers.
 
 **Unit tests** need nothing installed and always run: the token/password/
-middleware tests in `internal/auth`, the schedule arithmetic in
-`internal/discordfmt`, and the command/permission tests in `cmd/bot`.
+middleware tests in `internal/auth`, post rendering and schedule arithmetic in
+`internal/discordfmt`, environment parsing in `internal/config`, the penetration
+and critical tables in `internal/esoref`, message construction in
+`internal/email`, hub fan-out in `internal/realtime`, the request normalizers in
+`internal/handlers/normalize_test.go`, and the command, permission, and
+component builders in `cmd/bot`.
 
 **Integration tests** (`internal/handlers/*_integration_test.go`) exercise the
 real routing, middleware, handler, store, and SQL stack over HTTP against a
@@ -175,10 +179,14 @@ Read the headline number with `go tool cover`, not by summing the profile:
 `-coverpkg` makes every test binary emit its own copy of each block, and
 `go tool cover` merges those duplicates where naive summing double-counts them.
 
-Coverage is currently low in absolute terms and uneven by design — `internal/auth`
-is above 90% while the Discord command surface in `cmd/bot` is near zero, and
-`cmd/bot` is over 3800 of the module's ~8100 statements, so it dominates the
-total. The CI job summary prints the per-package breakdown for each run. There is
+Coverage is uneven by design. The pure packages are well covered —
+`internal/config`, `internal/esoref`, `internal/discordfmt`, and `internal/auth`
+are all above 90% — and the handler and model layers sit near half, driven there
+by the database integration tests. The Discord command surface in `cmd/bot` is
+the outlier at roughly a tenth: its interaction handlers need a live
+`discordgo` session, so only the pure builders and helpers are tested. Because
+`cmd/bot` is over 3800 of the module's ~8100 statements, it dominates the total.
+The CI job summary prints the per-package breakdown for each run. There is
 deliberately no minimum-coverage gate; the badge is a trend line, not a test.
 
 **The badge.** CI publishes the number as `coverage.json` on an orphan `badges`
