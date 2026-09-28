@@ -419,7 +419,7 @@ const MASTERIES_BY_CLASS = {
     { value: "steadfast_candescence", label: "Steadfast Candescence", desc: "Your conviction is unwavering. Light gives no quarter. Sacred Ground now activates and refreshes itself while Bracing. Increases the amount of damage you can block by 20% while stationary." },
   ],
   warden: [
-    { value: "tundras_maw", label: "Tundra's Maw", desc: "Expose your enemies to unrelenting cold. Applying Chill to an enemy also applies Major Brittle for 2 seconds, increasing their Critical Damage taken by 20%." },
+    { value: "tundras_maw", label: "Tundra's Maw", desc: "Expose your enemies to unrelenting cold. Applying Chill to an enemy also applies Major Brittle for 2.1 seconds, increasing their Critical Damage taken by 20%." },
     { value: "wild_adaptation", label: "Wild Adaptation", desc: "The battlefield is your grove. Tend to it. Gain 333 Weapon and Spell Damage for each status effect on your target, up to a maximum of 1665." },
     { value: "glacial_obstinance", label: "Glacial Obstinance", desc: "Tap into the wellspring of permafrost's resolve. Upgrades Bond with Nature to also activate when casting Winter's Embrace abilities and to grant 15% Weapon and Spell Damage for 10 seconds if you are at full Health after the heal." },
     { value: "green_keepers_hide", label: "Green-Keeper's Hide", desc: "The twisting of seasons has tempered your will. Reduce your damage taken by 3% for every status effect active on your attacker, up to a maximum of 15%." },
@@ -572,8 +572,7 @@ function validEncounterGroups(existingNames, keepName) {
 // as a tooltip on the picker options and selected chips.
 const POTION_GROUPS = [
   { group: "Trial Potions", potions: [
-    { value: "spell_power_potion", label: "Essence of Spell Power", desc: "Grants Major Sorcery and Major Prophecy (increased Spell Damage and Spell Critical) and restores Magicka. The standard magicka-DPS \"spell power\" potion (Lady's Smock, Corn Flower, Water Hyacinth)." },
-    { value: "weapon_power_potion", label: "Essence of Weapon Power", desc: "Grants Major Brutality and Major Savagery (increased Weapon Damage and Weapon Critical) and restores Stamina. The standard stamina-DPS \"weapon power\" potion (Blessed Thistle, Dragonthorn, Water Hyacinth)." },
+    { value: "damage_potion", label: "Damage Potion", desc: "Grants Major Brutality and Major Savagery (increased Weapon and Spell Damage and Critical) and restores a resource. Update 51 hybridized alchemy, so Essence of Spell Power and Essence of Weapon Power now grant the same buffs — either one is the standard DPS potion." },
     { value: "tri_restoration_potion", label: "Tri-Restoration Potion", desc: "Restores Health, Magicka, and Stamina and grants Minor Fortitude, Minor Intellect, and Minor Endurance (increased recoveries). The \"tri-stat\" potion (Bugloss, Columbine, Mountain Flower)." },
   ] },
 ];
@@ -604,9 +603,9 @@ const MUNDUS_STONES = [
   { value: "", label: "—", critPct: 0, desc: "No mundus selected." },
   { value: "the_shadow", label: "The Shadow", critPct: 18, desc: "Increases Critical Damage by 18% (the standard DPS mundus)." },
   { value: "the_thief", label: "The Thief", critPct: 0, desc: "Increases Critical Chance." },
-  { value: "the_warrior", label: "The Warrior", critPct: 0, desc: "Increases Weapon Damage." },
+  { value: "the_warrior", label: "The Warrior", critPct: 0, desc: "Increases Weapon and Spell Damage." },
   { value: "the_mage", label: "The Mage", critPct: 0, desc: "Increases Maximum Magicka." },
-  { value: "the_apprentice", label: "The Apprentice", critPct: 0, desc: "Increases Spell Damage." },
+  { value: "the_apprentice", label: "The Apprentice", critPct: 0, desc: "Increases Experience and Inspiration gain by 8% (no longer a damage mundus as of Update 51)." },
   { value: "the_atronach", label: "The Atronach", critPct: 0, desc: "Increases Magicka Recovery." },
   { value: "the_ritual", label: "The Ritual", critPct: 0, desc: "Increases Healing Done." },
   { value: "the_lover", label: "The Lover", critPct: 0, desc: "Increases Physical and Spell Penetration." },
@@ -881,6 +880,7 @@ const LOADOUT_TYPES = {
 //   - Green Balance  (Warden)        → group Minor Toughness
 //   - Draconic Power (Dragonknight)  → group Minor Brutality
 //   - Assassination  (Nightblade)    → group Minor Savagery
+//   - Dawn's Wrath   (Templar)       → group Illuminate (Armor)
 //
 // SELF-BUFF FLAG: a buff with `selfBuff: true` is a personal Major/Minor buff a
 // player can maintain for themselves. The Discord bot's build-details DM lists
@@ -900,13 +900,15 @@ const BUFFS = [
     sources: { masteries: ["lead_from_the_front"], skills: ["summon_storm_atronach", "summon_charged_atronach", "greater_storm_atronach"] } },
   { value: "minor_berserk", label: "Minor Berserk", desc: "Increases group damage done by 5%.", selfBuff: true,
     sources: { skills: ["combat_prayer"], gear: ["kinras_wrath"] } },
-  // Brutality & Sorcery
-  // Major Brutality & Sorcery: only the Dragonknight Igneous Weapons line shares
-  // it with grouped allies; personal potions/Degeneration/Surge are self-only.
-  { value: "major_brutality_sorcery", label: "Major Brutality and Sorcery", desc: "Increases group Weapon and Spell Damage.", selfBuff: true,
+  // Brutality
+  // Update 51 folded Major/Minor Sorcery into Major/Minor Brutality, so a single
+  // buff now raises both Weapon and Spell Damage. Only the Dragonknight Igneous
+  // Weapons line shares Major Brutality with grouped allies; personal potions,
+  // Degeneration, and Surge are self-only.
+  { value: "major_brutality", label: "Major Brutality", desc: "Increases group Weapon and Spell Damage by 20%.", selfBuff: true,
     sources: { skills: ["igneous_weapons", "molten_armaments", "molten_weapons"] } },
   // Minor Brutality shared to the group by the Dragonknight Draconic Power passive.
-  { value: "minor_brutality_sorcery", label: "Minor Brutality", desc: "Increases group Weapon Damage.",
+  { value: "minor_brutality", label: "Minor Brutality", desc: "Increases group Weapon and Spell Damage by 10%.",
     sources: { skillLines: ["draconic_power"], classes: ["dragonknight"] } },
   // Courage
   { value: "major_courage", label: "Major Courage", desc: "Increases Weapon and Spell Damage.",
@@ -919,7 +921,7 @@ const BUFFS = [
   // Random multi-debuff sets (Kynmarcher's Cruelty, Saint and the Seducer) are
   // intentionally omitted.
   { value: "major_cowardice", label: "Major Cowardice", desc: "Reduces the enemy's Weapon and Spell Damage by 430.",
-    sources: { gear: ["nix_hounds_howl", "gardener_of_seasons", "vykosa"], skills: ["chains_of_dominance", "chains_of_flame", "agony_totem", "bone_totem", "remote_totem", "aspect_of_terror", "manifestation_of_terror", "mass_hysteria", "deafening_roar"] } },
+    sources: { gear: ["nix_hounds_howl", "gardener_of_seasons", "vykosa", "tarcyr"], skills: ["chains_of_dominance", "chains_of_flame", "agony_totem", "bone_totem", "remote_totem", "aspect_of_terror", "manifestation_of_terror", "mass_hysteria", "deafening_roar"] } },
   { value: "minor_cowardice", label: "Minor Cowardice", desc: "Reduces the enemy's Weapon and Spell Damage by 215.",
     sources: { gear: ["healing_mage"], skills: ["power_extraction", "corrupting_pollen"], masteries: ["erudites_rigor"] } },
   // Evasion: the Arcanist Soldier of Apocrypha passive shares it with the group,
@@ -942,6 +944,10 @@ const BUFFS = [
   // by Reawakened Hierophant (2 Crux).
   { value: "minor_heroism", label: "Minor Heroism", desc: "Grants the group Ultimate over time.",
     sources: { gear: ["reawakened_hierophant"], skills: ["fire_keeper", "hearth_and_home", "hearthfire"] } },
+  // Illuminate: the Templar Dawn's Wrath passive. Update 51 replaced its Minor
+  // Sorcery with a unique 2974 Armor buff, so it stacks with Major/Minor Resolve.
+  { value: "illuminate", label: "Illuminate", desc: "Grants the group 2974 Armor (stacks with Resolve).",
+    sources: { skillLines: ["dawns_wrath"], classes: ["templar"] } },
   // Intellect and Endurance: the Arcanist domains, Templar auras, and the
   // Magicka/Stamina-recovery group heals (Refreshing Path, Regenerative Ward,
   // Enchanted Growth) apply both Minor Intellect and Minor Endurance to allies.
@@ -961,19 +967,23 @@ const BUFFS = [
     sources: { skills: ["frost_cloak", "expansive_frost_cloak", "ice_fortress", "mend_spirit"], gear: ["mighty_glacier"] } },
   { value: "minor_resolve", label: "Minor Resolve", desc: "Increases group Physical and Spell Resistance.",
     sources: { gear: ["magma_incarnate"], skills: ["combat_prayer", "runic_defense", "runeguard_of_freedom", "runeguard_of_still_waters"] } },
-  // Savagery & Prophecy
-  // Major Savagery and Prophecy has no group-wide provider — every source
-  // (potions, slotted skills like Camouflaged Hunter / Grim Focus, Toothrow /
-  // Treasure Hunter, Oakensoul) only buffs the wearer. It is therefore tracked
-  // as a self buff with no group sources: never group-covered, always listed in
-  // the Discord "Self Buffs" reminder so each player brings it themselves.
-  { value: "major_savagery_prophecy", label: "Major Savagery and Prophecy", desc: "Increases Weapon and Spell Critical.", selfBuff: true,
+  // Savagery
+  // Update 51 folded Major/Minor Prophecy into Major/Minor Savagery, so a single
+  // buff now raises both Weapon and Spell Critical. Major Savagery still has no
+  // group-wide provider — every source (potions, slotted skills like Camouflaged
+  // Hunter / Grim Focus, Toothrow / Treasure Hunter, Oakensoul) only buffs the
+  // wearer. It is therefore tracked as a self buff with no group sources: never
+  // group-covered, always listed in the Discord "Self Buffs" reminder so each
+  // player brings it themselves.
+  { value: "major_savagery", label: "Major Savagery", desc: "Increases Weapon and Spell Critical rating by 2629.", selfBuff: true,
     sources: {} },
   // Minor Savagery is shared to the group by the Nightblade Assassination passive.
-  { value: "minor_savagery_prophecy", label: "Minor Savagery", desc: "Increases group Weapon Critical.",
+  { value: "minor_savagery", label: "Minor Savagery", desc: "Increases group Weapon and Spell Critical rating by 1314.",
     sources: { skillLines: ["assassination"], classes: ["nightblade"] } },
   // Slayer
-  { value: "major_slayer", label: "Major Slayer", desc: "Increases damage to Dungeon/Trial monsters.",
+  // Update 51 dropped the Dungeon/Trial/Arena restriction: Slayer now increases
+  // damage done to every monster.
+  { value: "major_slayer", label: "Major Slayer", desc: "Increases damage done to monsters by 10%.",
     sources: { gear: ["master_architect", "roaring_opportunist", "war_machine"] } },
   // Toughness: shared to the group by the Warden Green Balance passive.
   { value: "minor_toughness", label: "Minor Toughness", desc: "Increases group Max Health by 10%.",
@@ -1572,6 +1582,12 @@ const PEN_GROUP_SOURCES = [
   // (Elemental Drain was previously here but grants MAJOR Breach, not Minor.)
   // A scribed skill set to provide Minor Breach also applies it to the target.
   { value: "minor_breach", label: "Minor Breach", pen: 2974, detect: { skills: ["pierce_armor", "deep_fissure", "sunderflame"], scribed: ["minor_breach"] } },
+  // Exploitation is a Sorcerer Dark Magic passive that buffs nearby allies.
+  // Update 51 replaced its Minor Prophecy with a unique 2974 Offensive
+  // Penetration buff, so it stacks with the Breaches and the rest of the group
+  // bucket. Applies to a pure (non-subclassed) Sorcerer, or to a subclassed
+  // player who has slotted the Dark Magic skill line.
+  { value: "exploitation", label: "Exploitation (Sorcerer)", pen: 2974, detect: { classPassive: [{ class: "sorcerer", line: "dark_magic" }] } },
   { value: "alkosh", label: "Roar of Alkosh", pen: 6000, detect: { gear: ["roar_of_alkosh"] } },
   { value: "crimson_oath", label: "Crimson Oath's Rive", pen: 3541, detect: { gear: ["crimson_oaths_rive"] } },
   { value: "tremorscale", label: "Tremorscale", pen: 2640, detect: { gear: ["tremorscale"] } },

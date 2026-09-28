@@ -1400,7 +1400,8 @@ interest gathered via Discord, plus manual web entries. (A team can opt into
   card, built on the same pattern. A player wants their Offensive Penetration to
   reach the target's Resistance (`PEN_TARGET = 18200`, the standard trial value).
 - **Two buckets**: `group` (team-wide debuffs/buffs — Breaches, Alkosh, Crimson
-  Oath, Tremorscale, Crusher, etc.; any one player providing it counts for all)
+  Oath, Tremorscale, Crusher, the Sorcerer Exploitation passive, etc.; any one
+  player providing it counts for all)
   and `self` (only that player — CP Piercing, light armor, The Lover mundus,
   Velothi, Arcanist Splintered Secrets, Wood Elf, arena 1pc, plus `pen_extra`).
   Per player, total = `group + self`; they meet it when total ≥ 18200. **Self
@@ -1420,7 +1421,10 @@ interest gathered via Discord, plus manual web entries. (A team can opt into
   `self|group`; an optional `maxStack` (e.g. `set_piece_bonuses` = 5) lets a self
   source be added multiple times, stored as the key repeated once per stack and
   summed in the calculator). Light armor is `PEN_LIGHT_PER_PIECE` (939) × light pieces; arena
-  1pc is detected from any equipped gear in the `Arena Weapons` group. Several
+  1pc is detected from any equipped gear in the `Arena Weapons` group. A
+  `PEN_GROUP_SOURCES` entry may also use the `classPassive` detect category
+  (`exploitation` does), matching a non-subclassed player's class or a
+  subclassed player's slotted line. Several
   group keys (Major/Minor Breach, Runic Sunder, Dismember) are **placeholders** —
   one-line edits.
 - **Rule** (`computePenCoverage(players, loadoutBySlot)`): class-passive detection

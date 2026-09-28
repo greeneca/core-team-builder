@@ -424,7 +424,7 @@ alongside one trial). Violations return `400`.
       "slot": 1,
       "gear": ["perfected_relequen", "slimecraw"],
       "skills": ["pragmatic_fatecarver"],
-      "potions": ["spell_power_potion"],
+      "potions": ["damage_potion"],
       "cp_blue": ["fighting_finesse", "backstabber"],
       "crit_dmg": ["dual_wield_double"],
       "mundus": "the_shadow",

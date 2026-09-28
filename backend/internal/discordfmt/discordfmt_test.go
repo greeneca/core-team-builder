@@ -831,7 +831,7 @@ func TestMissingSelfBuffs(t *testing.T) {
 
 	t.Run("nothing equipped means every self buff is missing", func(t *testing.T) {
 		got := missingSelfBuffs(team, nil)
-		for _, want := range []string{"Minor Berserk", "Major Brutality and Sorcery", "Major Resolve"} {
+		for _, want := range []string{"Minor Berserk", "Major Brutality", "Major Resolve"} {
 			if !containsString(got, want) {
 				t.Errorf("%q should be missing, got %v", want, got)
 			}
@@ -846,7 +846,7 @@ func TestMissingSelfBuffs(t *testing.T) {
 		if containsString(got, "Minor Berserk") {
 			t.Errorf("Kinras's Wrath should cover Minor Berserk, got %v", got)
 		}
-		if containsString(got, "Major Brutality and Sorcery") {
+		if containsString(got, "Major Brutality") {
 			t.Errorf("Igneous Weapons should cover Major Brutality, got %v", got)
 		}
 		if !containsString(got, "Major Resolve") {
