@@ -193,7 +193,7 @@ column; the `User` JSON model hides it (`json:"-"`).
     from this set, and `handleUpdateTeam` validates each player's role against the
     team's own role keys (not a global allow-list) and each role's `base` against
     `ValidRoleBases` (empty base derives from the key, else `DefaultRoleBase`).
-    Add/remove roles from the **Main panel** ("Roster Roles"); the add row has a
+    Add/remove roles from the **Configure page** ("Roles"); the add row has a
     base/color picker, and each role chip is accented with its base color. A role
     can't be removed while a player is assigned to it. The editor is shown in
     every mode, including simple-signup pre-made runs (players pick one of the
@@ -285,7 +285,7 @@ column; the `User` JSON model hides it (`json:"-"`).
   ≥1 encounter in the DB. An editor opts in per team via the topbar/section
   toggle.
 - **Auto-share with member pool** (`034_team_auto_share_pool.sql`):
-  `teams.auto_share_pool_viewers BOOLEAN` (default **false**) — a "Team Features"
+  `teams.auto_share_pool_viewers BOOLEAN` (default **false**) — a "Features" (Configure page)
   checkbox. When **on**, the team is automatically shared as **viewer** with the
   app accounts of everyone in its **member pool** (`team_roster_members`), current
   and future. A pool member only becomes a viewer once their Discord identity is
@@ -306,7 +306,7 @@ column; the `User` JSON model hides it (`json:"-"`).
   team, then promotes it with a save that sets `pre_made=true` and
   `simple_signup=true` — simple signup is the template default), **or toggled
   later** with the **Convert to template / Convert to team** button in the team
-  detail page's "Team Features" section (editors only). Convert flips only
+  detail page's "Features" (Configure page) section (editors only). Convert flips only
   `pre_made` and persists it via the normal team save; the roster and all other
   data are preserved, and `simple_signup` is left unchanged (so a converted team
   keeps its per-slot builds unless simple signup is turned on). The teams page
@@ -320,7 +320,7 @@ column; the `User` JSON model hides it (`json:"-"`).
   `051_team_advanced_signup_default.sql`): `teams.simple_signup BOOLEAN`
   (default **true** — simple signup is the default for new teams/templates). The
   web UI surfaces this **inverted**, as an "**Advanced signup** (per slot)"
-  checkbox in "Team Features" (shown only when the team is a template); the box is
+  checkbox in "Features" (Configure page) (shown only when the team is a template); the box is
   **unchecked by default** (`advancedToggle.checked = !simple_signup`). Advanced
   on (`simple_signup=false`) = "specific" signup (the post shows each slot's
   class/gear, a "get build details" dropdown is offered, and players claim an
@@ -336,7 +336,7 @@ column; the `User` JSON model hides it (`json:"-"`).
   carry deliberately-chosen builds).
 - **Simple signup style** (`057_team_simple_signup_style.sql`):
   `teams.simple_signup_style TEXT` (default **`'dropdown'`**), a "Simple signup
-  layout" `<select>` in "Team Features" shown only for a **simple** template.
+  layout" `<select>` in "Features" (Configure page) shown only for a **simple** template.
   Chooses how a simple-signup run post presents its controls (advanced signup is
   unaffected): `'dropdown'` (the current single consolidated dropdown),
   `'buttons'` (one **color-coded button per role** — `roleButtonStyle`:
@@ -348,7 +348,7 @@ column; the `User` JSON model hides it (`json:"-"`).
   unknown → `'dropdown'`). See the bot's `premadeComponents` /
   `premadeRoleButtonRows` / `premadeSignupButtonRow` below.
 - **Waitlist** (`038_premade_waitlist.sql`): `teams.waitlist_enabled BOOLEAN`
-  (default **false**) — a "Team Features" checkbox shown only when **Pre-made** is
+  (default **false**) — a "Features" (Configure page) checkbox shown only when **Pre-made** is
   on. When on, a "Join a waitlist (role is full)" select appears on the post for
   any **full** role; joining queues the user (`premade_waitlist`, FIFO per role).
   When a claimed slot frees up — on **leave** (`handlePremadeLeave`) **or** when a

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Dashboard — Core Team Builder</title>
   <link rel="icon" type="image/png" href="favicon.png" />
-  <link rel="stylesheet" href="css/styles.css?v=120" />
+  <link rel="stylesheet" href="css/styles.css?v=121" />
 </head>
 <body>
   <div id="message" class="toast is-hidden" role="alert" aria-live="assertive"></div>
@@ -105,16 +105,16 @@
         <div class="form-actions detail-toolbar-actions">
           <span id="presence-indicator" class="presence-indicator is-hidden" aria-live="polite" title=""></span>
           <button id="members-btn" class="btn btn--ghost btn--sm" type="button">Members Pool</button>
+          <button id="config-btn" class="btn btn--ghost btn--sm" type="button">Configure</button>
           <button id="convert-template-btn" class="btn btn--ghost btn--sm is-hidden" type="button" title="Convert this between a regular team and a signup template. The roster and all data are preserved; only how the Discord bot treats it changes.">Convert to template</button>
           <button id="collapse-all-btn" class="btn btn--ghost btn--sm" type="button">Collapse all</button>
           <button id="expand-all-btn" class="btn btn--ghost btn--sm" type="button">Expand all</button>
         </div>
       </div>
 
-      <div id="team-header-card" class="card mt-4 collapsible section-collapsible">
-        <div class="section-head collapsible-head">
+      <div id="team-header-card" class="card mt-4">
+        <div class="section-head">
           <div class="collapsible-head-main">
-            <button class="collapse-toggle" type="button" aria-expanded="true" aria-label="Collapse section"></button>
             <div>
               <input id="team-name-input" class="input team-name-input" maxlength="100" />
               <p class="text-muted" id="team-meta" style="margin: var(--space-2) 0 0;"></p>
@@ -125,110 +125,6 @@
           </div>
         </div>
 
-        <div class="collapsible-body">
-        <div id="schedule-section" class="schedule mt-6">
-          <h3 class="schedule-heading">Trial schedule</h3>
-          <div class="form-group">
-              <label>Days of the Week</label>
-            <div id="schedule-days" class="day-toggles"></div>
-          </div>
-          <div class="schedule-time-row">
-            <div class="form-group schedule-time-group">
-              <label for="schedule-hour">Time <span id="schedule-tz-note" class="text-muted"></span></label>
-              <!-- Custom time picker: separate hour and minute <select>s
-                   (populated by app.js). The minute select is restricted to
-                   quarter-hour values so the time can only ever land on a
-                   15-minute boundary. The empty hour option (—) means no time
-                   set; combined the pair reads as "HH:MM" (24h). -->
-              <div class="schedule-time-fields">
-                <select id="schedule-hour" class="input" aria-label="Hour"></select>
-                <select id="schedule-minute" class="input" aria-label="Minute"></select>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Roster roles: the customizable set of roles players can be assigned.
-             Populated by app.js from the team's roles (defaults to the standard
-             set). Shown in every mode, including simple-signup pre-made runs. -->
-        <div id="roles-section" class="roles-section mt-6">
-          <h3 class="schedule-heading">Roster Roles<span class="info-indicator" tabindex="0" role="img" aria-label="Roster roles: the roles players on this team can be assigned. Add or remove roles here; the roster role picker uses this list. Removing a role isn't allowed while a player is still assigned to it." data-tip="The roles players on this team can be assigned. Add or remove roles here; the roster role picker uses this list. You can't remove a role while a player is still using it.">i</span></h3>
-          <div id="roles-list" class="roles-list"></div>
-          <div class="roles-add-row">
-            <input id="role-add-input" class="input" maxlength="40" placeholder="Add a role (e.g. Off Tank)" aria-label="New role name" />
-            <select id="role-add-base" class="input" aria-label="Role color (Tank, Healer, DPS, or Support DPS)" title="Pick which color category this role uses, so the roster color coding still works."></select>
-            <button id="role-add-btn" class="btn btn--ghost btn--sm" type="button">+ Add Role</button>
-          </div>
-        </div>
-
-        <div class="team-features mt-6">
-          <h3 class="schedule-heading">Team Features</h3>
-          <label class="toggle" id="advanced-signup-label" title="Only applies to a pre-made trial run. Off (simple, the default): class, gear, and the details dropdown are hidden; players pick a role and are placed in the first open slot matching it. On (advanced): the post shows each slot's class and gear, players can request a slot's build details, and they claim an exact slot.">
-            <input type="checkbox" id="advanced-signup-toggle" /> Advanced signup (per slot)
-          </label>
-          <label class="toggle is-hidden" id="simple-signup-style-label" for="simple-signup-style-select" title="Only applies to a simple (role-based) pre-made run. Chooses how players sign up on the post: a single dropdown listing each role; one color-coded button per role (tank = blue, healer = green, dps/support dps = red) plus a separate Maybe button; or a single green Sign up button that opens the dropdown privately (just for the presser).">
-            Simple signup layout
-            <select id="simple-signup-style-select" class="input input--sm">
-              <option value="dropdown">Dropdown (single menu)</option>
-              <option value="buttons">Buttons (one per role)</option>
-              <option value="ephemeral">Button → private dropdown</option>
-            </select>
-          </label>
-          <label class="toggle" id="waitlist-label" title="Only applies to a pre-made trial run. When on, players can join a per-role waitlist once a role is full; when a slot of that role opens up, the next person on that role's waitlist is automatically moved in and notified by DM.">
-            <input type="checkbox" id="waitlist-toggle" /> Allow waitlist (per role)
-          </label>
-          <label class="toggle" id="auto-share-pool-label" title="When on, everyone in the member pool is automatically given viewer access to this team — current and future members — once their account is linked via Discord. Turning it off does not remove access already granted.">
-            <input type="checkbox" id="auto-share-pool-toggle" /> Auto-share with member pool (viewer)
-          </label>
-          <label class="toggle" id="encounters-enabled-label" title="When off, the encounters section is hidden and only the first encounter is shown.">
-            <input type="checkbox" id="encounters-enabled-toggle" /> Encounters Enabled
-          </label>
-        </div>
-        </div>
-      </div>
-
-      <!-- Pre-made run post body: shown only when the team is a pre-made trial
-           run. The bot prepends this text to the /coreteam signup announcement. -->
-      <div id="premade-post-card" class="card mt-4 collapsible section-collapsible is-hidden">
-        <div class="section-head collapsible-head">
-          <div class="collapsible-head-main">
-            <button class="collapse-toggle" type="button" aria-expanded="true" aria-label="Collapse section"></button>
-            <h2 style="margin: 0;">Pre-made Run Post<span class="info-indicator" tabindex="0" role="img" aria-label="Pre-made run post: free-form text the Discord bot prepends to a /coreteam signup run announcement. Saved with the team." data-tip="Free-form text the Discord bot prepends to a /coreteam signup run announcement (e.g. requirements, expectations). Saved with the team.">i</span></h2>
-          </div>
-        </div>
-        <div class="collapsible-body">
-          <div class="form-group mt-4">
-            <label for="premade-post-input">Announcement Body</label>
-            <textarea id="premade-post-input" class="input" rows="3" maxlength="2000" placeholder="Optional text the bot prepends to a pre-made run post (e.g. requirements, expectations, what to bring)."></textarea>
-          </div>
-        </div>
-      </div>
-
-      <!-- Discord bot footers: free-form text the Discord bot appends to its
-           output, kept in its own section so it can be collapsed independently. -->
-      <div id="discord-bot-texts-card" class="card mt-4 collapsible section-collapsible">
-        <div class="section-head collapsible-head">
-          <div class="collapsible-head-main">
-            <button class="collapse-toggle" type="button" aria-expanded="true" aria-label="Collapse section"></button>
-            <h2 style="margin: 0;">Discord Bot Texts<span class="info-indicator" tabindex="0" role="img" aria-label="Discord Bot Texts: free-form text the Discord bot appends to its output. The post footer is added to the /coreteam post overview; the DM footer is added to the Build Details direct message. Saved with the team." data-tip="Free-form text the Discord bot appends to its output. The post footer is added to the /coreteam post overview; the DM footer is added to the Build Details direct message. Saved with the team.">i</span></h2>
-          </div>
-        </div>
-        <div class="collapsible-body">
-        <div class="discord-footers">
-          <div id="post-footer-group" class="form-group mt-4">
-            <label for="post-footer-input">Post Footer<span class="info-indicator" tabindex="0" role="img" aria-label="Post footer: free-form text appended to the bottom of the bot's /coreteam post overview (e.g. raid lead, voice channel, reminders). Saved with the team." data-tip="Free-form text appended to the bottom of the bot's /coreteam post overview (e.g. raid lead, voice channel, reminders). Saved with the team.">i</span></label>
-            <textarea id="post-footer-input" class="input" rows="3" maxlength="2000" placeholder="Optional text appended to the bottom of the bot's /coreteam post (e.g. raid lead, voice channel, reminders)."></textarea>
-          </div>
-          <div id="dm-footer-group" class="form-group mt-4">
-            <label for="dm-footer-input">Build Details DM Footer<span class="info-indicator" tabindex="0" role="img" aria-label="Build details DM footer: free-form text appended to the bottom of the Build Details direct message the bot sends each player. Saved with the team." data-tip="Free-form text appended to the bottom of the Build Details direct message the bot sends each player. Saved with the team.">i</span></label>
-            <textarea id="dm-footer-input" class="input" rows="3" maxlength="2000" placeholder="Optional text appended to the bottom of the Build Details DM (e.g. reminders, links)."></textarea>
-          </div>
-          <div id="signup-post-group" class="form-group mt-4">
-            <label for="signup-post-input">Recruit Post<span class="info-indicator" tabindex="0" role="img" aria-label="Recruit post: free-form recruitment text the bot posts with /coreteam recruit. Interested users press a button and the bot DMs them to gather availability, roles, and classes. Saved with the team." data-tip="Free-form recruitment text the bot posts with /coreteam recruit. Interested users press a button and the bot DMs them to gather availability, roles, and classes. Saved with the team.">i</span></label>
-            <textarea id="signup-post-input" class="input" rows="3" maxlength="2000" placeholder="Optional recruitment text the bot posts with /coreteam recruit (e.g. what you're looking for, expectations)."></textarea>
-          </div>
-        </div>
-        </div>
       </div>
 
       <!-- Rosters: switch between / manage a team's lineups. Each roster owns its
@@ -561,6 +457,127 @@
       </div>
     </div>
 
+    <!-- Team configuration view: opened by the Configure button on the team
+         page. Holds the settings that used to sit at the top of that page. -->
+    <section id="config-view" class="is-hidden">
+      <div class="detail-toolbar mt-4">
+        <button id="config-back-btn" class="btn btn--ghost" type="button">← Back to team</button>
+        <div class="form-actions detail-toolbar-actions">
+          <span id="config-save-status" class="save-status" aria-live="polite"></span>
+        </div>
+      </div>
+      <h1 id="config-team-name" class="mt-4" style="margin-bottom: 0;">…</h1>
+
+      <div id="config-features-card" class="card mt-4">
+        <div class="team-features">
+          <h2 style="margin: 0 0 var(--space-3);">Features</h2>
+          <label class="toggle feature-row" id="advanced-signup-label" title="Only applies to a pre-made trial run. Off (simple, the default): class, gear, and the details dropdown are hidden; players pick a role and are placed in the first open slot matching it. On (advanced): the post shows each slot's class and gear, players can request a slot's build details, and they claim an exact slot.">
+            <span class="feature-title"><input type="checkbox" id="advanced-signup-toggle" /> Advanced signup (per slot)</span>
+            <span class="feature-desc">Pre-made runs only. On: the post shows each slot's class and gear, and players claim an exact slot. Off: players just pick a role.</span>
+          </label>
+          <label class="toggle feature-row is-hidden" id="simple-signup-style-label" for="simple-signup-style-select" title="Only applies to a simple (role-based) pre-made run. Chooses how players sign up on the post: a single dropdown listing each role; one color-coded button per role (tank = blue, healer = green, dps/support dps = red) plus a separate Maybe button; or a single green Sign up button that opens the dropdown privately (just for the presser).">
+            <span class="feature-title">Simple signup layout</span>
+            <span class="feature-desc">Simple pre-made runs only. Sets how players sign up on the post: one dropdown, one button per role, or a button that opens a private dropdown.</span>
+            <select id="simple-signup-style-select" class="input input--sm">
+              <option value="dropdown">Dropdown (single menu)</option>
+              <option value="buttons">Buttons (one per role)</option>
+              <option value="ephemeral">Button → private dropdown</option>
+            </select>
+          </label>
+          <label class="toggle feature-row" id="waitlist-label" title="Only applies to a pre-made trial run. When on, players can join a per-role waitlist once a role is full; when a slot of that role opens up, the next person on that role's waitlist is automatically moved in and notified by DM.">
+            <span class="feature-title"><input type="checkbox" id="waitlist-toggle" /> Allow waitlist (per role)</span>
+            <span class="feature-desc">Pre-made runs only. Players can join a waitlist when a role is full, and are moved in and messaged when a slot opens.</span>
+          </label>
+          <label class="toggle feature-row" id="auto-share-pool-label" title="When on, everyone in the member pool is automatically given viewer access to this team — current and future members — once their account is linked via Discord. Turning it off does not remove access already granted.">
+            <span class="feature-title"><input type="checkbox" id="auto-share-pool-toggle" /> Auto-share with member pool (viewer)</span>
+            <span class="feature-desc">Gives everyone in the member pool view access to this team once their Discord is linked. Turning it off does not remove access already given.</span>
+          </label>
+          <label class="toggle feature-row" id="encounters-enabled-label" title="When off, the encounters section is hidden and only the first encounter is shown.">
+            <span class="feature-title"><input type="checkbox" id="encounters-enabled-toggle" /> Encounters Enabled</span>
+            <span class="feature-desc">Shows the encounters section. Off: it is hidden and only the first encounter is used.</span>
+          </label>
+        </div>
+      </div>
+
+      <div id="config-scheduling-card" class="card mt-4">
+        <div id="schedule-section" class="schedule">
+          <h2 style="margin: 0 0 var(--space-3);">Scheduling</h2>
+          <div class="form-group">
+              <label>Days of the Week</label>
+            <div id="schedule-days" class="day-toggles"></div>
+          </div>
+          <div class="schedule-time-row">
+            <div class="form-group schedule-time-group">
+              <label for="schedule-hour">Time <span id="schedule-tz-note" class="text-muted"></span></label>
+              <!-- Custom time picker: separate hour and minute <select>s
+                   (populated by app.js). The minute select is restricted to
+                   quarter-hour values so the time can only ever land on a
+                   15-minute boundary. The empty hour option (—) means no time
+                   set; combined the pair reads as "HH:MM" (24h). -->
+              <div class="schedule-time-fields">
+                <select id="schedule-hour" class="input" aria-label="Hour"></select>
+                <select id="schedule-minute" class="input" aria-label="Minute"></select>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="config-roles-card" class="card mt-4">
+        <div id="roles-section" class="roles-section">
+          <h2 style="margin: 0 0 var(--space-3);">Roles<span class="info-indicator" tabindex="0" role="img" aria-label="Roster roles: the roles players on this team can be assigned. Add or remove roles here; the roster role picker uses this list. Removing a role isn't allowed while a player is still assigned to it." data-tip="The roles players on this team can be assigned. Add or remove roles here; the roster role picker uses this list. You can't remove a role while a player is still using it.">i</span></h2>
+          <div id="roles-list" class="roles-list"></div>
+          <div class="roles-add-row">
+            <input id="role-add-input" class="input" maxlength="40" placeholder="Add a role (e.g. Off Tank)" aria-label="New role name" />
+            <select id="role-add-base" class="input" aria-label="Role color (Tank, Healer, DPS, or Support DPS)" title="Pick which color category this role uses, so the roster color coding still works."></select>
+            <button id="role-add-btn" class="btn btn--ghost btn--sm" type="button">+ Add Role</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Pre-made run post body: shown only when the team is a pre-made trial
+           run. The bot prepends this text to the /coreteam signup announcement. -->
+      <div id="premade-post-card" class="card mt-4 is-hidden">
+        <div class="section-head collapsible-head">
+          <div class="collapsible-head-main">
+            <h2 style="margin: 0;">Pre-made Run Post<span class="info-indicator" tabindex="0" role="img" aria-label="Pre-made run post: free-form text the Discord bot prepends to a /coreteam signup run announcement. Saved with the team." data-tip="Free-form text the Discord bot prepends to a /coreteam signup run announcement (e.g. requirements, expectations). Saved with the team.">i</span></h2>
+          </div>
+        </div>
+        <div>
+          <div class="form-group mt-4">
+            <label for="premade-post-input">Announcement Body</label>
+            <textarea id="premade-post-input" class="input" rows="3" maxlength="2000" placeholder="Optional text the bot prepends to a pre-made run post (e.g. requirements, expectations, what to bring)."></textarea>
+          </div>
+        </div>
+      </div>
+
+      <!-- Discord bot footers: free-form text the Discord bot appends to its
+           output, kept in its own section so it can be collapsed independently. -->
+      <div id="discord-bot-texts-card" class="card mt-4">
+        <div class="section-head collapsible-head">
+          <div class="collapsible-head-main">
+            <h2 style="margin: 0;">Discord Bot Texts<span class="info-indicator" tabindex="0" role="img" aria-label="Discord Bot Texts: free-form text the Discord bot appends to its output. The post footer is added to the /coreteam post overview; the DM footer is added to the Build Details direct message. Saved with the team." data-tip="Free-form text the Discord bot appends to its output. The post footer is added to the /coreteam post overview; the DM footer is added to the Build Details direct message. Saved with the team.">i</span></h2>
+          </div>
+        </div>
+        <div>
+        <div class="discord-footers">
+          <div id="post-footer-group" class="form-group mt-4">
+            <label for="post-footer-input">Post Footer<span class="info-indicator" tabindex="0" role="img" aria-label="Post footer: free-form text appended to the bottom of the bot's /coreteam post overview (e.g. raid lead, voice channel, reminders). Saved with the team." data-tip="Free-form text appended to the bottom of the bot's /coreteam post overview (e.g. raid lead, voice channel, reminders). Saved with the team.">i</span></label>
+            <textarea id="post-footer-input" class="input" rows="3" maxlength="2000" placeholder="Optional text appended to the bottom of the bot's /coreteam post (e.g. raid lead, voice channel, reminders)."></textarea>
+          </div>
+          <div id="dm-footer-group" class="form-group mt-4">
+            <label for="dm-footer-input">Build Details DM Footer<span class="info-indicator" tabindex="0" role="img" aria-label="Build details DM footer: free-form text appended to the bottom of the Build Details direct message the bot sends each player. Saved with the team." data-tip="Free-form text appended to the bottom of the Build Details direct message the bot sends each player. Saved with the team.">i</span></label>
+            <textarea id="dm-footer-input" class="input" rows="3" maxlength="2000" placeholder="Optional text appended to the bottom of the Build Details DM (e.g. reminders, links)."></textarea>
+          </div>
+          <div id="signup-post-group" class="form-group mt-4">
+            <label for="signup-post-input">Recruit Post<span class="info-indicator" tabindex="0" role="img" aria-label="Recruit post: free-form recruitment text the bot posts with /coreteam recruit. Interested users press a button and the bot DMs them to gather availability, roles, and classes. Saved with the team." data-tip="Free-form recruitment text the bot posts with /coreteam recruit. Interested users press a button and the bot DMs them to gather availability, roles, and classes. Saved with the team.">i</span></label>
+            <textarea id="signup-post-input" class="input" rows="3" maxlength="2000" placeholder="Optional recruitment text the bot posts with /coreteam recruit (e.g. what you're looking for, expectations)."></textarea>
+          </div>
+        </div>
+        </div>
+      </div>
+    </section>
+
     <!-- Member pool view (the /coreteam recruit recruitment pool) -->
     <section id="members-view" class="is-hidden">
       <div class="detail-toolbar mt-4">
@@ -674,6 +691,6 @@
   <script src="js/gear-skills.js?v=103"></script>
   <script src="js/data.js?v=110"></script>
   <script src="js/components.js?v=102"></script>
-  <script src="js/app.js?v=131"></script>
+  <script src="js/app.js?v=132"></script>
 </body>
 </html>

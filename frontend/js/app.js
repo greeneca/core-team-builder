@@ -28,6 +28,7 @@
   const detailView = el("team-detail-view");
   const shareView = el("share-view");
   const membersView = el("members-view");
+  const configView = el("config-view");
 
   let currentUser = null;
   let currentTeam = null;
@@ -109,6 +110,7 @@
     detailView.classList.toggle("is-hidden", view !== "detail");
     shareView.classList.toggle("is-hidden", view !== "share");
     membersView.classList.toggle("is-hidden", view !== "members");
+    configView.classList.toggle("is-hidden", view !== "config");
     window.scrollTo(0, 0);
   }
 
@@ -1150,6 +1152,7 @@
     el("team-meta").textContent = `${roleLabel} · created ${created.toLocaleDateString()}`;
 
     el("team-save-status").classList.toggle("is-hidden", !editable);
+    el("config-save-status").classList.toggle("is-hidden", !editable);
     setSaveStatus("team", "");
 
     const postFooterInput = el("post-footer-input");
@@ -1399,6 +1402,22 @@
   el("members-btn").addEventListener("click", () => {
     if (currentTeam) openMembers(currentTeam.id);
   });
+  // Configure page: the team's features, schedule, roles, and bot texts. The
+  // inputs are the same elements the autosave already watches, so editing them
+  // here saves exactly as it did on the team page.
+  el("config-btn").addEventListener("click", () => {
+    if (!currentTeam) return;
+    el("config-team-name").textContent = currentTeam.name;
+    showView("config");
+  });
+  el("config-back-btn").addEventListener("click", () => {
+    if (currentTeam) {
+      showView("detail");
+    } else {
+      showView("teams");
+      loadTeams();
+    }
+  });
   el("members-back-btn").addEventListener("click", () => {
     if (currentTeam) {
       showView("detail");
@@ -1438,7 +1457,14 @@
   }
 
   function setSaveStatus(scope, state) {
-    const node = el(scope === "encounter" ? "encounter-save-status" : "team-save-status");
+    if (scope !== "encounter") {
+      // Mirror the team status onto the Configure page so edits there show it.
+      setStatusNode(el("config-save-status"), state);
+    }
+    setStatusNode(el(scope === "encounter" ? "encounter-save-status" : "team-save-status"), state);
+  }
+
+  function setStatusNode(node, state) {
     if (!node) return;
     node.classList.remove("is-saving", "is-saved", "is-error");
     if (state === "saving") {
@@ -1825,7 +1851,7 @@
       clearTimeout(autosaveTimer);
       autosaveTimer = null;
       pendingScopes.clear();
-      if (!detailView.classList.contains("is-hidden")) {
+      if (!detailView.classList.contains("is-hidden") || !configView.classList.contains("is-hidden")) {
         Promise.resolve(saveAll()).then(() => {
           if (currentEncounter) return saveLoadouts();
         });
