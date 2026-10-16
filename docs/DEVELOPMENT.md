@@ -508,6 +508,8 @@ team.
 | `POST /api/teams/{id}/roster-members`                      | editor+ | Add a member manually → `201`.             |
 | `PUT /api/teams/{id}/roster-members/{memberID}`            | editor+ | Edit a member's availability/roles/classes (leaves intake status/step/source untouched). |
 | `DELETE /api/teams/{id}/roster-members/{memberID}`         | editor+ | Remove a member → `204`.                   |
+| `GET /api/teams/{id}/auto-post`                            | viewer+ | Auto post / auto delete settings plus the team's bound channels (`channels: [{channel_id, name}]`). |
+| `PUT /api/teams/{id}/auto-post`                            | editor+ | Save the settings. `auto_post_channel_id` must be a channel bound to this team (else `400`); both durations are minutes, 60–43200. |
 
 Days/roles/classes are normalized/validated against the same allow-lists as the
 roster; availability start hours clamp to 0–23 and end hours to 1–24 (24 = end

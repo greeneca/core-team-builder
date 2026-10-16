@@ -295,6 +295,8 @@ func TestTeamEndpointsRejectAnonymousCallers(t *testing.T) {
 		{http.MethodGet, path + "/groupings"},
 		{http.MethodGet, path + "/images"},
 		{http.MethodGet, path + "/roster-members"},
+		{http.MethodGet, path + "/auto-post"},
+		{http.MethodPut, path + "/auto-post"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.method+" "+tc.path, func(t *testing.T) {

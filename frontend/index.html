@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Dashboard — Core Team Builder</title>
   <link rel="icon" type="image/png" href="favicon.png" />
-  <link rel="stylesheet" href="css/styles.css?v=121" />
+  <link rel="stylesheet" href="css/styles.css?v=122" />
 </head>
 <body>
   <div id="message" class="toast is-hidden" role="alert" aria-live="assertive"></div>
@@ -496,6 +496,40 @@
             <span class="feature-title"><input type="checkbox" id="encounters-enabled-toggle" /> Encounters Enabled</span>
             <span class="feature-desc">Shows the encounters section. Off: it is hidden and only the first encounter is used.</span>
           </label>
+          <!-- Auto post / auto delete are saved through their own endpoint
+               (GET/PUT /api/teams/{id}/auto-post), not the team autosave. -->
+          <div id="auto-post-settings">
+            <div class="feature-row" id="auto-post-row">
+              <label class="feature-title" for="auto-post-toggle">
+                <input type="checkbox" id="auto-post-toggle" /> Auto post
+              </label>
+              <span class="feature-desc">The bot posts the run overview in the chosen channel this long before the next run. Needs a schedule and a channel set up with /coreteam setup.</span>
+              <div class="feature-options">
+                <select id="auto-post-channel" class="input input--sm" aria-label="Channel to post in"></select>
+                <input id="auto-post-lead" class="input input--sm feature-number" type="number" min="1" step="1" aria-label="Time before the run" />
+                <select id="auto-post-lead-unit" class="input input--sm" aria-label="Unit for time before the run">
+                  <option value="hours">hours</option>
+                  <option value="days">days</option>
+                </select>
+                <span class="feature-desc">before the run</span>
+              </div>
+              <span id="auto-post-note" class="feature-desc is-hidden"></span>
+            </div>
+            <div class="feature-row" id="auto-delete-row">
+              <label class="feature-title" for="auto-delete-toggle">
+                <input type="checkbox" id="auto-delete-toggle" /> Auto delete post
+              </label>
+              <span class="feature-desc">The bot deletes the run post, and its discussion thread, this long after the run. Needs Manage Messages and Manage Threads in the channel.</span>
+              <div class="feature-options">
+                <input id="auto-delete-delay" class="input input--sm feature-number" type="number" min="1" step="1" aria-label="Time after the run" />
+                <select id="auto-delete-delay-unit" class="input input--sm" aria-label="Unit for time after the run">
+                  <option value="hours">hours</option>
+                  <option value="days">days</option>
+                </select>
+                <span class="feature-desc">after the run</span>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -687,10 +721,10 @@
     </div>
   </footer>
 
-  <script src="js/api.js?v=113"></script>
+  <script src="js/api.js?v=114"></script>
   <script src="js/gear-skills.js?v=103"></script>
   <script src="js/data.js?v=110"></script>
   <script src="js/components.js?v=102"></script>
-  <script src="js/app.js?v=132"></script>
+  <script src="js/app.js?v=133"></script>
 </body>
 </html>

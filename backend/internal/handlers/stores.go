@@ -104,6 +104,14 @@ type rosterImageStore interface {
 	Delete(ctx context.Context, imageID int64) error
 }
 
+// autoPostStore backs the team's auto post / auto delete settings and the list
+// of channels bound to the team.
+type autoPostStore interface {
+	Get(ctx context.Context, teamID int64) (models.AutoPostSettings, error)
+	Save(ctx context.Context, teamID int64, a models.AutoPostSettings) error
+	ListChannels(ctx context.Context, teamID int64) ([]models.BoundChannel, error)
+}
+
 // settingsStore is the global key/value config the API reads; only the
 // registration toggle is surfaced today.
 type settingsStore interface {
@@ -153,4 +161,5 @@ var (
 	_ refreshTokenStore  = (*models.RefreshTokenStore)(nil)
 	_ passwordResetStore = (*models.PasswordResetStore)(nil)
 	_ discordStore       = (*models.DiscordStore)(nil)
+	_ autoPostStore      = (*models.AutoPostStore)(nil)
 )

@@ -99,6 +99,17 @@ type discordStore interface {
 	MarkPostReminded(ctx context.Context, messageID string) error
 }
 
+// autoPostStore backs the scheduler's auto post and auto delete passes and the
+// channel names the web app shows for bound channels.
+type autoPostStore interface {
+	ListAutoPostEnabled(ctx context.Context) ([]models.AutoPostDue, error)
+	MarkAutoPosted(ctx context.Context, teamID int64, runAt time.Time) error
+	DueAutoDeletes(ctx context.Context, now time.Time) ([]models.Post, error)
+	MarkPostAutoDeleted(ctx context.Context, messageID string) error
+	SetChannelName(ctx context.Context, channelID, name string) error
+	UnnamedChannels(ctx context.Context) ([]string, error)
+}
+
 // premadeStore backs /coreteam signup: the run itself, its slot claims,
 // waitlist and tentative lists, the scheduler's thread/cleanup passes, and the
 // short-lived DM session that walks a user through creating a run.

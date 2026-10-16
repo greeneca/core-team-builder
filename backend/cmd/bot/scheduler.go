@@ -58,6 +58,7 @@ func cleanupBackoff(attempt int) time.Duration {
 func (b *bot) runScheduler(ctx context.Context, session *discordgo.Session) {
 	// Run an immediate pass on startup so anything that came due while the bot
 	// was offline is handled right away, then on each tick.
+	b.backfillChannelNames(ctx, session)
 	b.schedulerTick(ctx, session)
 	ticker := time.NewTicker(schedulerInterval)
 	defer ticker.Stop()
@@ -116,6 +117,10 @@ func (b *bot) schedulerTick(ctx context.Context, session *discordgo.Session) {
 	for _, p := range posts {
 		b.pingPostAttendees(ctx, session, p)
 	}
+
+	// Auto post and auto delete for recurring /coreteam post overviews.
+	b.autoPostTick(ctx, session, now)
+	b.autoDeleteTick(ctx, session, now)
 
 	// RSVP reminders for recurring /coreteam post overviews (48 h before start):
 	// nudge assigned roster members who still haven't responded.

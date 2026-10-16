@@ -19,13 +19,17 @@ import (
 // the narrow interfaces declared in stores.go rather than the concrete
 // *models.*Store types, so a test can supply a fake without a database.
 type bot struct {
-	teams        teamStore
-	encounters   encounterStore
-	groupings    groupingStore
-	members      memberStore
-	discord      discordStore
-	premade      premadeStore
-	rosterImages rosterImageStore
+	teams      teamStore
+	encounters encounterStore
+	groupings  groupingStore
+	members    memberStore
+	discord    discordStore
+	premade    premadeStore
+	autoPost   autoPostStore
+	// autoPostRetryAt holds, per team, when a failed auto post may be retried.
+	// Only the scheduler goroutine touches it.
+	autoPostRetryAt map[int64]time.Time
+	rosterImages    rosterImageStore
 	// appBaseURL is the public base URL of the web app (APP_BASE_URL), used to
 	// build sign-in links the bot sends to users. Empty when unconfigured.
 	appBaseURL string
@@ -663,6 +667,7 @@ func (b *bot) handleSetupSelect(s *discordgo.Session, i *discordgo.InteractionCr
 		ephemeral(s, i, "Something went wrong binding the channel. Please try again.")
 		return
 	}
+	b.recordChannelName(ctx, s, i.ChannelID)
 	team, _ := b.teams.Get(ctx, teamID)
 	name := "the team"
 	if team != nil {
@@ -715,6 +720,7 @@ func (b *bot) handleSetupCreate(s *discordgo.Session, i *discordgo.InteractionCr
 		ephemeral(s, i, "Created the team but could not bind the channel. Try /coreteam setup again.")
 		return
 	}
+	b.recordChannelName(ctx, s, i.ChannelID)
 	ephemeral(s, i, "Created **"+team.Name+"** and bound it to this channel. Fill it out in the web app, then run /coreteam post.")
 }
 
@@ -808,7 +814,13 @@ func (b *bot) startPostThread(ctx context.Context, s *discordgo.Session, i *disc
 		log.Printf("post: fetch response for thread: %v", err)
 		return
 	}
+	b.trackPostThread(ctx, s, i.ChannelID, msg.ID, team, runAtUnix)
+}
 
+// trackPostThread records a posted overview, opens its discussion thread, and
+// seeds the thread. It is shared by /coreteam post (via startPostThread) and the
+// scheduler's auto post, which has no interaction to fetch the message from.
+func (b *bot) trackPostThread(ctx context.Context, s *discordgo.Session, channelID, messageID string, team *models.Team, runAtUnix int64) {
 	// Record the post with the run date locked at post time (nil when there's no
 	// concrete schedule) so the scheduler can ping attendees before the run and
 	// re-renders can reuse the same fixed date. This is the value handlePost
@@ -819,7 +831,7 @@ func (b *bot) startPostThread(ctx context.Context, s *discordgo.Session, i *disc
 		runAt = &t
 	}
 	c, cancel := context.WithTimeout(ctx, 10*time.Second)
-	if err := b.discord.RecordPost(c, msg.ID, i.ChannelID, runAt); err != nil {
+	if err := b.discord.RecordPost(c, messageID, channelID, runAt); err != nil {
 		log.Printf("post: record post: %v", err)
 	}
 	cancel()
@@ -828,7 +840,7 @@ func (b *bot) startPostThread(ctx context.Context, s *discordgo.Session, i *disc
 	if name == "" {
 		name = "Trial run"
 	}
-	thread, err := s.MessageThreadStartComplex(i.ChannelID, msg.ID, &discordgo.ThreadStart{
+	thread, err := s.MessageThreadStartComplex(channelID, messageID, &discordgo.ThreadStart{
 		Name: truncate(name, 100),
 	})
 	if err != nil {
@@ -836,7 +848,7 @@ func (b *bot) startPostThread(ctx context.Context, s *discordgo.Session, i *disc
 		return
 	}
 	c, cancel = context.WithTimeout(ctx, 10*time.Second)
-	if err := b.discord.SetPostThread(c, msg.ID, thread.ID); err != nil {
+	if err := b.discord.SetPostThread(c, messageID, thread.ID); err != nil {
 		log.Printf("post: set thread id: %v", err)
 	}
 	cancel()

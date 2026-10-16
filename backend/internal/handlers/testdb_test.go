@@ -185,6 +185,7 @@ func newTestAPI(t *testing.T) *testAPI {
 		RefreshTokens:    models.NewRefreshTokenStore(pool),
 		PasswordResets:   models.NewPasswordResetStore(pool),
 		Discord:          models.NewDiscordStore(pool),
+		AutoPost:         models.NewAutoPostStore(pool),
 		Tokens:           auth.NewTokenManager([]byte("integration-test-secret"), 15*time.Minute, 24*time.Hour),
 		Mailer:           mailer,
 		Realtime:         realtime.NewHub(),

@@ -105,6 +105,12 @@
     showMessage(err.message || "Something went wrong");
   }
 
+  // The team page and its Configure page are two views of one open team: saves,
+  // live updates, and the event stream stay active while either is showing.
+  function teamPageHidden() {
+    return detailView.classList.contains("is-hidden") && configView.classList.contains("is-hidden");
+  }
+
   function showView(view) {
     teamsView.classList.toggle("is-hidden", view !== "teams");
     detailView.classList.toggle("is-hidden", view !== "detail");
@@ -331,6 +337,7 @@
       } catch {
         currentRosterMembers = [];
       }
+      await loadAutoPost(id);
       // Opening a fresh team: nothing is dirty yet.
       dirtyMeta = false;
       dirtyPlayerSlots.clear();
@@ -410,7 +417,7 @@
     clearTimeout(eventReconnectTimer);
     eventReconnectTimer = setTimeout(async () => {
       if (!currentTeam || currentTeam.id !== teamId) return;
-      if (detailView.classList.contains("is-hidden")) return;
+      if (teamPageHidden()) return;
       // The token may have expired; refresh before reconnecting.
       await api.tryRefresh();
       if (!currentTeam || currentTeam.id !== teamId) return;
@@ -467,7 +474,7 @@
     const a = document.activeElement;
     if (
       a &&
-      detailView.contains(a) &&
+      (detailView.contains(a) || configView.contains(a)) &&
       a.matches("input, select, textarea, [contenteditable]") &&
       Date.now() - lastDetailInputAt < ACTIVE_EDIT_GRACE_MS
     ) {
@@ -480,13 +487,15 @@
   // detail view. Capture phase so it runs regardless of stopPropagation;
   // programmatic value changes during a live re-render don't fire these events,
   // so they never falsely mark the user as busy.
-  ["input", "change"].forEach((evt) =>
-    detailView.addEventListener(
-      evt,
-      () => {
-        lastDetailInputAt = Date.now();
-      },
-      true
+  [detailView, configView].forEach((view) =>
+    ["input", "change"].forEach((evt) =>
+      view.addEventListener(
+        evt,
+        () => {
+          lastDetailInputAt = Date.now();
+        },
+        true
+      )
     )
   );
 
@@ -497,7 +506,7 @@
   }
 
   function runLiveReloadIfIdle() {
-    if (!currentTeam || detailView.classList.contains("is-hidden")) {
+    if (!currentTeam || teamPageHidden()) {
       liveReloadQueued = false;
       return;
     }
@@ -515,7 +524,7 @@
   // preserving the selected encounter and scroll position. force=true re-renders
   // even if the user just resumed editing (used after a 409 conflict).
   async function liveReloadNow(force) {
-    if (!currentTeam || detailView.classList.contains("is-hidden")) return;
+    if (!currentTeam || teamPageHidden()) return;
     const teamId = currentTeam.id;
     const encId = currentEncounter && currentEncounter.id;
     const scrollY = window.scrollY;
@@ -1572,7 +1581,7 @@
 
   async function saveAll() {
     // Only saveable from the team detail view as an editor/owner.
-    if (!currentTeam || detailView.classList.contains("is-hidden") || !canEdit()) {
+    if (!currentTeam || teamPageHidden() || !canEdit()) {
       return;
     }
     const name = el("team-name-input").value.trim();
@@ -1648,7 +1657,7 @@
   // selects/checkboxes fire immediately. The add-encounter form, the encounter
   // controls (rename), and the per-player loadouts handle their own saves and
   // are excluded so they don't trigger a redundant team save.
-  detailView.addEventListener("change", (e) => {
+  function onTeamFieldChange(e) {
     if (!currentTeam || !canEdit()) return;
     // The encounters panel (add-encounter form, chip rename picker) handles its
     // own saves, so its select changes must not trigger a team-meta autosave.
@@ -1660,6 +1669,8 @@
     if (e.target.closest("[data-copy]")) return;
     // The add-role input commits via its own button/Enter handler (addRole).
     if (e.target.id === "role-add-input") return;
+    // Auto post / auto delete save through their own endpoint (saveAutoPost).
+    if (e.target.closest("#auto-post-settings")) return;
     // Groupings manage their own per-grouping state + autosave.
     if (e.target.closest("#groupings-card")) return;
     if (e.target.matches("input, select, textarea")) {
@@ -1683,7 +1694,11 @@
         renderRolesEditor();
       }
     }
-  });
+  }
+  detailView.addEventListener("change", onTeamFieldChange);
+  // The Configure page holds the team-level fields (schedule, features, roles,
+  // bot texts), which save through the same autosave.
+  configView.addEventListener("change", onTeamFieldChange);
 
   // Quick, fixed-duration smooth scroll. The native `behavior: "smooth"` is
   // distance-based and feels sluggish for long jumps (e.g. slot 1 → slot 12), so
@@ -1851,7 +1866,7 @@
       clearTimeout(autosaveTimer);
       autosaveTimer = null;
       pendingScopes.clear();
-      if (!detailView.classList.contains("is-hidden") || !configView.classList.contains("is-hidden")) {
+      if (!teamPageHidden()) {
         Promise.resolve(saveAll()).then(() => {
           if (currentEncounter) return saveLoadouts();
         });
@@ -3493,6 +3508,130 @@
     }
   }
 
+  // --- Auto post / auto delete (Configure page) ---
+  // These two features live in their own table and endpoint, so they save on
+  // their own rather than through the team autosave. Durations travel as minutes;
+  // the UI shows them as a number of hours or days.
+  let autoPostSettings = null;
+  let autoPostChannels = [];
+
+  // Split minutes into a display number + unit (days when it divides evenly).
+  function minutesToDuration(minutes) {
+    if (minutes >= 1440 && minutes % 1440 === 0) return { n: minutes / 1440, unit: "days" };
+    return { n: Math.max(1, Math.round(minutes / 60)), unit: "hours" };
+  }
+
+  // Convert a number + unit back to minutes; 0 when the number isn't a whole
+  // number of at least 1 (the server enforces the 30-day upper bound too).
+  function durationToMinutes(n, unit) {
+    const value = Number(n);
+    if (!Number.isInteger(value) || value < 1) return 0;
+    return value * (unit === "days" ? 1440 : 60);
+  }
+
+  async function loadAutoPost(teamId) {
+    // Best-effort: a failure leaves the rows showing their defaults rather than
+    // blocking the team page.
+    try {
+      const res = await api.getAutoPost(teamId);
+      autoPostChannels = res.channels || [];
+      autoPostSettings = {
+        auto_post_enabled: !!res.auto_post_enabled,
+        auto_post_channel_id: res.auto_post_channel_id || "",
+        auto_post_lead_minutes: res.auto_post_lead_minutes,
+        auto_delete_enabled: !!res.auto_delete_enabled,
+        auto_delete_delay_minutes: res.auto_delete_delay_minutes,
+      };
+    } catch {
+      autoPostSettings = null;
+      autoPostChannels = [];
+    }
+    renderAutoPost();
+  }
+
+  function renderAutoPost() {
+    const s = autoPostSettings;
+    const editable = canEdit() && !!s;
+    const hasChannels = autoPostChannels.length > 0;
+
+    const channelSel = el("auto-post-channel");
+    channelSel.replaceChildren();
+    autoPostChannels.forEach((c) => {
+      const opt = document.createElement("option");
+      opt.value = c.channel_id;
+      opt.textContent = c.name ? `#${c.name}` : `Channel ${c.channel_id}`;
+      channelSel.appendChild(opt);
+    });
+    // With no saved channel the first option is shown; a saved channel that is no
+    // longer bound isn't in the list, so show no choice and let the save say so.
+    if (s && s.auto_post_channel_id) {
+      const known = autoPostChannels.some((c) => c.channel_id === s.auto_post_channel_id);
+      channelSel.selectedIndex = known ? autoPostChannels.findIndex((c) => c.channel_id === s.auto_post_channel_id) : -1;
+    }
+
+    const note = el("auto-post-note");
+    note.textContent = hasChannels
+      ? ""
+      : "No channels are bound to this team yet. Run /coreteam setup in the Discord channel to use auto post.";
+    note.classList.toggle("is-hidden", hasChannels);
+
+    const lead = minutesToDuration(s ? s.auto_post_lead_minutes : 1440);
+    el("auto-post-lead").value = lead.n;
+    el("auto-post-lead-unit").value = lead.unit;
+    const delay = minutesToDuration(s ? s.auto_delete_delay_minutes : 120);
+    el("auto-delete-delay").value = delay.n;
+    el("auto-delete-delay-unit").value = delay.unit;
+
+    el("auto-post-toggle").checked = !!(s && s.auto_post_enabled);
+    el("auto-delete-toggle").checked = !!(s && s.auto_delete_enabled);
+
+    el("auto-post-toggle").disabled = !editable || !hasChannels;
+    ["auto-post-channel", "auto-post-lead", "auto-post-lead-unit"].forEach((id) => {
+      el(id).disabled = !editable || !hasChannels;
+    });
+    el("auto-delete-toggle").disabled = !editable;
+    ["auto-delete-delay", "auto-delete-delay-unit"].forEach((id) => {
+      el(id).disabled = !editable;
+    });
+  }
+
+  // Read the controls, save, and re-render from the server's answer. On a
+  // validation or save failure the controls snap back to the last saved values.
+  async function saveAutoPost() {
+    if (!currentTeam || !canEdit() || !autoPostSettings) return;
+    const body = {
+      auto_post_enabled: el("auto-post-toggle").checked,
+      auto_post_channel_id: el("auto-post-channel").value || "",
+      auto_post_lead_minutes: durationToMinutes(el("auto-post-lead").value, el("auto-post-lead-unit").value),
+      auto_delete_enabled: el("auto-delete-toggle").checked,
+      auto_delete_delay_minutes: durationToMinutes(el("auto-delete-delay").value, el("auto-delete-delay-unit").value),
+    };
+    if (!body.auto_post_lead_minutes || !body.auto_delete_delay_minutes) {
+      showMessage("Enter a whole number of hours or days (1 hour to 30 days)");
+      renderAutoPost();
+      return;
+    }
+    setSaveStatus("team", "saving");
+    try {
+      const res = await api.saveAutoPost(currentTeam.id, body);
+      autoPostChannels = res.channels || [];
+      autoPostSettings = {
+        auto_post_enabled: !!res.auto_post_enabled,
+        auto_post_channel_id: res.auto_post_channel_id || "",
+        auto_post_lead_minutes: res.auto_post_lead_minutes,
+        auto_delete_enabled: !!res.auto_delete_enabled,
+        auto_delete_delay_minutes: res.auto_delete_delay_minutes,
+      };
+      setSaveStatus("team", "saved");
+    } catch (err) {
+      setSaveStatus("team", "error");
+      handleError(err);
+    }
+    renderAutoPost();
+  }
+
+  el("auto-post-settings").addEventListener("change", saveAutoPost);
+
   // Whether the open team is a pre-made trial run. Disabled by default.
   function preMade() {
     return !!currentTeam && currentTeam.pre_made === true;
@@ -3510,6 +3649,11 @@
     const on = preMade();
     const scheduleSection = el("schedule-section");
     if (scheduleSection) scheduleSection.classList.toggle("is-hidden", on);
+    // Auto post / auto delete are for recurring /coreteam post overviews, which
+    // templates don't use (their runs are posted and cleaned up by the bot's
+    // signup flow), so hide both rows in template mode.
+    const autoPostSettingsEl = el("auto-post-settings");
+    if (autoPostSettingsEl) autoPostSettingsEl.classList.toggle("is-hidden", on);
     // The Discord Bot Texts card stays visible for templates: the Build Details
     // DM footer still applies (players can request build details on a pre-made
     // run). Only the Post Footer (/coreteam post overview) and Recruit Post

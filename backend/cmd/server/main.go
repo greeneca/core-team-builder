@@ -91,6 +91,7 @@ func run() error {
 		RefreshTokens:    refreshTokens,
 		PasswordResets:   passwordResets,
 		Discord:          discord,
+		AutoPost:         models.NewAutoPostStore(pool),
 		Tokens:           tokens,
 		Mailer:           mailer,
 		Realtime:         hub,

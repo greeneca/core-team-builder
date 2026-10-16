@@ -54,6 +54,7 @@ func run() error {
 		members:           models.NewMemberStore(pool),
 		discord:           models.NewDiscordStore(pool),
 		premade:           models.NewPremadeStore(pool),
+		autoPost:          models.NewAutoPostStore(pool),
 		rosterImages:      models.NewRosterImageStore(pool),
 		appBaseURL:        cfg.AppBaseURL,
 		repoURL:           cfg.RepoURL,

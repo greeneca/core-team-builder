@@ -70,6 +70,7 @@ type Server struct {
 	refreshTokens    refreshTokenStore
 	passwordResets   passwordResetStore
 	discord          discordStore
+	autoPost         autoPostStore
 	tokens           *auth.TokenManager
 	mailer           email.Mailer
 	realtime         *realtime.Hub
@@ -92,6 +93,7 @@ type Config struct {
 	RefreshTokens    refreshTokenStore
 	PasswordResets   passwordResetStore
 	Discord          discordStore
+	AutoPost         autoPostStore
 	Tokens           *auth.TokenManager
 	Mailer           email.Mailer
 	Realtime         *realtime.Hub
@@ -129,6 +131,7 @@ func New(c Config) *Server {
 		refreshTokens:    c.RefreshTokens,
 		passwordResets:   c.PasswordResets,
 		discord:          c.Discord,
+		autoPost:         c.AutoPost,
 		tokens:           c.Tokens,
 		mailer:           c.Mailer,
 		realtime:         c.Realtime,
@@ -185,6 +188,8 @@ func (s *Server) Routes() http.Handler {
 	mux.Handle("POST /api/teams/{id}/share", protected(s.handleShareTeam))
 	mux.Handle("DELETE /api/teams/{id}/members/{userID}", protected(s.handleUnshareTeam))
 	mux.Handle("DELETE /api/teams/{id}/membership", protected(s.handleLeaveTeam))
+	mux.Handle("GET /api/teams/{id}/auto-post", protected(s.handleGetAutoPost))
+	mux.Handle("PUT /api/teams/{id}/auto-post", protected(s.handlePutAutoPost))
 	mux.Handle("PUT /api/teams/{id}/players/{slot}", protected(s.handleSavePlayer))
 
 	// Rosters: each team has one or more rosters (its 12-player lineup +

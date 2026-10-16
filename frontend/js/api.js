@@ -291,6 +291,17 @@ const api = {
     return this.request(`/api/teams/${id}`, { method: "PUT", body: payload });
   },
 
+  // Auto post / auto delete settings plus the team's bound Discord channels:
+  // { auto_post_enabled, auto_post_channel_id, auto_post_lead_minutes,
+  //   auto_delete_enabled, auto_delete_delay_minutes, channels: [{channel_id, name}] }.
+  getAutoPost(id) {
+    return this.request(`/api/teams/${id}/auto-post`);
+  },
+
+  saveAutoPost(id, body) {
+    return this.request(`/api/teams/${id}/auto-post`, { method: "PUT", body });
+  },
+
   deleteTeam(id) {
     return this.request(`/api/teams/${id}`, { method: "DELETE" });
   },

@@ -524,6 +524,8 @@ Managed via `DiscordStore`; the hourly sweep prunes expired/used link codes. See
 overview, so the scheduler can ping attendees in the post's discussion thread
 ~15 min before the run. Keyed by `message_id` (re-posting starts fresh):
 
+`team_auto_post` (`060_team_auto_post.sql`) — one row per team: `auto_post_enabled`, `auto_post_channel_id` (FK `discord_channels`, `ON DELETE SET NULL`), `auto_post_lead_minutes`, `auto_posted_run_at`, `auto_delete_enabled`, `auto_delete_delay_minutes` (both durations CHECK 60–43200). `060` also adds `discord_channels.channel_name` and `discord_posts.auto_deleted_at`.
+
 | column     | type        | notes                                              |
 |------------|-------------|----------------------------------------------------|
 | message_id | text        | posted overview message (PK)                       |

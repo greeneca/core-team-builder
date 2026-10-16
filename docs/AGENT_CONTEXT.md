@@ -955,6 +955,33 @@ column; the `User` JSON model hides it (`json:"-"`).
   again.
   (`DiscordStore.RecordPost`/`SetPostThread`.) Keyed by message ID so re-posting
   starts fresh.
+- **Auto post / auto delete** (`060_team_auto_post.sql`, `models/auto_post.go`,
+  `handlers/auto_post.go`, `cmd/bot/autopost.go`): two opt-in features set on the
+  **Configure page → Features** (hidden for templates). They live in their own
+  table `team_auto_post` (one row per team, created on first save) and save
+  through `GET`/`PUT /api/teams/{id}/auto-post`, **not** the team autosave
+  (the Configure page's change handler skips `#auto-post-settings`). Durations
+  are stored in **minutes** (60–43200, i.e. 1 hour–30 days; CHECK-backed) and
+  the UI shows them as hours or days.
+  - **Auto post**: the scheduler (`autoPostTick`) posts the `/coreteam post`
+    overview in the chosen channel `auto_post_lead_minutes` before the next run
+    (`autoPostDue`: inside the lead window, before the run starts, and not
+    already posted for that run — `auto_posted_run_at` records the run instant,
+    set *before* the thread is opened so a failure can't double-post). The post
+    goes through the same embed/components/thread flow as the command
+    (`trackPostThread`), footer "Posted by auto post". A failed send is retried
+    after 5 min (`autoPostRetryAt`, in memory). The chosen channel must be bound
+    to the team: checked on save **and** by the scheduler's join on
+    `discord_channels.team_id`, so a channel re-bound to another team stops
+    posting. The dropdown is the team's bound channels; `discord_channels.channel_name`
+    is stored by `/coreteam setup` and backfilled at bot start.
+  - **Auto delete**: `autoDeleteTick` deletes a tracked post and its thread
+    `auto_delete_delay_minutes` after its `run_at` (post → team via its channel's
+    binding), then sets `discord_posts.auto_deleted_at` (and `MarkPostGone`).
+    Only posts less than 24 h past due are picked up, so enabling the feature
+    never sweeps away old posts. Failures (missing Manage Messages/Threads) are
+    logged and not retried.
+
 - **Action log**: `discord_action_log_channels` (`058_discord_action_log.sql`)
   holds one row per guild — the channel that server mirrors signup activity to
   (no row = logging off; `DiscordStore.SetActionLogChannel`/
