@@ -526,6 +526,8 @@ overview, so the scheduler can ping attendees in the post's discussion thread
 
 `team_auto_post` (`060_team_auto_post.sql`) — one row per team: `auto_post_enabled`, `auto_post_channel_id` (FK `discord_channels`, `ON DELETE SET NULL`), `auto_post_lead_minutes`, `auto_posted_run_at`, `auto_delete_enabled`, `auto_delete_delay_minutes` (both durations CHECK 60–43200). `060` also adds `discord_channels.channel_name` and `discord_posts.auto_deleted_at`.
 
+`061_post_refresh_on_active_roster.sql` adds `discord_posts.refresh_requested_at` and the `teams_active_roster_refresh_posts` trigger that sets it on upcoming posts whenever `teams.active_roster_id` changes. `062_post_refresh_on_any_active_change.sql` replaces that trigger with `*_refresh_posts` triggers on `teams` and on every active-roster table (see AGENT_CONTEXT).
+
 | column     | type        | notes                                              |
 |------------|-------------|----------------------------------------------------|
 | message_id | text        | posted overview message (PK)                       |

@@ -29,7 +29,9 @@ type bot struct {
 	// autoPostRetryAt holds, per team, when a failed auto post may be retried.
 	// Only the scheduler goroutine touches it.
 	autoPostRetryAt map[int64]time.Time
-	rosterImages    rosterImageStore
+	// refreshRetryAt holds, per message, when a failed post refresh may be retried.
+	refreshRetryAt map[string]time.Time
+	rosterImages   rosterImageStore
 	// appBaseURL is the public base URL of the web app (APP_BASE_URL), used to
 	// build sign-in links the bot sends to users. Empty when unconfigured.
 	appBaseURL string

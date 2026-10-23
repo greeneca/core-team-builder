@@ -586,3 +586,51 @@ func (s *DiscordStore) ListFills(ctx context.Context, messageID string) ([]PostF
 	}
 	return out, rows.Err()
 }
+
+// PostRefresh is a tracked post that needs re-rendering, with the guild its
+// channel is bound in (needed to resolve roster names) and the request time the
+// scheduler passes back to ClearPostRefresh.
+type PostRefresh struct {
+	Post
+	GuildID     string
+	RequestedAt time.Time
+}
+
+// DuePostRefreshes returns posts marked for refresh (migration 061: the team's
+// active roster changed) whose run has not started yet. A post whose run began
+// since the mark is left alone: it is no longer "upcoming", so its lineup is
+// history.
+func (s *DiscordStore) DuePostRefreshes(ctx context.Context, now time.Time) ([]PostRefresh, error) {
+	const q = `
+		SELECT p.message_id, p.channel_id, p.thread_id, p.run_at, c.guild_id, p.refresh_requested_at
+		FROM discord_posts p
+		JOIN discord_channels c ON c.channel_id = p.channel_id
+		WHERE p.refresh_requested_at IS NOT NULL
+		  AND p.run_at IS NOT NULL
+		  AND p.run_at > $1
+		ORDER BY p.run_at`
+	rows, err := s.pool.Query(ctx, q, now)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []PostRefresh
+	for rows.Next() {
+		var r PostRefresh
+		if err := rows.Scan(&r.MessageID, &r.ChannelID, &r.ThreadID, &r.RunAt, &r.GuildID, &r.RequestedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// ClearPostRefresh clears a post's refresh mark, but only if it still carries the
+// request time that was read. A newer request (the roster changed again while we
+// were rendering) keeps its mark and is picked up on the next pass.
+func (s *DiscordStore) ClearPostRefresh(ctx context.Context, messageID string, requestedAt time.Time) error {
+	_, err := s.pool.Exec(ctx,
+		`UPDATE discord_posts SET refresh_requested_at = NULL WHERE message_id = $1 AND refresh_requested_at = $2`,
+		messageID, requestedAt)
+	return err
+}

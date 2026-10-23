@@ -955,6 +955,24 @@ column; the `User` JSON model hides it (`json:"-"`).
   again.
   (`DiscordStore.RecordPost`/`SetPostThread`.) Keyed by message ID so re-posting
   starts fresh.
+- **Post refresh on any active-roster/team change** (`061_…`, `062_post_refresh_on_any_active_change.sql`):
+  a posted overview renders the team's *active* roster, so changing it must
+  update posts for runs that haven't started. A trigger on
+  `teams.active_roster_id` (fires on activate **and** on delete-promotion, only
+  when the value really changes) sets `discord_posts.refresh_requested_at` for
+  the team's posts with `run_at > now()` (team found via the channel binding).
+  The scheduler's `refreshPostsTick` (`DuePostRefreshes`) re-renders each with
+  `refreshPostMessage` (RSVPs, fills, and the footer are kept), then
+  `ClearPostRefresh` — a compare-and-clear on the request time, so a change that
+  lands mid-render is picked up next pass. A deleted message is marked gone; other
+  failures retry after 5 min. Already-started runs are never touched. Note: fills
+  are keyed by roster *slot*, so a fill on a slot stays on that slot number.
+  `062` widened the marking beyond the switch itself: triggers on `teams` (any real
+  change besides `updated_at`) and on `rosters`/`players`/`encounters`/
+  `encounter_loadouts`/`groupings`/`grouping_groups`/`grouping_members` (only rows
+  of the team's **active** roster) mark upcoming posts. Edits to a non-active roster
+  mark nothing.
+
 - **Auto post / auto delete** (`060_team_auto_post.sql`, `models/auto_post.go`,
   `handlers/auto_post.go`, `cmd/bot/autopost.go`): two opt-in features set on the
   **Configure page → Features** (hidden for templates). They live in their own

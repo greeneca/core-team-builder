@@ -159,3 +159,53 @@ func (b *bot) recordChannelName(ctx context.Context, session *discordgo.Session,
 		log.Printf("record channel name (%s): %v", channelID, err)
 	}
 }
+
+// refreshRetryDelay is how long a failed post refresh waits before retrying.
+const refreshRetryDelay = 5 * time.Minute
+
+// refreshPostsTick re-renders upcoming posts whose team changed its active
+// roster, so the post shows the lineup that will actually run. The refresh edits
+// the message in place (keeping RSVPs, fills, and the original footer). A post
+// that was deleted on Discord is marked gone instead of retried; any other
+// failure is retried after refreshRetryDelay.
+func (b *bot) refreshPostsTick(ctx context.Context, session *discordgo.Session, now time.Time) {
+	c, cancel := context.WithTimeout(ctx, 10*time.Second)
+	posts, err := b.discord.DuePostRefreshes(c, now)
+	cancel()
+	if err != nil {
+		log.Printf("scheduler: due post refreshes: %v", err)
+		return
+	}
+	for _, p := range posts {
+		if until, ok := b.refreshRetryAt[p.MessageID]; ok && now.Before(until) {
+			continue
+		}
+		rc, rcancel := context.WithTimeout(ctx, 15*time.Second)
+		err := b.refreshPostMessage(rc, session, p.GuildID, p.ChannelID, p.MessageID)
+		rcancel()
+		switch {
+		case err == nil:
+			delete(b.refreshRetryAt, p.MessageID)
+		case discordStatus(err) == 404:
+			log.Printf("scheduler: post %s removed; skipping roster refresh", p.MessageID)
+			c, cancel := context.WithTimeout(ctx, 10*time.Second)
+			if gerr := b.discord.MarkPostGone(c, p.MessageID); gerr != nil {
+				log.Printf("scheduler: refresh mark gone (%s): %v", p.MessageID, gerr)
+			}
+			cancel()
+			delete(b.refreshRetryAt, p.MessageID)
+		default:
+			log.Printf("scheduler: refresh post %s: %v", p.MessageID, err)
+			if b.refreshRetryAt == nil {
+				b.refreshRetryAt = map[string]time.Time{}
+			}
+			b.refreshRetryAt[p.MessageID] = now.Add(refreshRetryDelay)
+			continue
+		}
+		c, cancel := context.WithTimeout(ctx, 10*time.Second)
+		if err := b.discord.ClearPostRefresh(c, p.MessageID, p.RequestedAt); err != nil {
+			log.Printf("scheduler: clear refresh (%s): %v", p.MessageID, err)
+		}
+		cancel()
+	}
+}

@@ -120,6 +120,7 @@ func (b *bot) schedulerTick(ctx context.Context, session *discordgo.Session) {
 
 	// Auto post and auto delete for recurring /coreteam post overviews.
 	b.autoPostTick(ctx, session, now)
+	b.refreshPostsTick(ctx, session, now)
 	b.autoDeleteTick(ctx, session, now)
 
 	// RSVP reminders for recurring /coreteam post overviews (48 h before start):

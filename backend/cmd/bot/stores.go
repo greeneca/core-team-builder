@@ -97,6 +97,10 @@ type discordStore interface {
 	MarkPostPinged(ctx context.Context, messageID string) error
 	DueReminders(ctx context.Context, now time.Time) ([]models.Post, error)
 	MarkPostReminded(ctx context.Context, messageID string) error
+
+	// Re-rendering upcoming posts after the team's active roster changed.
+	DuePostRefreshes(ctx context.Context, now time.Time) ([]models.PostRefresh, error)
+	ClearPostRefresh(ctx context.Context, messageID string, requestedAt time.Time) error
 }
 
 // autoPostStore backs the scheduler's auto post and auto delete passes and the
