@@ -671,6 +671,18 @@ func TestPlayerDetailUnnamedSlot(t *testing.T) {
 	}
 }
 
+func TestPlayerDetailNotes(t *testing.T) {
+	team := testTeam()
+	_, desc := PlayerDetail(team, models.Player{Slot: 1, Role: "dps", Notes: "  Stack on boss  "}, nil, nil)
+	if !strings.Contains(desc, "__Notes__\nStack on boss") {
+		t.Errorf("notes should appear under a Notes header:\n%s", desc)
+	}
+	_, desc = PlayerDetail(team, models.Player{Slot: 1, Role: "dps", Notes: "  "}, nil, nil)
+	if strings.Contains(desc, "Notes") {
+		t.Errorf("blank notes should be omitted:\n%s", desc)
+	}
+}
+
 func TestLoadoutDetailFields(t *testing.T) {
 	lo := models.Loadout{
 		Slot:        1,

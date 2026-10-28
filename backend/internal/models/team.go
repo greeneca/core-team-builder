@@ -292,6 +292,9 @@ type Player struct {
 	// encounter (see WerewolfDefaultSkills and TeamStore.Save); when false, all
 	// werewolf-line skills (WerewolfSkills) are removed from them.
 	Werewolf bool `json:"werewolf"`
+	// Notes is free-form text for the slot, shown in the Discord build-details DM
+	// when non-empty.
+	Notes string `json:"notes"`
 	// UpdatedAt is the row's last-modified timestamp; it doubles as the
 	// optimistic-concurrency token for a per-slot save (see SavePlayer).
 	UpdatedAt time.Time `json:"updated_at"`
@@ -598,9 +601,9 @@ func seedRosterPlayersTx(ctx context.Context, tx pgx.Tx, rosterID int64) error {
 func copyPlayersTx(ctx context.Context, tx pgx.Tx, srcRosterID, dstRosterID int64) error {
 	const q = `
 		INSERT INTO players (roster_id, slot, name, discord_handle, role, class, race,
-		                     subclassed, skill_line_1, skill_line_2, skill_line_3, mastery_1, mastery_2, werewolf)
+		                     subclassed, skill_line_1, skill_line_2, skill_line_3, mastery_1, mastery_2, werewolf, notes)
 		SELECT $1, slot, name, discord_handle, role, class, race,
-		       subclassed, skill_line_1, skill_line_2, skill_line_3, mastery_1, mastery_2, werewolf
+		       subclassed, skill_line_1, skill_line_2, skill_line_3, mastery_1, mastery_2, werewolf, notes
 		FROM players WHERE roster_id = $2`
 	_, err := tx.Exec(ctx, q, dstRosterID, srcRosterID)
 	return err
@@ -836,11 +839,11 @@ func (s *TeamStore) SavePlayer(ctx context.Context, rosterID int64, p Player, ex
 			UPDATE players
 			SET name = $1, discord_handle = $2, role = $3, class = $4, race = $5,
 			    subclassed = $6, skill_line_1 = $7, skill_line_2 = $8, skill_line_3 = $9,
-			    mastery_1 = $10, mastery_2 = $11, werewolf = $12
-			WHERE roster_id = $13 AND slot = $14`
+			    mastery_1 = $10, mastery_2 = $11, werewolf = $12, notes = $13
+			WHERE roster_id = $14 AND slot = $15`
 		tag, err := tx.Exec(ctx, updatePlayer,
 			p.Name, p.DiscordHandle, p.Role, p.Class, p.Race,
-			p.Subclassed, p.SkillLine1, p.SkillLine2, p.SkillLine3, p.Mastery1, p.Mastery2, p.Werewolf,
+			p.Subclassed, p.SkillLine1, p.SkillLine2, p.SkillLine3, p.Mastery1, p.Mastery2, p.Werewolf, p.Notes,
 			rosterID, p.Slot,
 		)
 		if err != nil {
@@ -854,11 +857,11 @@ func (s *TeamStore) SavePlayer(ctx context.Context, rosterID int64, p Player, ex
 			UPDATE players
 			SET name = $1, discord_handle = $2, role = $3, class = $4, race = $5,
 			    subclassed = $6, skill_line_1 = $7, skill_line_2 = $8, skill_line_3 = $9,
-			    mastery_1 = $10, mastery_2 = $11, werewolf = $12
-			WHERE roster_id = $13 AND slot = $14 AND updated_at = $15`
+			    mastery_1 = $10, mastery_2 = $11, werewolf = $12, notes = $13
+			WHERE roster_id = $14 AND slot = $15 AND updated_at = $16`
 		tag, err := tx.Exec(ctx, updatePlayerVer,
 			p.Name, p.DiscordHandle, p.Role, p.Class, p.Race,
-			p.Subclassed, p.SkillLine1, p.SkillLine2, p.SkillLine3, p.Mastery1, p.Mastery2, p.Werewolf,
+			p.Subclassed, p.SkillLine1, p.SkillLine2, p.SkillLine3, p.Mastery1, p.Mastery2, p.Werewolf, p.Notes,
 			rosterID, p.Slot, expectedUpdatedAt,
 		)
 		if err != nil {
@@ -876,11 +879,11 @@ func (s *TeamStore) SavePlayer(ctx context.Context, rosterID int64, p Player, ex
 	var out Player
 	const reread = `
 		SELECT id, slot, name, discord_handle, role, class, race,
-		       subclassed, skill_line_1, skill_line_2, skill_line_3, mastery_1, mastery_2, werewolf, updated_at
+		       subclassed, skill_line_1, skill_line_2, skill_line_3, mastery_1, mastery_2, werewolf, notes, updated_at
 		FROM players WHERE roster_id = $1 AND slot = $2`
 	if err := tx.QueryRow(ctx, reread, rosterID, p.Slot).Scan(
 		&out.ID, &out.Slot, &out.Name, &out.DiscordHandle, &out.Role, &out.Class, &out.Race,
-		&out.Subclassed, &out.SkillLine1, &out.SkillLine2, &out.SkillLine3, &out.Mastery1, &out.Mastery2, &out.Werewolf, &out.UpdatedAt,
+		&out.Subclassed, &out.SkillLine1, &out.SkillLine2, &out.SkillLine3, &out.Mastery1, &out.Mastery2, &out.Werewolf, &out.Notes, &out.UpdatedAt,
 	); err != nil {
 		return nil, err
 	}

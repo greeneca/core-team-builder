@@ -287,7 +287,7 @@ func (s *RosterStore) Delete(ctx context.Context, teamID, rosterID int64) error 
 func loadRosterPlayers(ctx context.Context, q pgxQuerier, rosterID int64) ([]Player, error) {
 	const playersQ = `
 		SELECT id, slot, name, discord_handle, role, class, race,
-		       subclassed, skill_line_1, skill_line_2, skill_line_3, mastery_1, mastery_2, werewolf, updated_at
+		       subclassed, skill_line_1, skill_line_2, skill_line_3, mastery_1, mastery_2, werewolf, notes, updated_at
 		FROM players WHERE roster_id = $1 ORDER BY slot`
 	rows, err := q.Query(ctx, playersQ, rosterID)
 	if err != nil {
@@ -299,7 +299,7 @@ func loadRosterPlayers(ctx context.Context, q pgxQuerier, rosterID int64) ([]Pla
 		var p Player
 		if err := rows.Scan(
 			&p.ID, &p.Slot, &p.Name, &p.DiscordHandle, &p.Role, &p.Class, &p.Race,
-			&p.Subclassed, &p.SkillLine1, &p.SkillLine2, &p.SkillLine3, &p.Mastery1, &p.Mastery2, &p.Werewolf, &p.UpdatedAt,
+			&p.Subclassed, &p.SkillLine1, &p.SkillLine2, &p.SkillLine3, &p.Mastery1, &p.Mastery2, &p.Werewolf, &p.Notes, &p.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}

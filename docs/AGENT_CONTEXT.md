@@ -241,6 +241,11 @@ column; the `User` JSON model hides it (`json:"-"`).
     `runCopySlotDialog` / `copyIntoSlot` in `app.js`). Only the target's
     **currently selected** encounter is written, and both the team and that
     encounter are saved.
+- **Slot notes** (`063_player_notes.sql`): `players.notes TEXT` (≤500 runes,
+  `maxPlayerNotesLen`) — a resizable textarea at the bottom of each roster slot.
+  When non-empty, `discordfmt.PlayerDetail` adds a `__Notes__` section to the
+  Build Details DM. Not copied by "Copy from slot" (it is per-player); cleared by
+  "Clear slot".
 - **Floating jump nav** (desktop only, `≥1280px`): `#player-nav` is fixed to the
   left edge with quick links to the top, the Group Buffs card, and each player
   slot (name + role, role-colored). Built by `renderPlayerNav()` from the live

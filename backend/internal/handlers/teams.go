@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/core-team-builder/backend/internal/auth"
 	"github.com/core-team-builder/backend/internal/models"
@@ -205,6 +206,7 @@ type playerPayload struct {
 	Mastery1      string `json:"mastery_1"`
 	Mastery2      string `json:"mastery_2"`
 	Werewolf      bool   `json:"werewolf"`
+	Notes         string `json:"notes"`
 }
 
 func (s *Server) handleUpdateTeam(w http.ResponseWriter, r *http.Request) {
@@ -337,6 +339,10 @@ func validatePlayer(p playerPayload, validRole map[string]bool) (models.Player, 
 		return models.Player{}, errors.New("invalid race")
 	}
 
+	if utf8.RuneCountInString(p.Notes) > maxPlayerNotesLen {
+		return models.Player{}, fmt.Errorf("notes must be %d characters or fewer", maxPlayerNotesLen)
+	}
+
 	player := models.Player{
 		Slot:          p.Slot,
 		Name:          strings.TrimSpace(p.Name),
@@ -346,6 +352,7 @@ func validatePlayer(p playerPayload, validRole map[string]bool) (models.Player, 
 		Race:          race,
 		Subclassed:    p.Subclassed,
 		Werewolf:      p.Werewolf,
+		Notes:         strings.TrimSpace(p.Notes),
 	}
 
 	// The subclass flag selects which build set applies. Validate only the active

@@ -987,6 +987,17 @@ a.brand--home:hover {
   border-top: 1px dashed var(--color-border);
   padding-top: var(--space-3);
 }
+/* Per-slot notes: a vertically resizable box at the bottom of the slot */
+.player-notes {
+  border-top: 1px dashed var(--color-border);
+  padding-top: var(--space-3);
+}
+.player-notes textarea {
+  width: 100%;
+  min-height: 3rem;
+  resize: vertical;
+  font-family: inherit;
+}
 .subclass-toggle {
   display: inline-flex;
   align-items: center;

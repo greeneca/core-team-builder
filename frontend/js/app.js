@@ -1338,6 +1338,7 @@
         race: val("race"),
         subclassed,
         werewolf: wwEl ? wwEl.checked : false,
+        notes: val("notes").trim(),
         // Only the active build set is sent; the backend clears the rest too.
         skill_line_1: subclassed ? val("skill_line_1") : "",
         skill_line_2: subclassed ? val("skill_line_2") : "",
@@ -2829,9 +2830,14 @@
               </div>
             </div>
           </div>
+          <div class="player-notes form-group">
+            <label>Notes</label>
+            <textarea class="input" data-field="notes" rows="2" maxlength="500" placeholder="Shown in this player's build details DM"></textarea>
+          </div>
         </div>`;
 
       slot.querySelector('[data-field="name"]').value = player.name;
+      slot.querySelector('[data-field="notes"]').value = player.notes || "";
       slot.querySelector('[data-field="subclassed"]').checked = player.subclassed;
       slot.querySelector('[data-field="werewolf"]').checked = !!player.werewolf;
 
@@ -2947,7 +2953,7 @@
             nameEl && nameEl.value.trim()
               ? nameEl.value.trim()
               : `Slot ${slot.dataset.slot}`;
-          if (!confirm(`Clear ${who}'s name, handle, build, and loadout? Only the role is kept.`))
+          if (!confirm(`Clear ${who}'s name, handle, notes, build, and loadout? Only the role is kept.`))
             return;
           clearPlayerSlot(slot);
         });
@@ -2955,7 +2961,7 @@
 
       // Viewers get a read-only roster; editors/owner autosave on change.
       if (!editable) {
-        slot.querySelectorAll("input, select").forEach((field) => {
+        slot.querySelectorAll("input, select, textarea").forEach((field) => {
           field.disabled = true;
         });
       }
@@ -3307,7 +3313,7 @@
   // fields. Only the role is preserved (it has no empty value and defines the
   // slot). Operates on the live DOM, then persists both the team and encounter.
   function clearPlayerSlot(slot) {
-    ["name", "discord_handle", "class", "race"].forEach((f) => {
+    ["name", "discord_handle", "notes", "class", "race"].forEach((f) => {
       const d = slot.querySelector(`[data-field="${f}"]`);
       if (d) d.value = "";
     });

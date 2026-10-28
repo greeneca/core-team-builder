@@ -556,6 +556,11 @@ func PlayerDetail(team *models.Team, p models.Player, encounters []models.Encoun
 		L = append(L, gl...)
 	}
 
+	// Free-form notes for this slot, only when set.
+	if notes := strings.TrimSpace(p.Notes); notes != "" {
+		L = append(L, "", "__Notes__", notes)
+	}
+
 	// One section per encounter, each data type on its own underlined line. A
 	// single encounter needs no name header.
 	singleEncounter := len(encounters) == 1
